@@ -1,0 +1,134 @@
+# analysis/model_terms_deployed.yml
+#
+# The deployed model, term by term, for the three tracks the manuscript reports
+# (occurrence, duration, monthly case counts). This file is a statement of
+# what is fitted, not a config: nothing reads it at fit or simulation time.
+#
+# It is checked by the HARD gate analysis/tests/test_deployed_model_terms.R,
+# which follows analysis/configs/results/manuscript.yml -> results.deploy_config
+# -> deploy.fits.{occ,dur,mon}_dir and rebuilds the formula of EVERY config in
+# those fit batches with the track's own builder (utils/formula.R) on a
+# synthetic frame, the crossbasis columns named from each config's dlnm spec.
+# It requires one term set per batch (configs differ only in the ENSO lag and
+# the group) and that set to equal the entries below. A deploy that turns a
+# term on or off therefore fails the gate until this file (and CLAUDE.md's
+# "Deployed model structure" section) is updated.
+#
+# Term lists are compared as sets. `{k}` in a term expands to k = 1..count for
+# an entry written as {term: ..., count: <count>} (not `n:`, which YAML 1.1
+# reads as the boolean false). The intercept (`1`) is implicit on every
+# track. RE groups are the grouping factors brms creates, with `a/b` nesting
+# expanded (a, a:b). `not_in_model` names terms that are available in the
+# builders but switched off in every deployed config; the gate asserts that
+# none of them appears in any fixed or random term.
+#
+# `{nbr}` is the neighbour-contagion column name, which the gate derives per
+# config with paths.R::nbrCovariateName() from the config's `contagion:`
+# block (rho_km, scale, partition, partition_source) -- the same call
+# build_formula_terms() makes -- so a renamed kernel column needs no edit here.
+#
+# Fit-level counterpart (fit$formula / priors of the deployed fits): the 09
+# kind report_model_spec (table S34), derived in the convergence step from the same fit load; its `check` table compares every deployed fit with this file.
+
+schema: 1
+
+# Informational: the deploy this file was written against. The gate follows
+# the results config's deploy_config, whatever it is, and prints both.
+describes:
+  results_config: analysis/configs/results/manuscript.yml
+  deploy_config: analysis/configs/deploy/prod_run.yml
+  fit_batches:
+    occurrence: prod_run_occ_grouped_enso_singlelag
+    duration:   prod_run_dur_grouped_enso_singlelag
+    monthly:    prod_run_mon_grouped_enso_singlelag
+
+tracks:
+
+  occurrence:
+    batch_key: occ_dir
+    backend: brms_cb
+    family: poisson            # hard-coded in 04_fit_occ_brms_cb.R
+    link: log
+    response: "y"              # onset indicator per unit-month at risk
+    baseline:
+      - "s(t_start_seas, bs = 'cc', k = 8)"   # basehaz_poisson: seasonal (cyclic spline)
+    fixed_effects:
+      - time_to_last_outbreak                 # categorical, 7 levels
+      - ongoing_outbreak_lag1                 # own ADM1 active in the previous calendar month
+      - "{nbr}"                               # neighbour pressure; deployed: nbr_lag1_r500_rn_parthmmclusters (rho 500 km, row-normalised, within HMM transmission units)
+      - {term: "enso_cb{k}", count: 4}            # ONI at the single group lag, ns df 4 (df 5 in older runs)
+    re_terms:
+      - "(1 || country/ADM1/gid)"
+      - "(time_to_last_outbreak - 1 || country)"
+      - "(ongoing_outbreak_lag1 - 1 || country)"
+      - "({nbr} - 1 || country)"
+      - "({nbr} - 1 || country:ADM1)"
+      - {term: "(enso_cb{k} - 1 || country)", count: 4}
+      - {term: "(enso_cb{k} - 1 || country:ADM1)", count: 4}
+    re_groups: [country, "country:ADM1", "country:ADM1:gid"]
+    offsets:
+      - "offset(log_offset)"                  # log days at risk
+      - "offset(log(base_rate_occ))"          # empirical baseline-rate anchor
+    shape_terms: []
+    not_in_model: [mean_precip, dev_precip, mean_temp_daymean, dev_temp_daymean,
+                   ongoing_outbreak_country_lag1, ongoing_outbreak_tu_lag1, enso_lag]
+
+  duration:
+    batch_key: dur_dir
+    backend: brms_cb
+    family: poisson            # hard-coded in 04_fit_dur_brms_cb.R (discrete-time cessation hazard)
+    link: log
+    response: "y"              # episode ended this month
+    baseline:
+      - mso_band               # months-since-onset bands [1,2,3,4,6,9,Inf); prior_mso_band normal(0, 1.5)
+      - sin_month
+      - cos_month
+      - sin2_month
+      - cos2_month             # seasonal_term: harmonic2 (cessation seasonality)
+    fixed_effects:
+      - {term: "enso_cb{k}", count: 4}
+    re_terms:
+      - "(1 | country/ADM1)"
+      - "(0 + is_adm2 | country:ADM1:gid_leaf)"   # ADM1-ADM2 episode set, ADM2 leaf intercept (adm1_overlap censor_orphan)
+      - {term: "(enso_cb{k} - 1 || country)", count: 4}
+      - {term: "(enso_cb{k} - 1 || country:ADM1)", count: 4}
+    re_groups: [country, "country:ADM1", "country:ADM1:gid_leaf"]
+    offsets:
+      - "offset(log_offset)"                  # log active days
+      - "offset(log(base_rate_dur))"
+    shape_terms: []
+    not_in_model: [mean_precip, dev_precip, mean_temp_daymean, dev_temp_daymean,
+                   time_to_last_outbreak, ongoing_outbreak_lag1, nbr_lag1, enso_lag,
+                   t_start_seas]
+
+  monthly:
+    batch_key: mon_dir
+    backend: brms_cb
+    family: negbinomial        # monthly.family
+    link: log
+    response: cases_month
+    baseline:
+      - sin_month
+      - cos_month
+      - sin2_month
+      - cos2_month             # seasonal_term: harmonic2
+    fixed_effects:
+      - log_pop_c              # pop_elasticity: free (deviation beside offset(log(pop)))
+      - {term: "mso_cb{k}", count: 4}             # months since onset, bs degree 3 df 4
+      - {term: "enso_cb{k}", count: 4}
+    re_terms:
+      - "(1 | country/ADM1)"
+      - "(0 + is_adm2 | country:ADM1:gid_leaf)"   # re_adm2_leaf_scope: adm2_only
+      - {term: "(mso_cb{k} - 1 || country)", count: 4}
+      - {term: "(enso_cb{k} - 1 || country)", count: 4}
+      - {term: "(enso_cb{k} - 1 || country:ADM1)", count: 4}
+    re_groups: [country, "country:ADM1", "country:ADM1:gid_leaf"]
+    offsets:
+      - "offset(log(pop))"
+      - "offset(log_offset)"                  # log active days
+      - "offset(log(base_rate_mon))"
+    shape_terms:
+      - "(1 | country/ADM1)"                  # phi_re: region_country_adm1 (region dropped)
+    not_in_model: [mean_precip, dev_precip, mean_temp_daymean, dev_temp_daymean,
+                   time_to_last_outbreak, ongoing_outbreak_lag1, nbr_lag1, enso_lag,
+                   log_cases_prev]            # monthly.prev_cases: no

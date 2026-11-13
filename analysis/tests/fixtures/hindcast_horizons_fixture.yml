@@ -1,0 +1,589 @@
+# Test fixture: a generated hindcast manifest (by_group season ends), frozen
+# for analysis/tests.
+schema: 2
+generated_at: 2026-10-26 22:07:25
+grouping: enso_grouping_kl_nz60_ns5k5
+launch_month: 05-01
+launch_years:
+- 2012
+- 2013
+- 2014
+- 2015
+- 2016
+- 2017
+- 2018
+- 2019
+- 2020
+- 2021
+- 2022
+add_best_lag: yes
+horizon_months: 12
+smoothing_input: generated_data/sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_fixture/cache
+climate_panel: generated_data/sim_climate_panel_base-1990_2019_ep-gs.rds
+skipped_groups: []
+groups:
+  enso_east:
+    best_lag_occ: 0
+    best_lag_dur: -1
+    best_lag_mon: 2
+    min_lag: -1
+    n_countries: 4
+    iso3:
+    - BDI
+    - KEN
+    - TZA
+    - UGA
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    season_end_month: 7
+    units:
+    - hmmCE
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2012-07-01'
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2013-07-01'
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2014-07-01'
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2015-07-01'
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2016-07-01'
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2017-07-01'
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2018-07-01'
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2019-07-01'
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2020-07-01'
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2021-07-01'
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2022-07-01'
+  enso_horn:
+    best_lag_occ: 10
+    best_lag_dur: 7
+    best_lag_mon: 10
+    min_lag: 7
+    n_countries: 7
+    iso3:
+    - COG
+    - ETH
+    - GIN
+    - GNB
+    - SDN
+    - SLE
+    - SSD
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    season_end_month: 9
+    units:
+    - hmmCE
+    - hmmW
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2013-04-01'
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2014-04-01'
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2015-04-01'
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2016-04-01'
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2017-04-01'
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2018-04-01'
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2019-04-01'
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2020-04-01'
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2021-04-01'
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2022-04-01'
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2023-04-01'
+  enso_nga:
+    best_lag_occ: 7
+    best_lag_dur: 8
+    best_lag_mon: 8
+    min_lag: 7
+    n_countries: 2
+    iso3:
+    - GHA
+    - NGA
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    season_end_month: 11
+    units:
+    - hmmW
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2013-06-01'
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2014-06-01'
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2015-06-01'
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2016-06-01'
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2017-06-01'
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2018-06-01'
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2019-06-01'
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2020-06-01'
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2021-06-01'
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2022-06-01'
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2023-06-01'
+  enso_south:
+    best_lag_occ: 4
+    best_lag_dur: 11
+    best_lag_mon: 5
+    min_lag: 4
+    n_countries: 8
+    iso3:
+    - AGO
+    - CIV
+    - COD
+    - MOZ
+    - MWI
+    - NAM
+    - ZMB
+    - ZWE
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    season_end_month: 4
+    units:
+    - hmmCE
+    - hmmW
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2013-08-01'
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2014-08-01'
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2015-08-01'
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2016-08-01'
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2017-08-01'
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2018-08-01'
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2019-08-01'
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2020-08-01'
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2021-08-01'
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2022-08-01'
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2023-08-01'
+  enso_west:
+    best_lag_occ: -6
+    best_lag_dur: -4
+    best_lag_mon: -8
+    min_lag: -8
+    n_countries: 9
+    iso3:
+    - BEN
+    - CAF
+    - CMR
+    - LBR
+    - MLI
+    - NER
+    - SOM
+    - TCD
+    - TGO
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    season_end_month: 11
+    units:
+    - hmmCE
+    - hmmW
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2012-11-01'
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2013-11-01'
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2014-11-01'
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2015-11-01'
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2016-11-01'
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2017-11-01'
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2018-11-01'
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2019-11-01'
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2020-11-01'
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2021-11-01'
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2022-11-01'
+grouping_digest: ef26b8004c889fc9
+partition_by: registry
+partition_source: hmm_clusters
+partition_digest: 8162e70ff102490e
+contagion_partition_source: hmm_clusters
+units:
+  hmmCE:
+    members:
+    - AGO
+    - BDI
+    - COD
+    - ETH
+    - KEN
+    - MWI
+    - MOZ
+    - SOM
+    - SSD
+    - SDN
+    - TZA
+    - UGA
+    - ZMB
+    - ZWE
+    - NAM
+    groups:
+    - enso_east
+    - enso_horn
+    - enso_south
+    - enso_west
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2013-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2012
+        run_id: 20261026_hmmCE_2012_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2012.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2012/merged
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2014-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2013
+        run_id: 20261026_hmmCE_2013_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2013.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2013/merged
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2015-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2014
+        run_id: 20261026_hmmCE_2014_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2014.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2014/merged
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2016-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2015
+        run_id: 20261026_hmmCE_2015_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2015.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2015/merged
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2017-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2016
+        run_id: 20261026_hmmCE_2016_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2016.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2016/merged
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2018-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2017
+        run_id: 20261026_hmmCE_2017_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2017.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2017/merged
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2019-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2018
+        run_id: 20261026_hmmCE_2018_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2018.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2018/merged
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2020-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2019
+        run_id: 20261026_hmmCE_2019_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2019.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2019/merged
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2021-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2020
+        run_id: 20261026_hmmCE_2020_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2020.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2020/merged
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2022-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2021
+        run_id: 20261026_hmmCE_2021_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2021.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2021/merged
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2023-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2022
+        run_id: 20261026_hmmCE_2022_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmCE_2022.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmCE_2022/merged
+  hmmW:
+    members:
+    - BEN
+    - CMR
+    - CAF
+    - TCD
+    - CIV
+    - GHA
+    - GIN
+    - GNB
+    - LBR
+    - MLI
+    - NER
+    - NGA
+    - COG
+    - SLE
+    - TGO
+    groups:
+    - enso_horn
+    - enso_nga
+    - enso_south
+    - enso_west
+    years:
+      '2012':
+        launch: '2012-05-01'
+        horizon_end: '2013-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2012
+        run_id: 20261026_hmmW_2012_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2012.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2012/merged
+      '2013':
+        launch: '2013-05-01'
+        horizon_end: '2014-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2013
+        run_id: 20261026_hmmW_2013_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2013.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2013/merged
+      '2014':
+        launch: '2014-05-01'
+        horizon_end: '2015-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2014
+        run_id: 20261026_hmmW_2014_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2014.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2014/merged
+      '2015':
+        launch: '2015-05-01'
+        horizon_end: '2016-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2015
+        run_id: 20261026_hmmW_2015_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2015.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2015/merged
+      '2016':
+        launch: '2016-05-01'
+        horizon_end: '2017-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2016
+        run_id: 20261026_hmmW_2016_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2016.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2016/merged
+      '2017':
+        launch: '2017-05-01'
+        horizon_end: '2018-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2017
+        run_id: 20261026_hmmW_2017_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2017.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2017/merged
+      '2018':
+        launch: '2018-05-01'
+        horizon_end: '2019-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2018
+        run_id: 20261026_hmmW_2018_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2018.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2018/merged
+      '2019':
+        launch: '2019-05-01'
+        horizon_end: '2020-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2019
+        run_id: 20261026_hmmW_2019_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2019.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2019/merged
+      '2020':
+        launch: '2020-05-01'
+        horizon_end: '2021-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2020
+        run_id: 20261026_hmmW_2020_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2020.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2020/merged
+      '2021':
+        launch: '2021-05-01'
+        horizon_end: '2022-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2021
+        run_id: 20261026_hmmW_2021_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2021.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2021/merged
+      '2022':
+        launch: '2022-05-01'
+        horizon_end: '2023-08-01'
+        run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2022
+        run_id: 20261026_hmmW_2022_hindcast
+        config: analysis/tests/fixtures/run_configs/hindcast_hmmW_2022.yml
+        merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_fixture_hmmW_2022/merged
+countries:
+  AGO:
+    group: enso_south
+    unit: hmmCE
+  BDI:
+    group: enso_east
+    unit: hmmCE
+  COD:
+    group: enso_south
+    unit: hmmCE
+  ETH:
+    group: enso_horn
+    unit: hmmCE
+  KEN:
+    group: enso_east
+    unit: hmmCE
+  MWI:
+    group: enso_south
+    unit: hmmCE
+  MOZ:
+    group: enso_south
+    unit: hmmCE
+  SOM:
+    group: enso_west
+    unit: hmmCE
+  SSD:
+    group: enso_horn
+    unit: hmmCE
+  SDN:
+    group: enso_horn
+    unit: hmmCE
+  TZA:
+    group: enso_east
+    unit: hmmCE
+  UGA:
+    group: enso_east
+    unit: hmmCE
+  ZMB:
+    group: enso_south
+    unit: hmmCE
+  ZWE:
+    group: enso_south
+    unit: hmmCE
+  NAM:
+    group: enso_south
+    unit: hmmCE
+  BEN:
+    group: enso_west
+    unit: hmmW
+  CMR:
+    group: enso_west
+    unit: hmmW
+  CAF:
+    group: enso_west
+    unit: hmmW
+  TCD:
+    group: enso_west
+    unit: hmmW
+  CIV:
+    group: enso_south
+    unit: hmmW
+  GHA:
+    group: enso_nga
+    unit: hmmW
+  GIN:
+    group: enso_horn
+    unit: hmmW
+  GNB:
+    group: enso_horn
+    unit: hmmW
+  LBR:
+    group: enso_west
+    unit: hmmW
+  MLI:
+    group: enso_west
+    unit: hmmW
+  NER:
+    group: enso_west
+    unit: hmmW
+  NGA:
+    group: enso_nga
+    unit: hmmW
+  COG:
+    group: enso_horn
+    unit: hmmW
+  SLE:
+    group: enso_horn
+    unit: hmmW
+  TGO:
+    group: enso_west
+    unit: hmmW

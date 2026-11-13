@@ -1,0 +1,1780 @@
+# Test fixture: a generated past-ENSO-event manifest (by_group season ends),
+# frozen for analysis/tests.
+schema: 2
+kind: event_attribution
+generated_at: 2026-10-26 11:22:34
+events_registry: analysis/configs/enso_events_v2.yml
+grouping: enso_grouping_kl_nz60_ns5k5
+grouping_digest: ef26b8004c889fc9
+analog_set: neutral
+lenssen_dir: generated_data/lenssen_events
+smoothing_input: generated_data/sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_fixture/cache
+climate_panel: generated_data/sim_climate_panel_base-1990_2019_ep-gs_to-2026-08.rds
+panel_end: '2026-08-01'
+episode_key: gid_season
+partition_by: registry
+partition_source: hmm_clusters
+partition_digest: 8162e70ff102490e
+contagion_partition_source: hmm_clusters
+param_draw_mode: cycle
+events:
+  elnino_2015:
+    phase: elnino
+    label: El Nino 2015-16
+    launch: '2014-09-01'
+    peak: '2015-12-01'
+    peak_season_year: 2015
+    launch_rule: crossing
+    lenssen_cache: generated_data/lenssen_events/elnino_2015/lenssen_nino34_analogs.rds
+    lenssen_ready: yes
+    lenssen_status: ok
+    lenssen_lead_months: 155
+    lenssen_n_set: 244
+    africa_max_horizon: '2017-07-01'
+    groups:
+      enso_east:
+        best_lag_occ: 0
+        best_lag_dur: -1
+        best_lag_mon: 2
+        max_lag: 2
+        season_end_month: 7
+        season_end: '2016-07-01'
+        horizon_end: '2016-09-01'
+        n_countries: 4
+        iso3:
+        - BDI
+        - KEN
+        - TZA
+        - UGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+      enso_horn:
+        best_lag_occ: 10
+        best_lag_dur: 7
+        best_lag_mon: 10
+        max_lag: 10
+        season_end_month: 9
+        season_end: '2016-09-01'
+        horizon_end: '2017-07-01'
+        n_countries: 7
+        iso3:
+        - COG
+        - ETH
+        - GIN
+        - GNB
+        - SDN
+        - SLE
+        - SSD
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_nga:
+        best_lag_occ: 7
+        best_lag_dur: 8
+        best_lag_mon: 8
+        max_lag: 8
+        season_end_month: 11
+        season_end: '2016-11-01'
+        horizon_end: '2017-07-01'
+        n_countries: 2
+        iso3:
+        - GHA
+        - NGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmW
+      enso_south:
+        best_lag_occ: 4
+        best_lag_dur: 11
+        best_lag_mon: 5
+        max_lag: 11
+        season_end_month: 4
+        season_end: '2016-04-01'
+        horizon_end: '2017-03-01'
+        n_countries: 8
+        iso3:
+        - AGO
+        - CIV
+        - COD
+        - MOZ
+        - MWI
+        - NAM
+        - ZMB
+        - ZWE
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_west:
+        best_lag_occ: -6
+        best_lag_dur: -4
+        best_lag_mon: -8
+        max_lag: 0
+        season_end_month: 11
+        season_end: '2016-11-01'
+        horizon_end: '2016-11-01'
+        n_countries: 9
+        iso3:
+        - BEN
+        - CAF
+        - CMR
+        - LBR
+        - MLI
+        - NER
+        - SOM
+        - TCD
+        - TGO
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+    units:
+      hmmCE:
+        members:
+        - AGO
+        - BDI
+        - COD
+        - ETH
+        - KEN
+        - MWI
+        - MOZ
+        - SOM
+        - SSD
+        - SDN
+        - TZA
+        - UGA
+        - ZMB
+        - ZWE
+        - NAM
+        groups:
+        - enso_east
+        - enso_horn
+        - enso_south
+        - enso_west
+        horizon_end: '2017-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_elnino_2015_hmmCE.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmCE
+        factual_run_id: 20261026_elnino_2015_hmmCE_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmCE/merged
+        factual_launch: '2014-09-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmCE_cf-neutral
+            run_id: 20261026_elnino_2015_hmmCE_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_elnino_2015_hmmCE_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmCE_cf-neutral/merged
+            launch: '2014-09-01'
+      hmmW:
+        members:
+        - BEN
+        - CMR
+        - CAF
+        - TCD
+        - CIV
+        - GHA
+        - GIN
+        - GNB
+        - LBR
+        - MLI
+        - NER
+        - NGA
+        - COG
+        - SLE
+        - TGO
+        groups:
+        - enso_horn
+        - enso_nga
+        - enso_south
+        - enso_west
+        horizon_end: '2017-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_elnino_2015_hmmW.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmW
+        factual_run_id: 20261026_elnino_2015_hmmW_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmW/merged
+        factual_launch: '2014-09-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmW_cf-neutral
+            run_id: 20261026_elnino_2015_hmmW_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_elnino_2015_hmmW_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2015_hmmW_cf-neutral/merged
+            launch: '2014-09-01'
+    countries:
+      AGO:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      BDI:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2016-09-01'
+        unit_horizon_end: '2017-07-01'
+      COD:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      ETH:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      KEN:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2016-09-01'
+        unit_horizon_end: '2017-07-01'
+      MWI:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      MOZ:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      SOM:
+        group: enso_west
+        unit: hmmCE
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      SSD:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      SDN:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      TZA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2016-09-01'
+        unit_horizon_end: '2017-07-01'
+      UGA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2016-09-01'
+        unit_horizon_end: '2017-07-01'
+      ZMB:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      ZWE:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      NAM:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      BEN:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      CMR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      CAF:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      TCD:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      CIV:
+        group: enso_south
+        unit: hmmW
+        firm_horizon_end: '2017-03-01'
+        unit_horizon_end: '2017-07-01'
+      GHA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      GIN:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      GNB:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      LBR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      MLI:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      NER:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+      NGA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      COG:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      SLE:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2017-07-01'
+        unit_horizon_end: '2017-07-01'
+      TGO:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2016-11-01'
+        unit_horizon_end: '2017-07-01'
+  lanina_2020:
+    phase: lanina
+    label: La Nina 2020-21
+    launch: '2020-08-01'
+    peak: '2020-11-01'
+    peak_season_year: 2020
+    launch_rule: crossing
+    lenssen_cache: generated_data/lenssen_events/lanina_2020/lenssen_nino34_analogs.rds
+    lenssen_ready: yes
+    lenssen_status: ok
+    lenssen_lead_months: 84
+    lenssen_n_set: 352
+    africa_max_horizon: '2022-07-01'
+    groups:
+      enso_east:
+        best_lag_occ: 0
+        best_lag_dur: -1
+        best_lag_mon: 2
+        max_lag: 2
+        season_end_month: 7
+        season_end: '2021-07-01'
+        horizon_end: '2021-09-01'
+        n_countries: 4
+        iso3:
+        - BDI
+        - KEN
+        - TZA
+        - UGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+      enso_horn:
+        best_lag_occ: 10
+        best_lag_dur: 7
+        best_lag_mon: 10
+        max_lag: 10
+        season_end_month: 9
+        season_end: '2021-09-01'
+        horizon_end: '2022-07-01'
+        n_countries: 7
+        iso3:
+        - COG
+        - ETH
+        - GIN
+        - GNB
+        - SDN
+        - SLE
+        - SSD
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_nga:
+        best_lag_occ: 7
+        best_lag_dur: 8
+        best_lag_mon: 8
+        max_lag: 8
+        season_end_month: 11
+        season_end: '2020-11-01'
+        horizon_end: '2021-07-01'
+        n_countries: 2
+        iso3:
+        - GHA
+        - NGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmW
+      enso_south:
+        best_lag_occ: 4
+        best_lag_dur: 11
+        best_lag_mon: 5
+        max_lag: 11
+        season_end_month: 4
+        season_end: '2021-04-01'
+        horizon_end: '2022-03-01'
+        n_countries: 8
+        iso3:
+        - AGO
+        - CIV
+        - COD
+        - MOZ
+        - MWI
+        - NAM
+        - ZMB
+        - ZWE
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_west:
+        best_lag_occ: -6
+        best_lag_dur: -4
+        best_lag_mon: -8
+        max_lag: 0
+        season_end_month: 11
+        season_end: '2020-11-01'
+        horizon_end: '2020-11-01'
+        n_countries: 9
+        iso3:
+        - BEN
+        - CAF
+        - CMR
+        - LBR
+        - MLI
+        - NER
+        - SOM
+        - TCD
+        - TGO
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+    units:
+      hmmCE:
+        members:
+        - AGO
+        - BDI
+        - COD
+        - ETH
+        - KEN
+        - MWI
+        - MOZ
+        - SOM
+        - SSD
+        - SDN
+        - TZA
+        - UGA
+        - ZMB
+        - ZWE
+        - NAM
+        groups:
+        - enso_east
+        - enso_horn
+        - enso_south
+        - enso_west
+        horizon_end: '2022-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2020_hmmCE.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmCE
+        factual_run_id: 20261026_lanina_2020_hmmCE_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmCE/merged
+        factual_launch: '2020-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmCE_cf-neutral
+            run_id: 20261026_lanina_2020_hmmCE_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2020_hmmCE_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmCE_cf-neutral/merged
+            launch: '2020-08-01'
+      hmmW:
+        members:
+        - BEN
+        - CMR
+        - CAF
+        - TCD
+        - CIV
+        - GHA
+        - GIN
+        - GNB
+        - LBR
+        - MLI
+        - NER
+        - NGA
+        - COG
+        - SLE
+        - TGO
+        groups:
+        - enso_horn
+        - enso_nga
+        - enso_south
+        - enso_west
+        horizon_end: '2022-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2020_hmmW.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmW
+        factual_run_id: 20261026_lanina_2020_hmmW_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmW/merged
+        factual_launch: '2020-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmW_cf-neutral
+            run_id: 20261026_lanina_2020_hmmW_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2020_hmmW_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2020_hmmW_cf-neutral/merged
+            launch: '2020-08-01'
+    countries:
+      AGO:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      BDI:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2021-09-01'
+        unit_horizon_end: '2022-07-01'
+      COD:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      ETH:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      KEN:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2021-09-01'
+        unit_horizon_end: '2022-07-01'
+      MWI:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      MOZ:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      SOM:
+        group: enso_west
+        unit: hmmCE
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      SSD:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      SDN:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      TZA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2021-09-01'
+        unit_horizon_end: '2022-07-01'
+      UGA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2021-09-01'
+        unit_horizon_end: '2022-07-01'
+      ZMB:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      ZWE:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      NAM:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      BEN:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      CMR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      CAF:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      TCD:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      CIV:
+        group: enso_south
+        unit: hmmW
+        firm_horizon_end: '2022-03-01'
+        unit_horizon_end: '2022-07-01'
+      GHA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2021-07-01'
+        unit_horizon_end: '2022-07-01'
+      GIN:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      GNB:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      LBR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      MLI:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      NER:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+      NGA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2021-07-01'
+        unit_horizon_end: '2022-07-01'
+      COG:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      SLE:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2022-07-01'
+      TGO:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2020-11-01'
+        unit_horizon_end: '2022-07-01'
+  lanina_2021:
+    phase: lanina
+    label: La Nina 2021-22
+    launch: '2021-08-01'
+    peak: '2021-11-01'
+    peak_season_year: 2021
+    launch_rule: crossing
+    lenssen_cache: generated_data/lenssen_events/lanina_2021/lenssen_nino34_analogs.rds
+    lenssen_ready: yes
+    lenssen_status: ok
+    lenssen_lead_months: 72
+    lenssen_n_set: 342
+    africa_max_horizon: '2023-07-01'
+    groups:
+      enso_east:
+        best_lag_occ: 0
+        best_lag_dur: -1
+        best_lag_mon: 2
+        max_lag: 2
+        season_end_month: 7
+        season_end: '2022-07-01'
+        horizon_end: '2022-09-01'
+        n_countries: 4
+        iso3:
+        - BDI
+        - KEN
+        - TZA
+        - UGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+      enso_horn:
+        best_lag_occ: 10
+        best_lag_dur: 7
+        best_lag_mon: 10
+        max_lag: 10
+        season_end_month: 9
+        season_end: '2022-09-01'
+        horizon_end: '2023-07-01'
+        n_countries: 7
+        iso3:
+        - COG
+        - ETH
+        - GIN
+        - GNB
+        - SDN
+        - SLE
+        - SSD
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_nga:
+        best_lag_occ: 7
+        best_lag_dur: 8
+        best_lag_mon: 8
+        max_lag: 8
+        season_end_month: 11
+        season_end: '2021-11-01'
+        horizon_end: '2022-07-01'
+        n_countries: 2
+        iso3:
+        - GHA
+        - NGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmW
+      enso_south:
+        best_lag_occ: 4
+        best_lag_dur: 11
+        best_lag_mon: 5
+        max_lag: 11
+        season_end_month: 4
+        season_end: '2022-04-01'
+        horizon_end: '2023-03-01'
+        n_countries: 8
+        iso3:
+        - AGO
+        - CIV
+        - COD
+        - MOZ
+        - MWI
+        - NAM
+        - ZMB
+        - ZWE
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_west:
+        best_lag_occ: -6
+        best_lag_dur: -4
+        best_lag_mon: -8
+        max_lag: 0
+        season_end_month: 11
+        season_end: '2021-11-01'
+        horizon_end: '2021-11-01'
+        n_countries: 9
+        iso3:
+        - BEN
+        - CAF
+        - CMR
+        - LBR
+        - MLI
+        - NER
+        - SOM
+        - TCD
+        - TGO
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+    units:
+      hmmCE:
+        members:
+        - AGO
+        - BDI
+        - COD
+        - ETH
+        - KEN
+        - MWI
+        - MOZ
+        - SOM
+        - SSD
+        - SDN
+        - TZA
+        - UGA
+        - ZMB
+        - ZWE
+        - NAM
+        groups:
+        - enso_east
+        - enso_horn
+        - enso_south
+        - enso_west
+        horizon_end: '2023-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2021_hmmCE.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmCE
+        factual_run_id: 20261026_lanina_2021_hmmCE_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmCE/merged
+        factual_launch: '2021-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmCE_cf-neutral
+            run_id: 20261026_lanina_2021_hmmCE_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2021_hmmCE_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmCE_cf-neutral/merged
+            launch: '2021-08-01'
+      hmmW:
+        members:
+        - BEN
+        - CMR
+        - CAF
+        - TCD
+        - CIV
+        - GHA
+        - GIN
+        - GNB
+        - LBR
+        - MLI
+        - NER
+        - NGA
+        - COG
+        - SLE
+        - TGO
+        groups:
+        - enso_horn
+        - enso_nga
+        - enso_south
+        - enso_west
+        horizon_end: '2023-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2021_hmmW.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmW
+        factual_run_id: 20261026_lanina_2021_hmmW_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmW/merged
+        factual_launch: '2021-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmW_cf-neutral
+            run_id: 20261026_lanina_2021_hmmW_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2021_hmmW_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2021_hmmW_cf-neutral/merged
+            launch: '2021-08-01'
+    countries:
+      AGO:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      BDI:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2022-09-01'
+        unit_horizon_end: '2023-07-01'
+      COD:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      ETH:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      KEN:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2022-09-01'
+        unit_horizon_end: '2023-07-01'
+      MWI:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      MOZ:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      SOM:
+        group: enso_west
+        unit: hmmCE
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      SSD:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      SDN:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      TZA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2022-09-01'
+        unit_horizon_end: '2023-07-01'
+      UGA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2022-09-01'
+        unit_horizon_end: '2023-07-01'
+      ZMB:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      ZWE:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      NAM:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      BEN:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      CMR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      CAF:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      TCD:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      CIV:
+        group: enso_south
+        unit: hmmW
+        firm_horizon_end: '2023-03-01'
+        unit_horizon_end: '2023-07-01'
+      GHA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2023-07-01'
+      GIN:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      GNB:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      LBR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      MLI:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      NER:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+      NGA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2022-07-01'
+        unit_horizon_end: '2023-07-01'
+      COG:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      SLE:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2023-07-01'
+      TGO:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2021-11-01'
+        unit_horizon_end: '2023-07-01'
+  lanina_2022:
+    phase: lanina
+    label: La Nina 2022-23
+    launch: '2022-08-01'
+    peak: '2022-10-01'
+    peak_season_year: 2022
+    launch_rule: annual
+    lenssen_cache: generated_data/lenssen_events/lanina_2022/lenssen_nino34_analogs.rds
+    lenssen_ready: yes
+    lenssen_status: ok
+    lenssen_lead_months: 60
+    lenssen_n_set: 218
+    africa_max_horizon: '2024-07-01'
+    groups:
+      enso_east:
+        best_lag_occ: 0
+        best_lag_dur: -1
+        best_lag_mon: 2
+        max_lag: 2
+        season_end_month: 7
+        season_end: '2023-07-01'
+        horizon_end: '2023-09-01'
+        n_countries: 4
+        iso3:
+        - BDI
+        - KEN
+        - TZA
+        - UGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+      enso_horn:
+        best_lag_occ: 10
+        best_lag_dur: 7
+        best_lag_mon: 10
+        max_lag: 10
+        season_end_month: 9
+        season_end: '2023-09-01'
+        horizon_end: '2024-07-01'
+        n_countries: 7
+        iso3:
+        - COG
+        - ETH
+        - GIN
+        - GNB
+        - SDN
+        - SLE
+        - SSD
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_nga:
+        best_lag_occ: 7
+        best_lag_dur: 8
+        best_lag_mon: 8
+        max_lag: 8
+        season_end_month: 11
+        season_end: '2022-11-01'
+        horizon_end: '2023-07-01'
+        n_countries: 2
+        iso3:
+        - GHA
+        - NGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmW
+      enso_south:
+        best_lag_occ: 4
+        best_lag_dur: 11
+        best_lag_mon: 5
+        max_lag: 11
+        season_end_month: 4
+        season_end: '2023-04-01'
+        horizon_end: '2024-03-01'
+        n_countries: 8
+        iso3:
+        - AGO
+        - CIV
+        - COD
+        - MOZ
+        - MWI
+        - NAM
+        - ZMB
+        - ZWE
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_west:
+        best_lag_occ: -6
+        best_lag_dur: -4
+        best_lag_mon: -8
+        max_lag: 0
+        season_end_month: 11
+        season_end: '2022-11-01'
+        horizon_end: '2022-11-01'
+        n_countries: 9
+        iso3:
+        - BEN
+        - CAF
+        - CMR
+        - LBR
+        - MLI
+        - NER
+        - SOM
+        - TCD
+        - TGO
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+    units:
+      hmmCE:
+        members:
+        - AGO
+        - BDI
+        - COD
+        - ETH
+        - KEN
+        - MWI
+        - MOZ
+        - SOM
+        - SSD
+        - SDN
+        - TZA
+        - UGA
+        - ZMB
+        - ZWE
+        - NAM
+        groups:
+        - enso_east
+        - enso_horn
+        - enso_south
+        - enso_west
+        horizon_end: '2024-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2022_hmmCE.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmCE
+        factual_run_id: 20261026_lanina_2022_hmmCE_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmCE/merged
+        factual_launch: '2022-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmCE_cf-neutral
+            run_id: 20261026_lanina_2022_hmmCE_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2022_hmmCE_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmCE_cf-neutral/merged
+            launch: '2022-08-01'
+      hmmW:
+        members:
+        - BEN
+        - CMR
+        - CAF
+        - TCD
+        - CIV
+        - GHA
+        - GIN
+        - GNB
+        - LBR
+        - MLI
+        - NER
+        - NGA
+        - COG
+        - SLE
+        - TGO
+        groups:
+        - enso_horn
+        - enso_nga
+        - enso_south
+        - enso_west
+        horizon_end: '2024-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_lanina_2022_hmmW.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmW
+        factual_run_id: 20261026_lanina_2022_hmmW_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmW/merged
+        factual_launch: '2022-08-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmW_cf-neutral
+            run_id: 20261026_lanina_2022_hmmW_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_lanina_2022_hmmW_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_lanina_2022_hmmW_cf-neutral/merged
+            launch: '2022-08-01'
+    countries:
+      AGO:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      BDI:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2023-09-01'
+        unit_horizon_end: '2024-07-01'
+      COD:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      ETH:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      KEN:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2023-09-01'
+        unit_horizon_end: '2024-07-01'
+      MWI:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      MOZ:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      SOM:
+        group: enso_west
+        unit: hmmCE
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      SSD:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      SDN:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      TZA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2023-09-01'
+        unit_horizon_end: '2024-07-01'
+      UGA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2023-09-01'
+        unit_horizon_end: '2024-07-01'
+      ZMB:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      ZWE:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      NAM:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      BEN:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      CMR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      CAF:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      TCD:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      CIV:
+        group: enso_south
+        unit: hmmW
+        firm_horizon_end: '2024-03-01'
+        unit_horizon_end: '2024-07-01'
+      GHA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2024-07-01'
+      GIN:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      GNB:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      LBR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      MLI:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      NER:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+      NGA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2023-07-01'
+        unit_horizon_end: '2024-07-01'
+      COG:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      SLE:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2024-07-01'
+        unit_horizon_end: '2024-07-01'
+      TGO:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2022-11-01'
+        unit_horizon_end: '2024-07-01'
+  elnino_2023:
+    phase: elnino
+    label: El Nino 2023-24
+    launch: '2023-05-01'
+    peak: '2023-12-01'
+    peak_season_year: 2023
+    launch_rule: crossing
+    lenssen_cache: generated_data/lenssen_events/elnino_2023/lenssen_nino34_analogs.rds
+    lenssen_ready: yes
+    lenssen_status: ok
+    lenssen_lead_months: 51
+    lenssen_n_set: 216
+    africa_max_horizon: '2025-07-01'
+    groups:
+      enso_east:
+        best_lag_occ: 0
+        best_lag_dur: -1
+        best_lag_mon: 2
+        max_lag: 2
+        season_end_month: 7
+        season_end: '2024-07-01'
+        horizon_end: '2024-09-01'
+        n_countries: 4
+        iso3:
+        - BDI
+        - KEN
+        - TZA
+        - UGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+      enso_horn:
+        best_lag_occ: 10
+        best_lag_dur: 7
+        best_lag_mon: 10
+        max_lag: 10
+        season_end_month: 9
+        season_end: '2024-09-01'
+        horizon_end: '2025-07-01'
+        n_countries: 7
+        iso3:
+        - COG
+        - ETH
+        - GIN
+        - GNB
+        - SDN
+        - SLE
+        - SSD
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_nga:
+        best_lag_occ: 7
+        best_lag_dur: 8
+        best_lag_mon: 8
+        max_lag: 8
+        season_end_month: 11
+        season_end: '2024-11-01'
+        horizon_end: '2025-07-01'
+        n_countries: 2
+        iso3:
+        - GHA
+        - NGA
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmW
+      enso_south:
+        best_lag_occ: 4
+        best_lag_dur: 11
+        best_lag_mon: 5
+        max_lag: 11
+        season_end_month: 4
+        season_end: '2024-04-01'
+        horizon_end: '2025-03-01'
+        n_countries: 8
+        iso3:
+        - AGO
+        - CIV
+        - COD
+        - MOZ
+        - MWI
+        - NAM
+        - ZMB
+        - ZWE
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+      enso_west:
+        best_lag_occ: -6
+        best_lag_dur: -4
+        best_lag_mon: -8
+        max_lag: 0
+        season_end_month: 11
+        season_end: '2024-11-01'
+        horizon_end: '2024-11-01'
+        n_countries: 9
+        iso3:
+        - BEN
+        - CAF
+        - CMR
+        - LBR
+        - MLI
+        - NER
+        - SOM
+        - TCD
+        - TGO
+        occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+        dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+        mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+        units:
+        - hmmCE
+        - hmmW
+    units:
+      hmmCE:
+        members:
+        - AGO
+        - BDI
+        - COD
+        - ETH
+        - KEN
+        - MWI
+        - MOZ
+        - SOM
+        - SSD
+        - SDN
+        - TZA
+        - UGA
+        - ZMB
+        - ZWE
+        - NAM
+        groups:
+        - enso_east
+        - enso_horn
+        - enso_south
+        - enso_west
+        horizon_end: '2025-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_elnino_2023_hmmCE.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmCE
+        factual_run_id: 20261026_elnino_2023_hmmCE_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmCE/merged
+        factual_launch: '2023-05-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmCE_cf-neutral
+            run_id: 20261026_elnino_2023_hmmCE_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_elnino_2023_hmmCE_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmCE_cf-neutral/merged
+            launch: '2023-05-01'
+      hmmW:
+        members:
+        - BEN
+        - CMR
+        - CAF
+        - TCD
+        - CIV
+        - GHA
+        - GIN
+        - GNB
+        - LBR
+        - MLI
+        - NER
+        - NGA
+        - COG
+        - SLE
+        - TGO
+        groups:
+        - enso_horn
+        - enso_nga
+        - enso_south
+        - enso_west
+        horizon_end: '2025-07-01'
+        factual_config: analysis/tests/fixtures/run_configs/event_elnino_2023_hmmW.yml
+        factual_run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmW
+        factual_run_id: 20261026_elnino_2023_hmmW_factual
+        factual_merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmW/merged
+        factual_launch: '2023-05-01'
+        analog_sets:
+        - neutral
+        primary_analog_set: neutral
+        counterfactual_sets:
+          neutral:
+            analog_set: neutral
+            run_tag: sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmW_cf-neutral
+            run_id: 20261026_elnino_2023_hmmW_cf-neutral
+            config: analysis/tests/fixtures/run_configs/event_elnino_2023_hmmW_cf-neutral.yml
+            merged_dir: generated_data//sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_event_country_fixture_elnino_2023_hmmW_cf-neutral/merged
+            launch: '2023-05-01'
+    countries:
+      AGO:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      BDI:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2024-09-01'
+        unit_horizon_end: '2025-07-01'
+      COD:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      ETH:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      KEN:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2024-09-01'
+        unit_horizon_end: '2025-07-01'
+      MWI:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      MOZ:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      SOM:
+        group: enso_west
+        unit: hmmCE
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      SSD:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      SDN:
+        group: enso_horn
+        unit: hmmCE
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      TZA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2024-09-01'
+        unit_horizon_end: '2025-07-01'
+      UGA:
+        group: enso_east
+        unit: hmmCE
+        firm_horizon_end: '2024-09-01'
+        unit_horizon_end: '2025-07-01'
+      ZMB:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      ZWE:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      NAM:
+        group: enso_south
+        unit: hmmCE
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      BEN:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      CMR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      CAF:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      TCD:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      CIV:
+        group: enso_south
+        unit: hmmW
+        firm_horizon_end: '2025-03-01'
+        unit_horizon_end: '2025-07-01'
+      GHA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      GIN:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      GNB:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      LBR:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      MLI:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      NER:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'
+      NGA:
+        group: enso_nga
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      COG:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      SLE:
+        group: enso_horn
+        unit: hmmW
+        firm_horizon_end: '2025-07-01'
+        unit_horizon_end: '2025-07-01'
+      TGO:
+        group: enso_west
+        unit: hmmW
+        firm_horizon_end: '2024-11-01'
+        unit_horizon_end: '2025-07-01'

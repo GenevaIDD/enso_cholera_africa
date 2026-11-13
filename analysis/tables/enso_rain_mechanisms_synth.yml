@@ -1,0 +1,20 @@
+# ENSO-rainfall table T1a of the synthetic world (00_ingest_synthetic.R):
+# placeholder text for the two fake groups, so 09's rain_enso step and 11's
+# T1a run on the synthetic run. The real table is enso_rain_mechanisms.yml.
+groups:
+  grp_a:
+    members_note: "Astoria, Brindlemark (synthetic)"
+    season: "Jun-Sep (synthetic rainy season peaking in July)"
+    stage: "synthetic"
+    main_lag: "simulated onset lag -3 months"
+    el_nino_signal: "wetter (simulated)"
+    mechanism: "None: simulated rainfall, wetter in El Nino for this group by construction."
+    references: "analysis/utils/synthetic_world.R"
+  grp_b:
+    members_note: "Calderon, Dunmore (synthetic)"
+    season: "Dec-Mar (synthetic rainy season peaking in January)"
+    stage: "synthetic"
+    main_lag: "simulated onset lag -1 month"
+    el_nino_signal: "drier (simulated)"
+    mechanism: "None: simulated rainfall, drier in El Nino for this group by construction."
+    references: "analysis/utils/synthetic_world.R"

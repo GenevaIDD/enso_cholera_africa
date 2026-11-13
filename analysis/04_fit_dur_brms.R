@@ -1,0 +1,309 @@
+# 04_fit_dur_brms.R — config-driven brms fit for the outbreak-duration track
+#
+# The DURATION model is a discrete-time cessation hazard. The panel
+# (analysis/03_prepare_dur.R -> analysis/utils/dur_data.R) carries one row per
+# ACTIVE MONTH per episode; `y = as.integer(ended)` is 1 on an episode's last
+# active month iff that episode is uncensored, and `log_offset` is the log of
+# the days of that month actually covered by [TL, TR].
+#
+# It is fitted as Poisson-with-log-offset for the same reason the occurrence
+# track is (Holford 1980; Laird & Olivier 1981): a discrete-time hazard with a
+# complementary-log-log / Poisson link and a per-interval exposure offset is
+# algebraically the Holford form of the hazard model. That equivalence is what
+# lets this script be a near-copy of 04_fit_occ_brms.R, and what lets the
+# occurrence track's RE postprocessing adapter be reused verbatim below.
+#
+# ONE THING IS DIFFERENT FROM OCCURRENCE AND IT MATTERS: the offset here is
+# TIME (days active in the month), not population and not interval length in
+# the seasonal clock. Dropping it does not error — it silently turns a per-day
+# cessation hazard into a per-row count, which fits fine and means nothing.
+# The offset is emitted by build_duration_formula_parts() (utils/config.R), and
+# test_duration_config_merge.R asserts its presence.
+#
+# TWO baseline hazards, on two different clocks, independently configurable:
+#   duration.basehaz_duration = factor | ms | none    on `mso` (months since
+#       onset). PRIMARY. `factor` uses `mso_band`, rebuilt from
+#       duration.mso_breaks at every load; `ms` uses an M-spline basis bound on
+#       below as msoms*; `none` is the constant-hazard null variant.
+#   duration.basehaz_poisson  = none | factor | cyclic | seasonal | ms  on
+#       `t_start_seas`. Default `none`. Enables "outbreaks end when the season
+#       ends" as a testable alternative rather than an assumption.
+#
+# Reads all parameters from a YAML config (--config / -C) or from CLI flags.
+# Priority: explicit CLI flag > YAML config value > default (config_defaults.yml).
+#
+# Examples:
+#   Rscript analysis/04_fit_run.R -C analysis/configs/dur_smoketest/dur_smoke.yml
+#   Rscript analysis/04_fit_dur_brms.R -C <cfg> --country ETH --sampling 200
+#   Rscript analysis/04_fit_dur_brms.R -C <cfg> --basehaz_duration none
+
+# Preamble ----------------------------------------------------------------
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(optparse)
+  library(brms)
+  library(splines2)
+})
+
+source("analysis/utils/config.R")
+source("analysis/utils/formula.R")               # model-term assembly
+source("analysis/utils/priors.R")                # brms prior builders
+source("analysis/utils/base.R")
+source("analysis/utils/gid.R")
+source("analysis/utils/paths.R")
+source("analysis/utils/clim_compile.R")
+source("analysis/utils/clim_db.R")
+source("analysis/utils/occ_data.R")
+source("analysis/utils/composite_lp.R")   # transitive dependency of population.R
+source("analysis/utils/population.R")     # .applyP3() -- occurrence/duration.canonical_admin_level (load_*_data)
+source("analysis/utils/siz_data.R")
+source("analysis/utils/dur_data.R")
+source("analysis/utils/provenance.R")
+source("analysis/utils/occ_post.R")
+source("analysis/utils/plots.R")
+source("analysis/utils/anchor.R")
+
+option_list <- list(
+  make_option(c("-a", "--admin_level"),
+              default = NULL, type = "character",
+              help = "Admin level (ADM1 | ADM2 | ADM1-ADM2) [config default: ADM1]"),
+  make_option(c("-b", "--baseline"),
+              default = NULL, type = "character",
+              help = "Baseline period [config default: 1990_2019]"),
+  make_option(c("-c", "--country"),
+              default = NULL, type = "character",
+              help = "ISO3 code(s), comma-separated, or 'all' [config default: all]"),
+  make_option(c("--basehaz_duration"),
+              default = NULL, type = "character",
+              help = "Baseline hazard on months-since-onset: factor|ms|none [config default: factor]"),
+  make_option(c("--basehaz_poisson"),
+              default = NULL, type = "character",
+              help = "Baseline hazard on seasonal time: none|factor|cyclic|seasonal|ms [config default: none]"),
+  make_option(c("--sampling"),
+              default = NULL, type = "integer",
+              help = "Post-warmup sampling iterations [config default: 1000]"),
+  make_option(c("--warmup"),
+              default = NULL, type = "integer",
+              help = "Warmup iterations [config default: 1000]"),
+  make_option(c("--chains"),
+              default = NULL, type = "integer",
+              help = "MCMC chains [config default: 4]"),
+  make_option(c("--cores"),
+              default = NULL, type = "integer",
+              help = "Parallel cores [config default: 4]"),
+  make_option(c("--seed"),
+              default = NULL, type = "integer",
+              help = "RNG seed [config default: 1234]"),
+  make_option(c("--brms_init"),
+              default = NULL, type = "character",
+              help = "Init strategy: random | 0 [config default: random]"),
+  make_option(c("--overwrite"),
+              default = NULL, action = "store_true",
+              help = "Re-fit even if output file already exists [default: FALSE]")
+)
+
+opt <- make_options_from_config(option_list     = option_list,
+                                enforce_options = c("country", "admin_level",
+                                                    "basehaz_duration",
+                                                    "basehaz_poisson",
+                                                    "sampling", "warmup", "chains",
+                                                    "cores", "seed", "brms_init",
+                                                    "overwrite"),
+                                model           = "duration")
+stopifnot(!is.null(opt$duration), opt$duration$backend == "brms")
+print_options(opt)
+
+dur_cfg  <- opt$duration
+brms_cfg <- dur_cfg$brms %||% list()
+
+# Early exit if fit already exists ----------------------------------------
+#
+# NOTE this is exactly the early exit that makes an artefact-name collision
+# silent: a config that resolves to an existing name is reported as a success
+# and leaves the OTHER config's fit on disk. makeDurationRunFile() is gated by
+# analysis/tests/test_duration_filename_roundtrip.R for that reason.
+
+fit_file <- makeDurationRunFile(opt, kind = "dur_fit")
+checkRunFileNames(opt, "duration")   # every artefact name fits NAME_MAX before the fit (paths.R)
+if (file.exists(fit_file) && !isTRUE(opt$overwrite)) {
+  message("Fit already exists (use --overwrite to re-fit): ", fit_file)
+  quit(save = "no", status = 0)
+}
+
+# Load data ---------------------------------------------------------------
+#
+# load_duration_data() applies the same covariate scaling as readSizeData()
+# and rebuilds `mso_band` from duration.mso_breaks, so a band-set sensitivity
+# run needs no re-prep. Country subsetting (including the grouping-mode subset
+# that resolve_group_countries() already wrote into opt$country) happens there.
+
+dur_dat <- load_duration_data(opt)
+# Episode record of the prep artefact this fit trains on (assertEpisodeKey()
+# in the loader); stamped onto the fit below so the simulator can refuse a fit
+# whose episode definition differs from the artefacts it is paired with.
+ep_rec <- attr(dur_dat, "episode_stamp")
+
+# Anchor sidecar (utils/anchor.R) -- the duration analogue of
+# `persistMeanRateTable(opt, size_dat)` (04_fit_siz_brms.R:89). Gated on
+# duration.offset_baserate, so it is inert for every config that predates it.
+if (anchorEnabled(opt, "dur")) persistBaseRateTable(opt, "dur", dur_dat)
+
+message(sprintf("Duration panel: %d active-month rows, %d episodes, %d cessations",
+                nrow(dur_dat),
+                dplyr::n_distinct(dur_dat$episode_id),
+                sum(dur_dat$y, na.rm = TRUE)))
+if (nrow(dur_dat) == 0L)
+  stop("Duration panel is empty after subsetting — check `country` / `grouping`.")
+
+# guardMissingClimateData() KEEPS rows outside CHIRPS/ERA5 coverage and flags
+# them (occ_data.R:112-134), leaving the filtering to the fit script. brms will
+# drop them with a generic "Rows containing NAs were excluded" warning that
+# says nothing about how many CESSATIONS went with them — and a dropped `y = 1`
+# row is a lost event, not just lost exposure. Report it explicitly.
+if ("climate_missing" %in% names(dur_dat)) {
+  n_miss <- sum(dur_dat$climate_missing, na.rm = TRUE)
+  if (n_miss > 0L)
+    message(sprintf(paste0("  %d row(s) (%.2f%%) lie outside climate coverage and ",
+                           "will be dropped by brms, carrying %d cessation event(s); ",
+                           "t_start %s to %s."),
+                    n_miss, 100 * n_miss / nrow(dur_dat),
+                    sum(dur_dat$y[dur_dat$climate_missing], na.rm = TRUE),
+                    format(min(dur_dat$t_start[dur_dat$climate_missing])),
+                    format(max(dur_dat$t_start[dur_dat$climate_missing]))))
+}
+
+# M-spline bases as fixed columns -----------------------------------------
+#
+# Same construction as the occurrence track's `ms` basehaz
+# (04_fit_occ_brms.R:129-134), but on each baseline's own clock. The formula
+# builder only NAMES these columns (^msoms[0-9]+$ / ^seasms[0-9]+$) and errors
+# if they are absent, so the basis must be bound on before it is called.
+
+if (identical(dur_cfg$basehaz_duration %||% "factor", "ms")) {
+  mso_basis <- splines2::mSpline(dur_dat$mso, degree = 3, df = 5, intercept = FALSE)
+  colnames(mso_basis) <- paste0(.DUR_MS_PREFIX, seq_len(ncol(mso_basis)))
+  dur_dat <- dplyr::bind_cols(dur_dat, tibble::as_tibble(mso_basis))
+}
+
+if (identical(dur_cfg$basehaz_poisson %||% "none", "ms")) {
+  seas_basis <- splines2::mSpline(dur_dat$t_start_seas, degree = 3, df = 5,
+                                  intercept = FALSE)
+  colnames(seas_basis) <- paste0(.DUR_SEAS_MS_PREFIX, seq_len(ncol(seas_basis)))
+  dur_dat <- dplyr::bind_cols(dur_dat, tibble::as_tibble(seas_basis))
+}
+
+# Build formula from config -----------------------------------------------
+#
+# build_duration_formula_parts() is data-aware: it prunes fixed factor levels
+# and RE terms that the subset cannot support (single-country, single mso band),
+# which is what makes a country-scoped smoke run possible at all.
+
+parts <- build_duration_formula_parts(opt, dur_dat)
+form  <- build_duration_formula(opt, dur_dat)
+message("Formula:\n  ", deparse1(brms::brmsterms(form)$allvars))
+message("  ", paste(c(parts$fixed_terms, parts$bh_terms, parts$seas_terms,
+                      parts$re_terms, parts$off_terms), collapse = " + "))
+
+# Priors ------------------------------------------------------------------
+#
+# Strings live in the config (duration.brms.prior_*) so a prior-sensitivity
+# batch is a config change, not a code change. The `b` prior is conditional:
+# brms errors on a prior for a class with no parameters, and the constant-
+# hazard null variant (basehaz_duration: none, no covariates, no slopes) has
+# no population-level effects beyond the intercept.
+
+priors <- build_duration_priors(opt, parts, brms_cfg, dat = dur_dat)
+
+# Init --------------------------------------------------------------------
+
+brms_init_str <- brms_cfg$init %||% "random"
+brms_init_val <- if (is.numeric(brms_init_str)) {
+  brms_init_str
+} else switch(as.character(brms_init_str),
+  random = "random",
+  `0`    = 0,
+  {
+    warning("Unknown brms_init value '", brms_init_str, "' — using random.")
+    "random"
+  }
+)
+
+# Fit ---------------------------------------------------------------------
+
+mcmc         <- resolve_brms_mcmc(brms_cfg, label = "brms")
+warmup_val   <- mcmc$warmup
+sampling_val <- mcmc$sampling
+iter_val     <- mcmc$iter
+refresh_val  <- mcmc$refresh
+
+chains_val  <- brms_cfg$chains  %||% 4L
+cores_val   <- brms_cfg$cores   %||% 4L
+
+threads_per_chain <- brms_cfg$threads_per_chain %||% NULL
+threads_arg <- if (!is.null(threads_per_chain) && as.integer(threads_per_chain) > 1L) {
+  message(sprintf("Multithreading enabled: %d threads per chain",
+                  as.integer(threads_per_chain)))
+  brms::threading(as.integer(threads_per_chain))
+} else {
+  NULL
+}
+
+t0 <- Sys.time()
+brms_fit <- brms::brm(
+  formula = form,
+  data    = dur_dat,
+  family  = poisson(),
+  prior   = priors,
+  chains  = chains_val,
+  iter    = iter_val,
+  warmup  = warmup_val,
+  cores   = cores_val,
+  seed    = opt$seed,
+  init    = brms_init_val,
+  refresh = refresh_val,
+  backend = "cmdstanr",
+  threads = threads_arg,
+  control = list(adapt_delta   = brms_cfg$adapt_delta   %||% 0.95,
+                 max_treedepth = brms_cfg$max_treedepth %||% 12L)
+)
+t1 <- Sys.time()
+message(sprintf("Fit time: %.1f min", as.numeric(difftime(t1, t0, units = "mins"))))
+
+# Attach training config so downstream scripts can recover opt without YAML
+attr(brms_fit, "opt") <- opt
+
+# Save fit ----------------------------------------------------------------
+attr(brms_fit, "episode_stamp") <- ep_rec
+saveRDS(brms_fit, fit_file)
+message("Saved fit -> ", fit_file)
+
+# Postprocess -------------------------------------------------------------
+#
+# computeNestedSurvReStatsBrms() is REUSED, not forked: the response is Poisson
+# with the identical nested RE structure, and the adapter enumerates RE levels
+# from ranef() rather than from anything occurrence-specific. Forking it would
+# be the most expensive duplication in this track — do it only if this fails.
+
+n_countries <- dplyr::n_distinct(dur_dat$country)
+
+re_groups     <- if (n_countries >= 2L) names(brms::ranef(brms_fit)) else character(0)
+drop_region   <- isTRUE(opt$grouping$enable)
+needed_groups <- if (drop_region) {
+  c("country", "country:ADM1")
+} else {
+  c("AFRO_region", "AFRO_region:country", "AFRO_region:country:ADM1")
+}
+
+if (n_countries < 2L) {
+  message("Skipping computeNestedSurvReStatsBrms: single-country / partial nesting.")
+} else if (all(needed_groups %in% re_groups)) {
+  re_stats <- computeNestedSurvReStatsBrms(brms_fit, dur_dat, drop_region = drop_region)
+  re_file  <- makeDurationRunFile(opt, kind = "dur_re_stats")
+  saveRDS(re_stats, re_file)
+  message("Saved RE stats -> ", re_file)
+} else {
+  message("Skipping computeNestedSurvReStatsBrms: needed groups not present (",
+          paste(setdiff(needed_groups, re_groups), collapse = ", "),
+          "). Likely a single-country / smoke fit.")
+}

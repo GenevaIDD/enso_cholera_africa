@@ -1,0 +1,7 @@
+# Display metadata for hmm_clusters_synth.csv: the contagion partition of the
+# synthetic world (00_ingest_synthetic.R), one cluster per synthetic ENSO group.
+label_prefix: "hmmSyn"
+order: [hmmSynA, hmmSynB]
+groups:
+  hmmSynA: {label: "Synthetic cluster A", short: "A"}
+  hmmSynB: {label: "Synthetic cluster B", short: "B"}

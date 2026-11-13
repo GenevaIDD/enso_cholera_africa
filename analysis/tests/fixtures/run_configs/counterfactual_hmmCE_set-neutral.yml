@@ -1,0 +1,17 @@
+# Test fixture: the simulator design keys of one main-set counterfactual run config (the first
+# unit, hmmCE), read by results_derive.R::run_design_table().
+simulator:
+  n_replicates: 9950
+  max_draws: 199
+  forecast:
+    param_draw_mode: cycle
+  enso:
+    clamp_to_knots: true
+    clamp_margin: 0.25
+    counterfactual:
+      scenario: lenssen
+      cache_path: generated_data/fixture_absent/lenssen_nino34_analogs.rds   # absent: no analog pool row
+      lenssen_horizon_start: "2026-05-01"
+      mean_offset: 0.0
+      log_var_scaling: 0.0
+      analog_set: neutral

@@ -1,0 +1,14 @@
+# Display metadata for enso_grouping.csv (utils/config.R::load_grouping_meta()).
+# Reproduces the tables formerly hardcoded in utils/results_core.R
+# (GROUP_LABELS / GROUP_SHORT / GROUP_ORDER / GROUP_SHORT_FIG) and
+# utils/enso.R::ensoGroupColours(); test_grouping_meta.R pins the equality.
+# Colours: a red/blue-free slice of ColorBrewer Dark2 (red/blue mean
+# increase/decrease in Figure 4).
+label_prefix: "enso_"
+order: [enso_east, enso_horn, enso_west, enso_south, enso_central]
+groups:
+  enso_east:    {label: "East Africa",     short: "East",     short_fig: "East",    colour: "#1b9e77"}
+  enso_horn:    {label: "Horn of Africa",  short: "Horn",     short_fig: "Horn",    colour: "#d95f02"}
+  enso_west:    {label: "West Africa",     short: "West",     short_fig: "West",    colour: "#66a61e"}
+  enso_south:   {label: "Southern Africa", short: "Southern", short_fig: "South",   colour: "#7570b3"}
+  enso_central: {label: "Central Africa",  short: "Central",  short_fig: "Central", colour: "#e7298a"}

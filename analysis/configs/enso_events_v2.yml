@@ -1,0 +1,102 @@
+# analysis/configs/enso_events_v2.yml -- registry of past ENSO events for the
+# event attribution, version 2: five single-winter events, and lanina_2020_23,
+# the 2020-23 La Nina as ONE event (one launch, one pair of runs per unit) read
+# in per-winter sub-windows. A deploy selects ids (deploy.event_attribution.events)
+# and this file (deploy.event_attribution.registry); the deployed run:
+# elnino_2015,lanina_2020_23,elnino_2023.
+#
+# Fields: those of a single-winter event (below), plus, for a multi-winter event,
+#   peaks             first-of-month peak of each winter (strictly increasing;
+#                     replaces `peak`; the LAST one sets the whole-event window
+#                     end, the first one the crossing check)
+#   peak_season_years first calendar year of each peak DJF (same length); the
+#                     counterfactual analogs are labelled on ALL of them (a set
+#                     label needs every one of these winters to agree)
+#   sub_windows       per_winter: the event window cut, per fit group (and per
+#                     country under per-country season ends), into consecutive
+#                     sub-windows, one per peak: k = 1 starts at the launch, each
+#                     ends where event_group_window() of its own peak ends (the
+#                     cholera season containing the peak + the group's largest
+#                     positive deployed lag), the next starts the month after.
+#                     09 reports one cell per sub-window plus the whole event.
+#                     none (default): one window.
+#   other_winters     neutral | any (optional; any event): overrides
+#                     deploy.enso_counterfactual.other_winters for this event
+#                     only. any = only the event's own winters (peak_season_years)
+#                     constrain the analog sets; the later winters its windows
+#                     read are still classified and recorded (cache stat_matrix,
+#                     role read_unconstrained) but mark no trajectory mixed.
+#                     Absent = the deploy's rule.
+#
+# v1 fields
+#   phase             elnino | lanina
+#   label             display name
+#   peak              month of the event's largest |ONI| (sets each fit group's
+#                     window end: the end of the cholera season containing it,
+#                     plus the group's max positive deployed lag)
+#   peak_season_year  first calendar year of the peak DJF; the counterfactual
+#                     Lenssen analogs are classified (nina / neutral / elnino) at
+#                     that DJF (03_prepare_lenssen_analogs.R --set_peak_season_year)
+#   launch            handoff month of both arms (factual and counterfactual)
+#   launch_rule       crossing: the month before ONI enters the event (crosses
+#                     +0.5 for El Nino, -0.5 for La Nina) and stays there to the
+#                     peak (utils/enso.R::ensoEventLaunch(); checked by
+#                     tests/test_event_attribution_configs.R against the ONI cache)
+#                     annual: `relaunch_of`'s launch + 12 months (a multi-year
+#                     event that never left the phase, so the crossing rule
+#                     names the earlier year's launch)
+#
+# v1 choices: strong events only; the 2020-23 La Nina as three annual re-launches.
+
+# v2: the 2020-23 La Nina also as one event with per-winter
+# sub-windows (lanina_2020_23); the three annual events stay for comparison.
+# lanina_2020_23 constrains only its own winters (other_winters: any).
+
+events:
+  elnino_2015:
+    phase: elnino
+    label: "El Nino 2015-16"
+    peak: "2015-12-01"          # ONI +2.59
+    peak_season_year: 2015
+    launch: "2014-09-01"        # ONI > +0.5 from 2014-10 to 2016-04 without a break
+    launch_rule: crossing
+  lanina_2020:
+    phase: lanina
+    label: "La Nina 2020-21"
+    peak: "2020-11-01"          # ONI -1.11
+    peak_season_year: 2020
+    launch: "2020-08-01"        # ONI < -0.5 from 2020-09
+    launch_rule: crossing
+  lanina_2021:
+    phase: lanina
+    label: "La Nina 2021-22"
+    peak: "2021-11-01"          # ONI -0.91
+    peak_season_year: 2021
+    launch: "2021-08-01"        # back above -0.5 in 2021-05/08, below again from 2021-09
+    launch_rule: crossing
+  lanina_2022:
+    phase: lanina
+    label: "La Nina 2022-23"
+    peak: "2022-10-01"          # ONI -0.89
+    peak_season_year: 2022
+    launch: "2022-08-01"        # never left La Nina after 2021-09
+    launch_rule: annual
+    relaunch_of: lanina_2021
+  elnino_2023:
+    phase: elnino
+    label: "El Nino 2023-24"
+    peak: "2023-12-01"          # ONI +1.99
+    peak_season_year: 2023
+    launch: "2023-05-01"        # ONI > +0.5 from 2023-06
+    launch_rule: crossing
+  lanina_2020_23:
+    phase: lanina
+    label: "La Nina 2020-23"
+    peaks: ["2020-11-01", "2021-11-01", "2022-10-01"]   # ONI -1.11, -0.91, -0.89
+    peak_season_years: [2020, 2021, 2022]
+    launch: "2020-08-01"        # ONI < -0.5 from 2020-09 (crossing, checked on the first peak)
+    launch_rule: crossing
+    sub_windows: per_winter
+    # Constrain only the event's own three
+    # winters, not DJF 2023/24 (the 2023 El Nino winter) that its windows also read.
+    other_winters: any

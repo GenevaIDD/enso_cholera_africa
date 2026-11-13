@@ -1,0 +1,80 @@
+# National-zero rule registry.
+#
+# Named parameter sets for 01_preprocess_national_zero_months.R
+# (utils/national_zero.R::buildNationalZeroMonths()). A rule is chosen by
+# episodes.national_zero_rule (03_prepare_occ.R --national_zero_rule; 01 --rule);
+# "" means `legacy`. The WHO case threshold is NOT part of a rule: it stays
+# episodes.national_zero_threshold (01 --zero_threshold), so one rule serves the
+# exact-zero (_nz-<rule>) and the thresholded (_nz<thr>-<rule>) panels.
+#
+# Fields
+#   zero_day_frac      share of a month's days zero national weeks must cover
+#   window             threshold branch: last months of a below-threshold year
+#                      claimed only if the NEXT year is also below (tail guard)
+#   head_window        threshold branch: first months of a below-threshold year
+#                      claimed only if the PREVIOUS year is also below (head
+#                      guard, the mirror of the tail guard); 0 = off
+#   db_tolerance       database deepest-level episode cases > this x WHO total
+#                      flags the WHO country-year as under-reported
+#                      (utils/national_zero.R::dbWhoConsistency())
+#   consistency_scope  threshold: that flag removes only below-threshold months;
+#                      all: it also removes months resting on a WHO EXACT zero
+#                      (who_zero and no national zero) -- what AWD reporting
+#                      looks like
+#   end                last month (YYYY-MM); 2024-12 = the WHO annual report's
+#                      last full year (a partial dashboard year is refused)
+#   exclude            static country-year exclusions, ISO3:Y0-Y1, each with a
+#                      reason and a status (proposed | confirmed)
+#   head_missing_quiet optional (absent = false): under the head guard, a
+#                      previous year with NO WHO figure counts as below the
+#                      threshold; false = a missing year blocks the head
+#                      months. The tail guard never treats a missing year as
+#                      below (the year after the WHO series end is missing).
+#
+# `legacy` reproduces the 01 CLI defaults exactly
+# (tests/test_national_zero_months.R pins it against 01's option defaults).
+
+legacy:
+  zero_day_frac: 0.8
+  window: 4
+  head_window: 0
+  db_tolerance: 1.2
+  consistency_scope: threshold
+  end: "2024-12"
+  exclude:
+    - entry: "ETH:2011-2014"
+      reason: "WHO zeros of the acute-watery-diarrhoea (AWD) reporting era"
+      status: confirmed
+
+# r2: head guard of 4 months,
+# the database-vs-WHO consistency check on every WHO-zero month, and the
+# Ethiopian AWD era widened to 2010-2016. SDN 2016-2018 and TZA 2020-2021 are
+# NOT listed: the consistency check (scope all) covers their contradictions.
+r2:
+  zero_day_frac: 0.8
+  window: 4
+  head_window: 4
+  db_tolerance: 1.2
+  consistency_scope: all
+  end: "2024-12"
+  exclude:
+    - entry: "ETH:2010-2016"
+      reason: "AWD reporting until about 2017 (the database has 109k cases in 2016)"
+      status: confirmed
+
+# Deployed rule: r2 with head_missing_quiet -- a previous year with no WHO
+# figure does not block the head months (e.g. KEN 2014 after 2013, where the
+# database's national series has 11 national-zero months). r2 is kept unchanged
+# (its panels and digest stay valid).
+r3:
+  zero_day_frac: 0.8
+  window: 4
+  head_window: 4
+  head_missing_quiet: true
+  db_tolerance: 1.2
+  consistency_scope: all
+  end: "2024-12"
+  exclude:
+    - entry: "ETH:2010-2016"
+      reason: "AWD reporting until about 2017 (the database has 109k cases in 2016)"
+      status: confirmed

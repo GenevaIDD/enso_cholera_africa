@@ -1,0 +1,19 @@
+# Past ENSO events of the SYNTHETIC world (00_ingest_synthetic.R, --seed 1):
+# utils/synthetic_world.R::synthEnsoEvents() on its synthetic ONI. The registry
+# of deploy synth_run1.yml (event_attribution.registry); the generator warns when
+# its ONI gives other events (another seed). Format: enso_events_v2.yml.
+events:
+  elnino_2015:
+    phase: elnino
+    label: El Nino 2015-16 (synthetic)
+    peak: '2016-02-01'
+    peak_season_year: 2015
+    launch: '2015-10-01'
+    launch_rule: crossing
+  lanina_2019:
+    phase: lanina
+    label: La Nina 2019-20 (synthetic)
+    peak: '2019-10-01'
+    peak_season_year: 2019
+    launch: '2019-02-01'
+    launch_rule: crossing

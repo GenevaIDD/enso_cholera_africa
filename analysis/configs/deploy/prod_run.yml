@@ -1,0 +1,272 @@
+# prod_run: the deployed run of the manuscript.
+#
+# One deploy YAML names everything a run needs: the three fit batches
+# (make_batch_configs.R: prod_run_{occ,dur,mon}_grouped_enso_singlelag, one
+# config per ENSO lag -11..11 x fit group), the brms_kl class sweep that derives
+# the fit grouping (prod_run_kl_sweep_classes; the pinned cell below), the
+# best-lag selection, the episode definition of the panels, the simulator
+# templates and overlays, and the forecast, attribution, hindcast and past-event
+# experiments. deploy_prod_run.R generates every batch, template and experiment
+# config from it, and analysis/configs/results/manuscript.yml points at it.
+#
+# Model: occurrence and monthly case counts as in the batch specs; duration with
+# calendar-month cessation seasonality (harmonic2) and a normal(0, 1.5) prior on
+# the months-since-onset band effects. Historical smoothing at Np 30,000.
+#
+#   Rscript analysis/utils/deploy_prod_run.R -C analysis/configs/deploy/prod_run.yml --stage all --dry-run
+#   bash analysis/bash/tools/run_pipeline.sh --deploy analysis/configs/deploy/prod_run.yml --plan
+#
+# The run tag is derived from this filename -> generated_data/deploy/prod_run/.
+deploy:
+  version: 1
+
+  # --- Source/destination fits -------------------------------------------
+  fits:
+    occ_dir: "prod_run_occ_grouped_enso_singlelag"
+    dur_dir: "prod_run_dur_grouped_enso_singlelag"   # harmonic2 cessation seasonality + prior_mso_band normal(0, 1.5)
+    mon_dir: "prod_run_mon_grouped_enso_singlelag"
+    dest:    "generated_data/enso_best_lag_fits_prod_run"
+    groups:  ["east", "horn", "nga", "south", "west"]   # the pinned cell's groups (gen_grouping refuses a mismatch)
+
+  # --- ENSO best-lag selection (utils/loo_lags.R::lag_selection_cfg()) -----
+  # Best-elpd lag only, with no floor at the occurrence lag - 4 for duration
+  # and monthly. Leads capped at -8: uncapped, Horn dur -9 / mon -10 and
+  # Nigeria mon -11 would end their forecast firm horizons in 2026-07/08.
+  # The occurrence best lags lie within both bounds.
+  lag_selection:
+    rule: best_elpd
+    se_mult: 2
+    min_lag: -8
+    occ_floor_offset: none
+
+  # --- Neighbour-contagion covariate naming --------------------------------
+  contagion:
+    rho_km: 500
+    scale:  "rownorm"
+    partition: "registry"
+    partition_source: ""   # "" = the partition registry (hmm_clusters), as the occurrence fits
+
+  # --- Neighbour-contagion kernel gate -------------------------------------
+  nbr_contagion:
+    enable: true
+    rho_km: 500
+
+  # Cross-track episode definition for the whole rollout (= the occurrence
+  # panel spec of the prod_run batches).
+  episodes:
+    key: gid_season
+    national_zero_fill: true
+    national_zero_threshold: 60  # national_zero_fill only: WHO country-years under N cases also zeros ("_nz<N>"); 0 = exact zeros
+    national_zero_rule: "r3"     # analysis/national_zero_rules.yml: r2 (head guard 4, consistency scope all, ETH 2010-2016) + a missing previous WHO year counts as quiet
+    at_risk_start: after_episode # mask rows inside a running episode
+    adm1_overlap: censor_orphan  # censor ADM2 children of orphan ADM1 episodes
+
+  # --- spatPomp templates --------------------------------------------------
+  templates:
+    historical:     "analysis/configs/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run.yml"
+    forecast:       "analysis/configs/sim_africa_brms_elag_enso_grouped_spatpomp_forecast_country_prod_run/sim_africa_brms_elag_enso_grouped_spatpomp_forecast_country_prod_run.yml"
+    counterfactual: "analysis/configs/sim_africa_brms_elag_enso_grouped_spatpomp_counterfactual_country_prod_run/sim_africa_brms_elag_enso_grouped_spatpomp_counterfactual_country_prod_run.yml"
+
+  # --- Base run_tags for the four spatPomp phases ------------------------
+  run_tags:
+    historical:     "sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run"
+    forecast:       "sim_africa_brms_elag_enso_grouped_spatpomp_forecast_country_prod_run"
+    counterfactual: "sim_africa_brms_elag_enso_grouped_spatpomp_counterfactual_country_prod_run"
+    hindcast:       "sim_africa_brms_elag_enso_grouped_spatpomp_hindcast_country_prod_run"
+
+  # --- Generator outputs -------------------------------------------------
+  outputs:
+    forecast_config_outdir: "analysis/configs/forecast_country_by_group_prod_run"
+    forecast_manifest:      "analysis/configs/forecast_horizons_prod_run.yml"
+    forecast_attrib_manifest: "analysis/configs/forecast_attribution_prod_run.yml"   # --stage gen_attrib: factual launched at the counterfactual handoff (attribution)
+    hindcast_config_outdir: "analysis/configs/hindcast_by_group_prod_run"
+    hindcast_manifest:      "analysis/configs/hindcast_horizons_prod_run.yml"
+
+  # --- Smoothing-cache handoff (== <run_tags.historical>/cache) ----------
+  smoothing_input: "generated_data/sim_spatpomp/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run/cache"
+
+  grouping:           "enso_grouping_prod_run"   # derived: --stage gen_grouping (kl_sweep below)
+  kl_sweep:            # brms_kl class sweep deriving `grouping` (--stage gen_grouping); batch "" = none
+    batch:     "prod_run_kl_sweep_classes"
+                         # Seed cores, ADM1 ENSO slopes, 400 + 300 draws x 8 chains; prior
+                         # grouping enso_grouping_prod_run_prior.
+    cell:      "ns4_K5"  # pinned after the classes phase (e.g. ns5_K5); "" stops the relay after classes
+    chains:    "agree"   # agree | all | 2,6
+    n_agree:   3         # agreeing chains: 0 = dominant mode, N = the N best-agreeing chains (here chains 2, 3, 6)
+    mode_tol:  1.5       # lags: max centre difference within one mode
+    fill_from: ""        # registry carrying over countries the fit lacks
+    meta_from: "enso_grouping_kl"   # sidecar labels / colours reused for shared groups
+
+  analog_sets:        "all,nina,neutral,elnino"
+  primary_analog_set: "neutral"
+  partition_by:       "registry"      # simulation units = transmission units
+  partition_source:   "hmm_clusters"  # hmmCE / hmmS / hmmW; the occurrence contagion registry is the same
+  enso_continuation:
+    method: analog         # required by seam last_full_oni
+    library: generated_data/enso_continuation_library.qs   # analog only (03_prepare_enso_continuation_library.R)
+    k: 30                  # analog: nearest analogs per seam state
+    blend_months: 3        # analog: e-folding of the seam offset
+    min_sep: 24            # analog: months between analogs within a model
+    max_per_model: .inf    # analog: cap per piControl model (.inf = none)
+    exclude_models: ["CM2.1-NMME"]   # analog: left out (largest share, strongest post-El Nino cold bias)
+    seam: last_full_oni    # analog seam at the last full 3-month CFSv2 mean; firm horizons move back one month
+
+  # --- Counterfactual ENSO analog pool (enso.R::ensoCounterfactualCfg) ---
+  # Library matcher: the pool drawn from the continuation library (same rescaled
+  # series, features, exclude_models and faded join), every DJF a reported
+  # month reads constrained; per-run cache built / verified in-process by
+  # gen_forecast and gen_events (sim.counterfactual cache_path below,
+  # event_attribution.lenssen_dir).
+  enso_counterfactual:
+    match: library
+    n_analogs: 100         # 2026 neutral set: 76 analogs at 50, 151 at 100
+    min_sep_months: 12     # months between analog starts within one model
+    blend_months: 3
+    winters: all_read      # every DJF a reported month reads
+    read_span: direct
+    other_winters: neutral # a trajectory whose other winters are not neutral is `mixed` (kept in all)
+    min_set_size: 30       # refuse a primary set under this size
+    seam_at: launch         # library: analog paths joined at the launch month (launch_minus_1 = month before)
+
+  # --- Convergence gate on deploy_fits / gen_grouping ----------------------
+  # refuse: deploy_fits stops before the prune on a failing fit; the user lists
+  # the fits allowed to deploy nonetheless after the deploy_fits --dry-run check.
+  convergence:
+    action: warn          # off | warn | refuse (warn: the ns4_K5 agreeing chains reach R-hat 1.61 on the south lag)
+    scope: population     # population (all but r_ / z_ / zs_) | all
+    rhat_max: 1.05        # default = diagnostics.R::DIAG_THRESHOLDS (1.01)
+    ess_min: default
+    max_divergent: 0
+    allow: []             # <track>:<short group> ids allowed to fail (filled after the deploy_fits dry run; stated in S8)
+
+  # --- Hindcast-only knobs ---------------------------------------------------
+  hindcast:
+    launch_month:        "05-01"
+    launch_years:        "2012:2022"
+    season_end:          "by_country_from_panel"   # by_group (season_end_by_group) | by_country_from_panel (each country's min_seas - 1)
+    season_min_window_months: 6   # by_country_from_panel: first season end >= launch + 6 months
+    season_end_by_group: "enso_east=7,enso_horn=9,enso_west=11,enso_south=4,enso_nga=11"   # by_group only
+    horizon_months:      12
+    # The hindcasts run the joint draw design (each replicate the draw of its
+    # handoff smoothing replicate; uniform handoff, max_draws = the smoothing's
+    # 100 replicates) at 5,000 replicates (50 per draw), not the forecast
+    # template's 10,000. Unset = patch_hindcast_config()'s random at the
+    # template's count.
+    param_draw_mode:     joint
+    n_replicates:        5000
+    add_best_lag:        true
+    climate_panel:       "generated_data/sim_climate_panel_base-1990_2019_ep-gs.rds"
+    # Season windows: each country's season from the month
+    # after its trough to the next trough, start floored at May, + max(0, min
+    # lag); one run per (unit, launch month, season year); the same rule for
+    # every group. Replaces launch_month / season_end above for the hindcast
+    # (event_attribution still inherits season_end).
+    season_window:       # one run per (unit, launch month, season year); see config.R
+      enable:             true
+      launch_floor_month: 5         # earliest season launch (after the ONI spring barrier)
+      trough_rule:        "onset_rate"   # onset_rate (min_seas fallback) | min_seas
+      min_onsets:         30
+      min_stability:      0.8
+      trough_years:       "2010:2024"
+      smooth_months:      3
+      bootstrap:          500
+      seed:               1
+      survival_panel:     ""        # "" = the template episodes' occurrence panel
+
+  # --- Past-ENSO-event attribution (--stage gen_events) -------------------
+  # Per-run Lenssen event caches. Event registry v2: La Nina 2020-23 as one
+  # event.
+  event_attribution:
+    events:              "elnino_2015,lanina_2020_23,elnino_2023"   # La Nina 2020-23 as one event with per-winter sub-windows
+    registry:            "analysis/configs/enso_events_v2.yml"
+    analog_set:          "neutral"
+    lenssen_dir:         "generated_data/lenssen_events_prod_run"
+    climate_panel:       "generated_data/sim_climate_panel_base-1990_2019_ep-gs_to-2026-08.rds"
+    season_end:          ""   # "" = hindcast.season_end
+    season_end_by_group: "enso_east=7,enso_horn=9,enso_west=11,enso_south=4,enso_nga=11"
+    run_tag_base:        "sim_africa_brms_elag_enso_grouped_spatpomp_event_country_prod_run"
+    config_outdir:       "analysis/configs/event_attribution_prod_run"
+    manifest:            "analysis/configs/event_attribution_horizons_prod_run.yml"
+    param_draw_mode:     "joint"   # each replicate runs the draw of its handoff smoothing replicate (100 draws = sim.forecast max_draws = the smoothing's 100 replicates; uniform handoff)
+    n_replicates:        10000     # 100 draws x 100 replicates, every draw equally often; both arms of every event run
+
+  # --- spatPomp template overlay (--stage gen_templates) -------------------
+  # Smoothing to the ENSO seam 2026-08 with the WHO term; factual handoff
+  # 2026-09, counterfactual 2026-05; 200 draws x 25 replicates on the shuffled
+  # handoff (simulator.forecast.handoff_weighting: each block of 100 replicate
+  # ids takes a seeded permutation of the 100 smoothing states, so the draw
+  # count need not be coprime to 100); season-year population, the WHO scale
+  # and overlap rule, and the per-run counterfactual Lenssen cache.
+  sim:
+    shared:
+      simulator.filter.measurement:      occurrence_duration_mon_NB_state_detect_actn   # normalized inactive-state case term
+      simulator.filter.case_fp_rate:     1.0   # eps = 1, the plain floor NB (eps is not estimable from the zero-filled panel)
+      simulator.filter.case_fp_mean:     0.1   # mu_0, the floor mean
+      simulator.onset_eligibility:       season   # the fitted risk set: no onset if the unit had one in its current cholera year
+      simulator.cessation_exposure:      half     # cessation drawn before the monthly mean, a ceasing month gets half a month as in the fit panel
+      simulator.filter.covariate_feed:   detected
+      simulator.filter.monthly_case_obs: zero_filled
+      simulator.location_frame.size_data_path: generated_data/outbreak_size_analysis_data_ep-gs.rds
+      # Each gid's population at the simulated month's season year.
+      simulator.location_frame.pop_year: season_year
+    historical:
+      simulator.filter.partition_by: registry  # TU units (deploy.partition_source)
+      simulator.filter.measurement: occurrence_duration_mon_NB_state_detect_actn_who   # normalized inactive-state case term, with the WHO term
+      simulator.filter.who_obs.fp_rate: 1.0   # the WHO term's eps, plain floor NB
+      simulator.filter.block_granularity: country
+      simulator.filter.who_obs.enable: true
+      simulator.filter.who_obs.path: generated_data/who_dashboard_monthly_africa.rds
+      simulator.filter.who_obs.start: "2023-01-01"
+      simulator.filter.who_obs.end: "2026-09-01"
+      simulator.filter.who_obs.phi: 5
+      simulator.filter.who_obs.mu_floor: 1
+      simulator.filter.who_obs.scale: 1
+      simulator.filter.who_obs.block_share: pop
+      # The per-country WHO scale estimated where identified (>= 100 database
+      # cases over >= 6 overlap months), the fixed scale (1 / who_f) elsewhere,
+      # no shrinkage; WHO not scored in the country-months the database observes.
+      # 08a writes who_scale.csv for review before 08b.
+      simulator.filter.who_obs.scale_mode: estimated
+      simulator.filter.who_obs.scale_est.fallback: fixed
+      simulator.filter.who_obs.scale_est.shrink_cases: 0
+      simulator.filter.who_obs.db_overlap: skip_who
+      simulator.parallel.chunk_size: 2
+      # Smoothing replicate j runs draw j in every unit; the 100 draws
+      # (max_draws) are the 100 smoothing replicates (template n_replicates),
+      # so every draw is used once.
+      simulator.filter.draw_design: shared_cycle
+      simulator.max_draws: 100
+      simulator.filter.Np: 30000  # 30,000 particles; pruned store
+      simulator.climate_panel: generated_data/sim_climate_panel_base-1990_2019_ep-gs_to-2026-08.rds
+      simulator.horizon.end: "2026-09-01"
+      simulator.filter.forecast_window.end: "2026-09-01"
+    forecast:
+      simulator.horizon.start: "2026-09-01"
+      simulator.filter.forecast_window.start: "2026-09-01"
+      simulator.filter.handoff_month: "2026-09-01"
+      simulator.enso.c3s_plume: data/precalc_plume_quantiles_ENSO_NINO34_202605_branded.png
+      simulator.climate_panel: generated_data/sim_climate_panel_projection_base-1990_2019_ep-gs.rds
+      simulator.enso.cfsv2_sd_correction: false
+      simulator.enso.cfsv2_calibration: generated_data/enso_cfsv2_calibration.rds
+      simulator.enso.cfsv2_calibration_target: ersst
+      simulator.enso.clamp_to_knots: true
+      simulator.enso.clamp_margin: 0.25
+      simulator.forecast.param_draw_mode: joint       # the draw of the handoff smoothing replicate
+      simulator.forecast.handoff_weighting: uniform   # joint pairs replicate r with smoothing replicate ((r - 1) mod 100) + 1
+      simulator.max_draws: 100
+      simulator.n_replicates: 10000  # 100 draws x 100 replicates
+    counterfactual:
+      simulator.horizon.start: "2026-05-01"
+      simulator.filter.forecast_window.start: "2026-05-01"
+      simulator.filter.handoff_month: "2026-05-01"
+      simulator.climate_panel: generated_data/sim_climate_panel_projection_base-1990_2019_ep-gs.rds
+      simulator.enso.clamp_to_knots: true
+      simulator.enso.clamp_margin: 0.25
+      simulator.forecast.param_draw_mode: joint       # the draw of the handoff smoothing replicate
+      simulator.forecast.handoff_weighting: uniform   # joint pairs replicate r with smoothing replicate ((r - 1) mod 100) + 1
+      simulator.max_draws: 100
+      simulator.n_replicates: 10000  # 100 draws x 100 replicates
+      # The per-run library-mode Lenssen cache (gen_forecast builds or
+      # verifies it in-process; the shared generated_data/lenssen_nino34_analogs.rds
+      # is refused in library mode).
+      simulator.enso.counterfactual.cache_path: generated_data/lenssen_prod_run/lenssen_nino34_analogs.rds

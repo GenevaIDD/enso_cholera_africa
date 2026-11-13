@@ -1,0 +1,97 @@
+# ---------------------------------------------------------------------------
+# analysis/configs/sim_templates/historical.yml -- RUN-AGNOSTIC SKELETON
+# ---------------------------------------------------------------------------
+# Historical bpfilter smoothing arm of a prod_run<N> rollout (joint occurrence +
+# duration + monthly case-count + detection-error filter over 2010-2024, grouped
+# mode: the three per-group fits are loaded from grouping.fits_dir; size is
+# retired downstream).
+#
+# This is NOT a runnable config. `deploy_prod_run.R --stage gen_templates` builds
+# the run's historical template as
+#     this skeleton  +  deploy `sim.shared`  +  deploy `sim.historical`  +  derived leaves
+# and writes it to analysis/configs/<run_tags.historical>/<run_tags.historical>.yml.
+# Per-run decisions belong in the deploy YAML's `sim:` block, never here.
+#
+# Leaves this skeleton deliberately leaves out:
+#   * derived from the deploy block (an overlay naming them is refused):
+#     simulator.run_tag, simulator.run_id, simulator.grouping.{source,fits_dir},
+#     simulator.nbr_contagion.{enable,rho_km}, episodes.key
+#   * required from the overlay: simulator.filter.measurement,
+#     simulator.filter.partition_by (country | enso_region; the smoothing
+#     partition is deliberately decoupled from deploy.partition_by)
+#   * optional per-run overlay leaves seen so far: simulator.filter.covariate_feed,
+#     simulator.filter.monthly_case_obs, simulator.parallel.chunk_size
+
+baseline: "1990_2019"
+seed:     20260624
+
+simulator:
+  climate_panel:  generated_data/sim_climate_panel_base-1990_2019.rds
+
+  location_frame:
+    hmm_clusters_path:      data/hmm_country_clusters.csv
+    outbreak_metadata_path: generated_data/outbreak_metadata.rds
+    size_data_path:         generated_data/outbreak_size_analysis_data.rds
+    # Monthly case-count base-rate anchor sidecar deliberately NOT pinned: with no
+    # base_rate_table_paths key, resolveBaseRatePaths() derives it from the
+    # deployed mon fit's own attached opt, coherent with the fit by construction.
+
+  grouping:
+    enable:          true
+    duration_enable: true
+    monthly_enable:  true
+
+  # Distance-weighted neighbour-contagion kernel term (enable / rho_km derived).
+  nbr_contagion:
+    gadm_path: "data/geodata/gadm_valid.gpkg"
+    cache_dir: "generated_data/"
+
+  # Full historical output window. bpfilter runs over [warmup.start, horizon.end).
+  horizon: { start: "2010-01-01", end: "2024-12-31" }
+
+  n_replicates: 100
+  draws_per_replicate: 1
+  max_draws: 200
+  posterior_strategy: paired
+  seed: 20260624
+
+  enso:
+    source: oni
+    cache_dir: generated_data/
+
+  filter:
+    enable:            true
+    Np:                10000
+    rerun_filter:      true
+    block_granularity: adm1          # bpfilter blocks per ADM1 unit
+    warmup_window:
+      start: "2009-01-01"    # panel starts 2009-01-01 (12-month burn-in)
+      end:   "2011-01-01"
+    forecast_window:
+      start: "2011-01-01"
+      end:   "2024-12-31"
+    delta_fn: 0.10
+    delta_fp: 0.001
+    n_draws_in_filter: 1
+    forecast_engine:   kernel_09a
+
+  scope:
+    transmission_units: all
+    countries:          all
+    admin_level:        ADM2
+    unseen_adm1:        restrict
+
+  scenario:
+    climate: factual
+
+  output:
+    format:               qs
+    aggregate:            adm2_month
+    keep_event_table:     true
+    keep_monthly_summary: true
+
+  parallel:
+    backend: furrr
+    over:    transmission_unit
+    chunk_size: 2
+    workers: 1

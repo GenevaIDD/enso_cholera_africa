@@ -1,0 +1,5 @@
+iso3,name,group,afro_region,hmm_cluster,lon0,lat0,enso_lag,enso_beta,season_peak,rain_peak
+XAA,Astoria,grp_a,Western Africa,hmmSynA,-2,-9,-3,0.7,8,7
+XAB,Brindlemark,grp_a,Western Africa,hmmSynA,0,-9,-3,0.7,8,7
+XAC,Calderon,grp_b,Eastern Africa,hmmSynB,40,-31,-1,-0.6,2,1
+XAD,Dunmore,grp_b,Eastern Africa,hmmSynB,42,-31,-1,-0.6,2,1

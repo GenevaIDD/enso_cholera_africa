@@ -1,0 +1,9 @@
+# Population extraction of the synthetic world (00_ingest_synthetic.R): its
+# WorldPop-like rasters and boundary cache under the sandbox's data/, its four
+# countries. Used by analysis/bash/tools/run_synthetic_pipeline.sh for 02a / 02b / 02c
+# and 02_preprocess_crosswalk.R.
+outdir: "generated_data"
+population:
+  raster_dir: "data/worldpop/"
+  boundary_cache: "data/country_boundaries"
+  country_registry: "analysis/groupings/enso_grouping_synth.csv"

@@ -1,0 +1,20 @@
+# Display metadata for enso_grouping_kl.csv (utils/config.R::load_grouping_meta()).
+# The brms_kl-inferred grouping (utils/make_kl_grouping.R on
+# kl_full_gauss_prodtu_rec_pb1, chains 2 and 6). Labels and colours follow
+# enso_grouping.yml for the shared groups; enso_nga (NGA alone) takes the next
+# ColorBrewer Dark2 colour. No enso_central group.
+# GHA (Ghana) is in enso_west by hand, carried over from enso_grouping_nga: the
+# kl fit predates the Ghana gid -> ADM1 fix (dfba2c8), which brought Ghana into
+# the panels, so the fit has no estimate for it (29 fitted countries + GHA).
+# Source fit archived read-only (with README, config as fitted, SHA256SUMS) in
+#   generated_data/kl_grouping_sources/enso_grouping_kl/
+#   chains 2+6 fit sha256 13d1995b91f5cc6b88acffc34c5b42e0a9e404911ed3677d49fecbba10c01ba0
+#   full 6-chain fit sha256 6e268e7a87c5b7f873fcd78bca1bc8b218a4ac13ab96b2e10f14e36935a61729
+label_prefix: "enso_"
+order: [enso_east, enso_horn, enso_west, enso_nga, enso_south]
+groups:
+  enso_east:    {label: "East Africa",     short: "East",     short_fig: "East",    colour: "#1b9e77"}
+  enso_horn:    {label: "Horn of Africa",  short: "Horn",     short_fig: "Horn",    colour: "#d95f02"}
+  enso_west:    {label: "West Africa",     short: "West",     short_fig: "West",    colour: "#66a61e"}
+  enso_nga:     {label: "Nigeria",         short: "Nigeria",  short_fig: "NGA",     colour: "#e6ab02"}
+  enso_south:   {label: "Southern Africa", short: "Southern", short_fig: "South",   colour: "#7570b3"}

@@ -1,0 +1,10 @@
+# Test fixture: the simulator design keys of one attribution factual run config (the first
+# unit, hmmCE), read by results_derive.R::run_design_table().
+simulator:
+  n_replicates: 9950
+  max_draws: 199
+  forecast:
+    param_draw_mode: cycle
+  enso:
+    clamp_to_knots: true
+    clamp_margin: 0.25

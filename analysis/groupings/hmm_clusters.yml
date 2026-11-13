@@ -1,0 +1,7 @@
+# Display metadata for hmm_clusters.csv (HMM transmission-unit clusters).
+label_prefix: "hmm"
+order: [hmmCE, hmmS, hmmW]
+groups:
+  hmmCE: {label: "Central-East (HMM)", short: "Central-East"}
+  hmmS:  {label: "South (HMM)",        short: "South"}
+  hmmW:  {label: "West (HMM)",         short: "West"}

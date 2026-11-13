@@ -1,0 +1,21 @@
+# Display metadata for enso_grouping_synth.csv: the two ENSO groups of the
+# synthetic world (analysis/groupings/synthetic_countries.csv; fake countries,
+# 00_ingest_synthetic.R). centroid_* feed results.style.group_labels: centroid.
+label_prefix: "grp_"
+order: [grp_a, grp_b]
+centroid_order: [grp_a, grp_b]
+groups:
+  grp_a:
+    label: "Group A (Astoria, Brindlemark)"
+    short: "A"
+    short_fig: "A"
+    colour: "#1b9e77"
+    centroid_short: "GA"
+    centroid_label: "Group A"
+  grp_b:
+    label: "Group B (Calderon, Dunmore)"
+    short: "B"
+    short_fig: "B"
+    colour: "#7570b3"
+    centroid_short: "GB"
+    centroid_label: "Group B"

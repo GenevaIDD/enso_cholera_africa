@@ -1,0 +1,4 @@
+#!/bin/bash
+# lib/local/squeue — under CHOLERA_BACKEND=local every job has already finished
+# when lib/local/sbatch returns: nothing is ever queued. Prints nothing.
+exit 0

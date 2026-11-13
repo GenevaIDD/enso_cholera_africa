@@ -1,0 +1,1062 @@
+# analysis/pipeline_steps.yml — the machine-readable run graph of the pipeline.
+#
+# Single source of truth for analysis/PIPELINE.md's step table and for
+# notebooks/pipeline_run_graph.dot. Both are GENERATED from this file by
+#
+#   Rscript analysis/utils/make_pipeline_docs.R            # rewrite both
+#   Rscript analysis/utils/make_pipeline_docs.R --check    # exit 1 if either is stale
+#
+# and analysis/tests/test_pipeline_doc_coverage.R (HARD gate) fails when a
+# numbered script or a tier-1 stage driver is missing here, when an entry names
+# a file that does not exist, when the list order below is not a valid run order
+# of the `after` edges, or when either generated file is stale.
+#
+# LIST ORDER IS RUN ORDER. Phase numbers are identifiers, not run order:
+# on the spatPomp path 08 (smoothing) runs
+# BEFORE 07b (forecast/hindcast), and the deploy tool runs at several points
+# between 05 and 07. The test checks that every `after` / `dispatched_by` entry
+# appears earlier in the list.
+#
+# Fields
+#   id            unique key. For a numbered step: its filename. For a non-step
+#                 tool: its utils/ path, or `deploy:<stage>` for one stage of
+#                 utils/deploy_prod_run.R.
+#   file          path relative to analysis/ (must exist)
+#   kind          step | tool | report
+#   phase         two-digit phase ("00".."11"); "--" for tools
+#   track         data | pop | occ | siz | dur | mon | all | sim | results
+#   rollout       core (part of every prod_run<N> rollout) | optional
+#                 (benchmarks, sensitivity, diagnostics, the v1 simulator)
+#   runs          local | slurm | local+slurm
+#   after         ids this step consumes artefacts from (data dependencies)
+#   dispatched_by id of the dispatcher that routes to this worker, if any
+#   drivers       bash drivers (relative to analysis/bash/) that run it
+#   inputs        external inputs not produced by any step (optional)
+#   outputs       what it writes (paths relative to the repo root)
+#   note          one line; optional
+
+steps:
+
+# --- 00 ingest ---------------------------------------------------------------
+- id: 00_ingest_outbreakextractr.R
+  file: 00_ingest_outbreakextractr.R
+  kind: step
+  phase: "00"
+  track: data
+  rollout: core
+  runs: local+slurm
+  after: []
+  drivers: [stages/00_ingest.sh, campaigns/preprocess.sh]
+  inputs:
+    - "OutbreakExtractR outputs: combined_outbreaks_cholera.csv + stage1_geo_*.geojson"
+  outputs:
+    - "~/secure/cholera_outbreak_data/outbreak_data_<Mon_YYYY>/time_series_{preoutbreak,outbreak}_extraction.rds"
+    - "~/secure/cholera_outbreak_data/outbreak_data_<Mon_YYYY>/outbreak_shapefiles.rds"
+    - "generated_data/prep_counts/00_ingest_outbreakextractr.yml (cascade counts)"
+  note: "Run when the outbreak data are refreshed; AFR/EMR filter (the >=50-case filter is upstream, in OutbreakExtractR). Writes into the vintage folder (--outdir defaults to --indir = paths.R::defaultOutbreakDataDir())."
+
+- id: 00_ingest_synthetic.R
+  file: 00_ingest_synthetic.R
+  kind: step
+  phase: "00"
+  track: data
+  rollout: optional
+  runs: local
+  after: []
+  drivers: [tools/run_synthetic_pipeline.sh]
+  inputs:
+    - "analysis/groupings/synthetic_countries.csv (fake countries, ISO 3166 user-assigned codes XA?)"
+  outputs:
+    - "$CHOLERA_OUTBREAK_DATA_DIR/outbreak_data_<Mon_YYYY>/combined_outbreaks_cholera.csv + stage1_geo/*.geojson (the input of 00_ingest_outbreakextractr.R)"
+    - "data/geodata/{gadm_410-levels,gadm_valid}.gpkg, basemap shapefiles; data/climate_parquet/; data/worldpop/ + data/country_boundaries/"
+    - "data/who_annual_report_africa/, data/best_seasonality_estimates.csv, data/hmm_country_clusters.csv, data/lenssen/extracted/, C3S plume stand-in"
+    - "generated_data/enso_*_cache.rds, generated_data/wpp2024_national_totals.csv, generated_data/synthetic_world/{truth.yml,epidemics.rds}"
+  note: "The synthetic world: every raw input in the format of the real source, simulated with known ENSO effects (utils/synthetic_world.R), so the real 00 -> 11 steps run without the restricted data. Runs only with CHOLERA_OUTBREAK_DATA_DIR set inside a sandbox (never ~/secure/); tools/run_synthetic_pipeline.sh chains every step on it with the deploy configs/deploy/synth_run1.yml."
+
+# --- 01 preprocess outbreaks -------------------------------------------------
+- id: 01_preprocess_outbreaks.R
+  file: 01_preprocess_outbreaks.R
+  kind: step
+  phase: "01"
+  track: data
+  rollout: core
+  runs: local+slurm
+  after: [00_ingest_outbreakextractr.R]
+  drivers: [stages/01_preprocess.sh, campaigns/preprocess.sh]
+  outputs:
+    - "~/secure/cholera_outbreak_data/outbreak_metadata.rds"
+    - "~/secure/cholera_outbreak_data/aggregated{,_admin_level}_ts_preoutbreak_extraction.rds"
+    - "~/secure/cholera_outbreak_data/outbreak_data_<Mon_YYYY>/outbreak_shapefiles.gpkg"
+    - "generated_data/prep_counts/01_preprocess_outbreaks.yml (cascade counts)"
+    - "figures/outbreak_map.png (-f TRUE; the Slurm stage passes -f FALSE)"
+
+- id: 01_preprocess_national_zero_months.R
+  file: 01_preprocess_national_zero_months.R
+  kind: step
+  phase: "01"
+  track: data
+  rollout: core
+  runs: local+slurm
+  after: [01_preprocess_outbreaks.R]
+  drivers: [stages/01_preprocess.sh, campaigns/preprocess.sh]
+  outputs:
+    - "~/secure/cholera_outbreak_data/national_zero_months.rds"
+    - "~/secure/cholera_outbreak_data/national_zero_months_t<N>.rds"
+    - "~/secure/cholera_outbreak_data/national_zero_months[_t<N>][_<rule>].audit.csv"
+    - "~/secure/cholera_outbreak_data/national_zero_months[_t<N>]_db_who_consistency.csv"
+  note: "National (ADM0) + WHO annual zeros -> country-months the coverage mask (coverage.R::build_coverage_mask) counts as observed 0 for every gid. --zero_threshold N (e.g. 60) adds WHO country-years under N cases (last --window months only if the next year is also under N; database-vs-WHO inconsistent years left out) as national_zero_months_t<N>.rds. --rule <name> (analysis/national_zero_rules.yml; r2 = head guard, consistency scope all, ETH 2010-2016) writes national_zero_months[_t<N>]_<name>.rds; every run writes the audit (<months>.audit.csv) and the database-vs-WHO table beside the months. The Slurm stage builds the deploy's deploy.episodes rule."
+
+- id: 01b_preprocess_outbreaks_monthly.R
+  file: 01b_preprocess_outbreaks_monthly.R
+  kind: step
+  phase: "01"
+  track: mon
+  rollout: core
+  runs: local+slurm
+  after: [00_ingest_outbreakextractr.R, 01_preprocess_outbreaks.R]
+  drivers: [stages/01_preprocess.sh, campaigns/preprocess.sh]
+  outputs:
+    - "~/secure/cholera_outbreak_data/outbreak_monthly_cases.rds"
+  note: "Month-grain re-aggregation of the same raw series; response of the monthly track. Gate B reads 01's outbreak metadata."
+
+- id: 01_preprocess_figures_data_overview.R
+  file: 01_preprocess_figures_data_overview.R
+  kind: step
+  phase: "01"
+  track: data
+  rollout: optional
+  runs: local
+  after: [00_ingest_outbreakextractr.R, 01_preprocess_outbreaks.R]
+  outputs:
+    - "figures/data_overview/"
+  note: "Manuscript Figure 1 (data overview). Reads 01's outbreak_shapefiles.gpkg."
+
+# --- 02 preprocess population / crosswalk / climate --------------------------
+- id: utils/preprocess_paths.R
+  file: utils/preprocess_paths.R
+  kind: tool
+  phase: "--"
+  track: data
+  rollout: core
+  runs: local+slurm
+  after: []
+  drivers: [stages/01_preprocess.sh, campaigns/preprocess.sh]
+  outputs:
+    - "KEY=value on stdout: OUTBREAK_VINTAGE / VINTAGE_DIR / SECURE_ROOT, NZ_RULE / NZ_THRESHOLD (--deploy), SEC= / GEN= output list (--outputs)"
+  note: "Bash reads the data-leg paths and the deploy's national-zero rule here; it never names the vintage."
+
+- id: 02a_preprocess_population_tasks.R
+  file: 02a_preprocess_population_tasks.R
+  kind: step
+  phase: "02"
+  track: pop
+  rollout: core
+  runs: local
+  after: [00_ingest_outbreakextractr.R]
+  drivers: [stages/02_population.sh]
+  outputs:
+    - "task YAMLs, per country (--task_unit country) or per (country, year) (TASKS_DIR= / N_TASKS= on stdout)"
+  note: "Login node; the national-boundary cache and the WorldPop rasters are downloaded before the 02b array (stages/02_population.sh checks the boundary cache)."
+
+- id: 02b_preprocess_population_run.R
+  file: 02b_preprocess_population_run.R
+  kind: step
+  phase: "02"
+  track: pop
+  rollout: optional
+  runs: local+slurm
+  after: [02a_preprocess_population_tasks.R]
+  drivers: [stages/02_population.sh]
+  inputs:
+    - "WorldPop constrained rasters; national boundaries"
+  outputs:
+    - "generated_data/population/parts/iso3=<ISO3>/year=<YYYY>/"
+  note: "Per-(country, year) runner (stages/02_population.sh --task-unit country_year), kept beside the per-country one."
+
+- id: 02b_preprocess_population_run_country.R
+  file: 02b_preprocess_population_run_country.R
+  kind: step
+  phase: "02"
+  track: pop
+  rollout: core
+  runs: local+slurm
+  after: [02a_preprocess_population_tasks.R]
+  drivers: [stages/02_population.sh, campaigns/preprocess.sh]
+  inputs:
+    - "WorldPop constrained rasters (prestaged); national boundaries"
+  outputs:
+    - "generated_data/population/parts/iso3=<ISO3>/year=<YYYY>/ (same partitions as 02b_preprocess_population_run.R)"
+    - "generated_data/population/gid_pop_cache/iso3=<ISO3>/year=<YYYY>.qs (Q_g, independent of the outbreak vintage)"
+  note: "One task per country, all years: geometry once, Q_g reused across vintages. A partition is skipped only when built from the current LP corpus (popPartFresh)."
+
+- id: 02c_preprocess_population_compile.R
+  file: 02c_preprocess_population_compile.R
+  kind: step
+  phase: "02"
+  track: pop
+  rollout: core
+  runs: local+slurm
+  after: [02b_preprocess_population_run_country.R]
+  drivers: [stages/02_population.sh, campaigns/preprocess.sh]
+  outputs:
+    - "generated_data/population_crosswalk_<Y0>-<Y1>.qs"
+    - "generated_data/gid_population_<Y0>-<Y1>.qs"
+    - "generated_data/population_qc/"
+  note: "The stage driver submits it afterok on the array."
+
+- id: 02_preprocess_crosswalk.R
+  file: 02_preprocess_crosswalk.R
+  kind: step
+  phase: "02"
+  track: pop
+  rollout: core
+  runs: local+slurm
+  after: [00_ingest_outbreakextractr.R, 01_preprocess_outbreaks.R, 02c_preprocess_population_compile.R]
+  drivers: [stages/02_crosswalk.sh, campaigns/preprocess.sh]
+  outputs:
+    - "generated_data/matched_ob_gids_crosswalk.rds"
+    - "generated_data/u_gids_crosswalk.rds"
+    - "generated_data/prep_counts/02_preprocess_crosswalk.yml (cascade counts)"
+  note: "Reads 01's outbreak_shapefiles.gpkg (attributes)."
+
+- id: 02_preprocess_climate.R
+  file: 02_preprocess_climate.R
+  kind: step
+  phase: "02"
+  track: data
+  rollout: core
+  runs: local+slurm
+  after: [00_ingest_outbreakextractr.R, 01_preprocess_outbreaks.R, 02_preprocess_crosswalk.R]
+  drivers: [stages/02_climate.sh, campaigns/preprocess.sh]
+  inputs:
+    - "data/climate_parquet/ (tools/download_jahn2026_parquet.sh) or data/climate_data/ (CHIRPS / ERA5-Land CSV, --climate_source csv)"
+  outputs:
+    - "generated_data/matched_ob_gids.rds (--stage match)"
+    - "generated_data/climate_stats/ per-gid caches (--stage extract)"
+    - "generated_data/climate_stats.sqlite, generated_data/climate_extremes.sqlite (--stage db)"
+  note: "Defaults = the deployed build (parquet, crosswalk gids, dynamic weighting); a database of other provenance is not overwritten without --force. Reads 01's outbreak_shapefiles.gpkg."
+
+# --- 03 prepare model datasets -----------------------------------------------
+- id: 03_prepare_occ.R
+  file: 03_prepare_occ.R
+  kind: step
+  phase: "03"
+  track: occ
+  rollout: core
+  runs: local+slurm
+  after: [01_preprocess_outbreaks.R, 01_preprocess_national_zero_months.R, 02_preprocess_climate.R, 02c_preprocess_population_compile.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/outbreaks_survival_data_base-<baseline>.rds"
+    - "generated_data/matched_ob_gids_seasonality_occ.rds"
+    - "generated_data/outbreaks_survival_data_base-<baseline><variant>.lp_members.csv"
+    - "generated_data/outbreaks_survival_data_base-<baseline><variant>.{adm1_overlap,discarded_onsets,adm0_dropped,masked_rows}.csv"
+    - "generated_data/outbreaks_survival_data_base-<baseline><variant>.contagion_coverage.csv"
+  note: "Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at) unless --force. --national_zero_fill (gid_season only) reads 01_preprocess_national_zero_months.R's output and writes the _nz panel; with --national_zero_threshold N it reads the _t<N> months and writes the _nz<N> panel."
+
+- id: 03_prepare_siz.R
+  file: 03_prepare_siz.R
+  kind: step
+  phase: "03"
+  track: siz
+  rollout: core
+  runs: local+slurm
+  after: [01_preprocess_outbreaks.R, 02_preprocess_climate.R, 02c_preprocess_population_compile.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/outbreak_size_analysis_data*.rds"
+    - "generated_data/outbreak_footprint_members*.rds"
+    - "generated_data/matched_ob_gids_seasonality_siz.rds"
+  note: "Refuses to overwrite an existing size frame or footprint map whose prep stamp differs (any field but stamped_at) or that has none, unless --force (the matched_ob_gids_seasonality_siz.rds cache is written before the guard)."
+
+- id: 03_prepare_dur.R
+  file: 03_prepare_dur.R
+  kind: step
+  phase: "03"
+  track: dur
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_siz.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/outbreaks_duration_data_base-<baseline>*.rds"
+  note: "Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at / restamped_at) or that has none, unless --force."
+
+- id: 03_prepare_mon.R
+  file: 03_prepare_mon.R
+  kind: step
+  phase: "03"
+  track: mon
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_dur.R, 01b_preprocess_outbreaks_monthly.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/outbreaks_monthly_data_base-<baseline>*.rds"
+  note: "Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at) or that has none, unless --force."
+
+- id: 03_prepare_sim_panel.R
+  file: 03_prepare_sim_panel.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_occ.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/sim_climate_panel_base-<baseline>.rds"
+  note: "Continuous per-(gid, month) historical panel (smoothing, hindcast, v1). Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at) or that has none, unless --force; ENSO values are not in the stamp (back up and diff)."
+
+- id: 03_prepare_who_monthly.R
+  file: 03_prepare_who_monthly.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: core
+  runs: local+slurm
+  after: []
+  drivers: [stages/03_prepare.sh]
+  inputs:
+    - "data/who_annual_report_africa/who_dashboard_weekly_africa.rds"
+    - "data/who_annual_report_africa/who_sitrep_cumulative_africa.csv"
+  outputs:
+    - "generated_data/who_dashboard_monthly_africa.rds"
+    - "generated_data/who_dashboard_monthly_africa_meta.yml"
+  note: "WHO dashboard national weekly counts -> monthly (day overlap), gap-filled from the WHO multi-country update cumulative snapshots (unchanged cumulative = zero only for --zero_iso3); scored by the smoothing's `_who` measurement (simulator.filter.who_obs). Refuses to overwrite an existing table whose _meta.yml (less `written` and the input mtimes) or content differs, or that has no meta, unless --force."
+
+- id: 03_prepare_sim_panel_projection.R
+  file: 03_prepare_sim_panel_projection.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_occ.R]
+  drivers: [stages/03_prepare.sh]
+  inputs:
+    - "ONI cache + NOAA CPC CFSv2 ENSO forecast"
+  outputs:
+    - "generated_data/sim_climate_panel_projection_base-<baseline>.rds"
+  note: "Forecast-horizon panel past the climate DB's last month. Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at) or that has none, unless --force; ENSO values are not in the stamp (back up and diff)."
+
+- id: 03_prepare_sim_panel_extended.R
+  file: 03_prepare_sim_panel_extended.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_sim_panel.R, 03_prepare_sim_panel_projection.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/sim_climate_panel_base-<baseline>[_ep-gs]_to-YYYY-MM.rds"
+  note: "Historical panel + projection rows up to the latest observed ONI month: the smoothing panel when the smoothing runs to the ENSO seam. Refuses to overwrite an existing panel whose prep stamp differs (any field but stamped_at) or that has none, unless --force."
+
+- id: 03_prepare_lenssen_analogs.R
+  file: 03_prepare_lenssen_analogs.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: core
+  runs: local
+  after: []
+  inputs:
+    - "Lenssen et al. (2024) CMIP6 piControl Nino3.4, Zenodo 10045687"
+  outputs:
+    - "generated_data/lenssen_nino34_analogs.rds"
+    - "generated_data/lenssen_nino34_analogs_meta.yml"
+  note: "ENSO analog cache for the counterfactual forecast (enso.counterfactual.scenario: lenssen). --match legacy (default) = the original matcher on the Zenodo Rdas; --match library draws the pool from generated_data/enso_continuation_library.qs, which gen_forecast / gen_events also build in-process per run under deploy.enso_counterfactual.match: library."
+
+- id: 03_prepare_enso_cfsv2_calibration.R
+  file: 03_prepare_enso_cfsv2_calibration.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: optional
+  runs: local
+  after: []
+  inputs:
+    - "NMME CFSv2 hindcast Nino3.4 (IRIDL PENTAD_SAMPLES_FULL, archived NetCDF)"
+    - "CPC detrended ERSST and OISST Nino3.4 indices"
+  outputs:
+    - "generated_data/enso_cfsv2_calibration.rds"
+    - "generated_data/enso_cfsv2_calibration_meta.yml"
+  note: "CPC-style PDF + spread correction of the CFSv2 forecast (simulator.enso.cfsv2_calibration)."
+
+- id: 03_prepare_enso_continuation_library.R
+  file: 03_prepare_enso_continuation_library.R
+  kind: step
+  phase: "03"
+  track: sim
+  rollout: optional
+  runs: local
+  after: []
+  inputs:
+    - "Lenssen et al. (2024) CMIP6 piControl Nino3.4 (data/lenssen/extracted/ or the Zenodo 10045687 zips)"
+    - "ONI cache (rescale sd; --validate: the observed seams)"
+  outputs:
+    - "generated_data/enso_continuation_library.qs"
+    - "generated_data/enso_continuation_library_meta.yml"
+    - "generated_data/enso_continuation_skill.csv (--validate)"
+    - "generated_data/enso_continuation_skill_meta.yml (--validate)"
+  note: "Seam-agnostic k-NN analog library for ENSO past the CFSv2 span (simulator.enso.continuation.method: analog; also read by 03_prepare_sim_panel_projection.R --enso_continuation analog). --validate (no build) scores the library as deployed (--deploy's enso_continuation over the defaults) on observed seams: fair CRPS / CRPSS vs climatology and neutral by lead (utils/enso_continuation_skill.R), read by 09 for each group's continuation CRPSS."
+
+- id: 03_prepare_rain_adm1.R
+  file: 03_prepare_rain_adm1.R
+  kind: step
+  phase: "03"
+  track: results
+  rollout: core
+  runs: local+slurm
+  after: [02_preprocess_climate.R]
+  drivers: [stages/03_prepare.sh]
+  outputs:
+    - "generated_data/adm1_monthly_precip.qs"
+    - "generated_data/adm1_monthly_precip_meta.yml"
+  note: "ADM1 x month rainfall reduced from climate_stats.sqlite (8.6 GB) for 09's rain_enso step (Figure 1c); built locally (copy the .qs to the cluster before 09 runs there) or on the cluster by stages/03_prepare.sh."
+
+# --- fit-batch configs (non-step tools) --------------------------------------
+- id: deploy:gen_batches
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: all
+  rollout: core
+  runs: local
+  after: []
+  outputs:
+    - "analysis/configs/<fits.*_dir>/*.yml + manifest.yml"
+    - "analysis/configs/<kl_sweep.batch>/*.yml + manifest.yml (when the deploy derives its grouping from a kl sweep)"
+  note: "--stage gen_batches: the deploy YAML's fit-batch dirs (and kl class sweep dir), from make_batch_configs.R's BATCH_REGISTRY. A sweep rollout runs it twice: the sweep dir first (the fit dirs are 'deferred' while their grouping registry is absent), then the fit dirs after deploy:gen_grouping (run_pipeline.sh phases `classes` and `fits`). A fit batch grouped by another registry than deploy.grouping is refused."
+
+- id: utils/make_batch_configs.R
+  file: utils/make_batch_configs.R
+  kind: tool
+  phase: "--"
+  track: all
+  rollout: optional
+  runs: local
+  after: []
+  outputs:
+    - "analysis/configs/<batch>/*.yml + manifest.yml"
+  note: "Any registered batch outside a deploy (benchmarks, sensitivity)."
+
+# --- 04 fit ------------------------------------------------------------------
+- id: 04_fit_run.R
+  file: 04_fit_run.R
+  kind: step
+  phase: "04"
+  track: all
+  rollout: core
+  runs: local+slurm
+  after: [deploy:gen_batches, utils/make_batch_configs.R]
+  drivers: [stages/04_fit.sh, campaigns/enso_grouped_singlelag.sh, campaigns/dur_enso_grouped_singlelag.sh, campaigns/mon_enso_grouped_singlelag.sh]
+  outputs:
+    - "(routes to 04_fit_<track>_<backend>.R from the config's <track>.backend)"
+  note: "Dispatcher; slurm/submit_fit.sh runs it, then 05_fit_postprocess.R."
+
+- id: 04_fit_occ_brms_cb.R
+  file: 04_fit_occ_brms_cb.R
+  kind: step
+  phase: "04"
+  track: occ
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_occ.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ occurrence fit + cb_meta (makeRunFile)"
+
+- id: 04_fit_occ_brms_kl.R
+  file: 04_fit_occ_brms_kl.R
+  kind: step
+  phase: "04"
+  track: occ
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_occ.R]
+  dispatched_by: 04_fit_run.R
+  drivers: [stages/04_fit_kl.sh]
+  outputs:
+    - "generated_data/ occurrence fit + kl_meta + kl_summary (+ kl_resp, kl_comembership, kl_partition for latent classes; kl_pin_plan, kl_pin + per-order _arrNN fits under kernel.pin) (makeRunFile)"
+  note: "ENSO lag kernel / latent country classes (utils/dlnm_kernel.R). A config batch (e.g. the class sweep kl_sweep_classes_prodtu_all, utils/make_batch_configs.R) on SLURM: stages/04_fit_kl.sh (array, -c 32 / 96G; --postprocess chains 05_fit_postprocess_kl_sweep.R; --deploy reads the batch from deploy.kl_sweep.batch and the comparison's chain selection from kl_sweep.n_agree / mode_tol)."
+
+- id: 04_fit_siz_brms_cb.R
+  file: 04_fit_siz_brms_cb.R
+  kind: step
+  phase: "04"
+  track: siz
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_siz.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ size fit + cb_meta (makeSizeRunFile)"
+
+- id: 04_fit_dur_brms_cb.R
+  file: 04_fit_dur_brms_cb.R
+  kind: step
+  phase: "04"
+  track: dur
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_dur.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ duration fit + cb_meta (makeDurationRunFile)"
+
+- id: 04_fit_mon_brms_cb.R
+  file: 04_fit_mon_brms_cb.R
+  kind: step
+  phase: "04"
+  track: mon
+  rollout: core
+  runs: local+slurm
+  after: [03_prepare_mon.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ monthly fit + cb_meta"
+
+- id: 04_fit_occ_brms.R
+  file: 04_fit_occ_brms.R
+  kind: step
+  phase: "04"
+  track: occ
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_occ.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/outbreaks_survival_poisson_fit_*.rds"
+
+- id: 04_fit_siz_brms.R
+  file: 04_fit_siz_brms.R
+  kind: step
+  phase: "04"
+  track: siz
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_siz.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ size fit (makeSizeRunFile)"
+
+- id: 04_fit_dur_brms.R
+  file: 04_fit_dur_brms.R
+  kind: step
+  phase: "04"
+  track: dur
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_dur.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ duration fit (makeDurationRunFile)"
+
+- id: 04_fit_mon_brms.R
+  file: 04_fit_mon_brms.R
+  kind: step
+  phase: "04"
+  track: mon
+  rollout: optional
+  runs: local+slurm
+  after: [03_prepare_mon.R]
+  dispatched_by: 04_fit_run.R
+  outputs:
+    - "generated_data/ monthly fit"
+
+# --- 05 postprocess ----------------------------------------------------------
+- id: 05_fit_postprocess.R
+  file: 05_fit_postprocess.R
+  kind: step
+  phase: "05"
+  track: all
+  rollout: core
+  runs: local+slurm
+  after: [04_fit_run.R]
+  drivers: [stages/04_fit.sh]
+  outputs:
+    - "generated_data/ RE stats, coef summaries, LOO, pp_check (make*RunFile)"
+  note: "Runs in the same SLURM job as the fit (slurm/submit_fit.sh)."
+
+- id: 05_fit_postprocess_cb.R
+  file: 05_fit_postprocess_cb.R
+  kind: step
+  phase: "05"
+  track: all
+  rollout: core
+  runs: local+slurm
+  after: [04_fit_occ_brms_cb.R, 04_fit_siz_brms_cb.R]
+  drivers: [stages/05_postprocess_cb.sh, campaigns/postfit.sh, tools/run_batch_cb_local.sh]
+  outputs:
+    - "generated_data/ crossbasis exposure-/lag-response surfaces"
+
+- id: 05_fit_postprocess_loo_lags.R
+  file: 05_fit_postprocess_loo_lags.R
+  kind: step
+  phase: "05"
+  track: all
+  rollout: core
+  runs: local+slurm
+  after: [04_fit_occ_brms_cb.R, 04_fit_siz_brms_cb.R, 04_fit_dur_brms_cb.R, 04_fit_mon_brms_cb.R]
+  drivers: [stages/05_loo_compare.sh, campaigns/postfit.sh]
+  outputs:
+    - "generated_data/loo_compare/<batch>/loo_compare_lags_<group>_<YYYYMMDD>.rds (+ png; ranking with per-lag Pareto-k columns)"
+    - "generated_data/loo_compare/<batch>/lag_loo_sidecar_<group>_<YYYYMMDD>.rds (opt-in --lag_sidecar: pointwise elpd, Pareto-k, per-lag crossbasis draws)"
+  note: "Lag ranking per ENSO group; --sidecar_only writes only the sidecar (ranking untouched)."
+
+- id: 05_fit_postprocess_lag_compare_surface.R
+  file: 05_fit_postprocess_lag_compare_surface.R
+  kind: step
+  phase: "05"
+  track: all
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_loo_lags.R]
+  outputs:
+    - "generated_data/ best-lag exposure-response surface + Nina/Nino contrasts"
+
+- id: 05_fit_postprocess_dependence.R
+  file: 05_fit_postprocess_dependence.R
+  kind: step
+  phase: "05"
+  track: all
+  rollout: optional
+  runs: local
+  after: [04_fit_siz_brms_cb.R, 04_fit_dur_brms_cb.R]
+  outputs:
+    - "generated_data/ size-duration Kendall tau + joint/independent decision"
+  note: "One-off decision for the simulator's size/duration sampling."
+
+- id: 05_fit_postprocess_kl_sweep.R
+  file: 05_fit_postprocess_kl_sweep.R
+  kind: step
+  phase: "05"
+  track: occ
+  rollout: optional
+  runs: local+slurm
+  after: [utils/make_batch_configs.R, 04_fit_occ_brms_kl.R]
+  drivers: [stages/04_fit_kl.sh]
+  inputs:
+    - "analysis/configs/<sweep batch>/*.yml and the brms_kl fits they name"
+  outputs:
+    - "generated_data/kl_sweep_compare/<batch>/{fits,classes,partition,loo,loo_country,diagnostics,diagnostics_chains,responsibilities,country_mixture,stability}.csv + loo.rds"
+  note: "brms_kl class-sweep comparison: chain modes, agreeing chains, R-hat / ESS, country-block LOO + stacking weights, MAP partitions, membership uncertainty (responsibility matrix, M1 country mixture, partition stability). Read by 06_fit_figures_kl_sweep.R, deploy:gen_grouping and 09 report_kl_sweep (results.kl_sweep_dir)."
+
+- id: deploy:gen_grouping
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: occ
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_kl_sweep.R]
+  inputs:
+    - "generated_data/kl_sweep_compare/<kl_sweep.batch>/{fits.csv,partition.csv,loo.rds} + the fit of the pinned cell (+ diagnostics_chains.csv for the convergence report)"
+  outputs:
+    - "analysis/groupings/<deploy.grouping>.csv + .yml (provenance header: deploy, batch, cell, chains, fit sha256)"
+    - "generated_data/kl_groupings/<deploy.grouping>_membership.csv"
+  note: "--stage gen_grouping (deploy.kl_sweep.batch set): the fit registry from the pinned cell deploy.kl_sweep.cell, each country in its class of maximum mean posterior probability (utils/kl_grouping.R, the make_kl_grouping.R body). The cell is never chosen automatically; its chains are the comparison's agreeing chains (kl_sweep.chains: agree; the comparison must have been run with the deploy's kl_sweep.n_agree / mode_tol: dominant mode, or the N best-agreeing chains) or a fixed list; deploy.fits.groups must name exactly the derived groups. Under deploy.convergence.action warn | refuse it prints the cell's all-chain and agreeing-chain diagnostics (kl_grouping.R::kl_grouping_convergence()) and, under refuse, refuses when fewer than 2 chains agree or the agreeing-chain R-hat exceeds 1.05 (warns beyond 1.01 / 400). Absent -> written, identical -> left, different -> refused unless --force. Consumed by deploy:gen_batches (the fit dirs) and every later deploy stage; first step of the `fits` phase of tools/run_pipeline.sh, after the `classes` phase (04_fit_kl.sh --deploy --postprocess)."
+
+# --- 06 fit figures ----------------------------------------------------------
+- id: 06_fit_figures_lag_compare.R
+  file: 06_fit_figures_lag_compare.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: core
+  runs: local+slurm
+  after: [05_fit_postprocess_loo_lags.R, 05_fit_postprocess_cb.R]
+  drivers: [stages/06_fit_figures_lag_compare.sh, campaigns/postfit.sh]
+  outputs:
+    - "figures/ cross-lag comparison figures"
+
+- id: 06_fit_figures.R
+  file: 06_fit_figures.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess.R]
+  outputs:
+    - "figures/ per-config fit figures (makeFigureDir)"
+
+- id: 06_fit_figures_cb.R
+  file: 06_fit_figures_cb.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_cb.R]
+  drivers: [tools/run_batch_cb_local.sh]
+  outputs:
+    - "figures/cb/<cfg-stem>/"
+
+- id: 06_fit_figures_cb_adm1.R
+  file: 06_fit_figures_cb_adm1.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [04_fit_occ_brms_cb.R, 04_fit_siz_brms_cb.R]
+  outputs:
+    - "figures/cb/ per-ADM1 crossbasis figures"
+
+- id: 06_fit_figures_cb_country.R
+  file: 06_fit_figures_cb_country.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [04_fit_occ_brms_cb.R, 04_fit_siz_brms_cb.R]
+  outputs:
+    - "figures/cb/ per-country crossbasis figures"
+
+- id: 06_fit_figures_cb_grouped.R
+  file: 06_fit_figures_cb_grouped.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_loo_lags.R]
+  outputs:
+    - "figures/cb/<cfg-stem>/grouped/"
+
+- id: 06_fit_figures_cb_grouped_composite.R
+  file: 06_fit_figures_cb_grouped_composite.R
+  kind: step
+  phase: "06"
+  track: all
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_loo_lags.R]
+  outputs:
+    - "figures/cb/<batch-dir-name>/composite/"
+
+- id: 06_fit_figures_kl_sweep.R
+  file: 06_fit_figures_kl_sweep.R
+  kind: step
+  phase: "06"
+  track: occ
+  rollout: optional
+  runs: local
+  after: [05_fit_postprocess_kl_sweep.R]
+  outputs:
+    - "figures/kl/<batch>/kl_sweep_*.png (+ per_fit/<config>/ with --per_fit)"
+  note: "Figures of the class sweep from the 05 tables; --per_fit adds per-fit panels (traces, class centres, membership maps)."
+
+# --- deploy: best-lag fits + smoothing check (non-step tool) -----------------
+- id: deploy:deploy_fits
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: all
+  rollout: core
+  runs: local
+  after: [05_fit_postprocess_loo_lags.R]
+  drivers: []
+  outputs:
+    - "generated_data/enso_best_lag_fits/ (canonically named best-lag fits + MANIFEST + CONVERGENCE.csv when the gate is on)"
+  note: "--stage deploy_fits (first part of --stage all). Convergence gate (deploy.convergence; absent = off): every source fit through diagnostics.R::fit_diagnostics_gate() (scope population: R-hat <= 1.01 and bulk / tail ESS >= 400 on all but r_/z_/zs_, R-hat <= 1.05 on every parameter, max_divergent, E-BFMI >= 0.3) BEFORE the prune; warn | refuse, allow-listed <track>:<group> ids pass as allowed; --dry-run prints the verdicts and never stops."
+
+- id: deploy:gen_templates
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: core
+  runs: local
+  after: [deploy:deploy_fits]
+  outputs:
+    - "analysis/configs/<run_tags.{historical,forecast,counterfactual}>/<run_tag>.yml (spatPomp templates: analysis/configs/sim_templates/<arm>.yml + deploy sim: overlay)"
+  note: "--stage gen_templates (second part of --stage all); refuses to overwrite a template that differs unless --force."
+
+- id: deploy:smoothing
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: core
+  runs: local
+  after: [deploy:gen_templates]
+  outputs:
+    - "(prints the stages/08_smoothing.sh submit command for the historical template)"
+  note: "--stage smoothing (third part of --stage all); writes nothing."
+
+# --- 08 smoothing (runs BEFORE 07b on the spatPomp path) ---------------------
+- id: 08a_smoothing_tasks.R
+  file: 08a_smoothing_tasks.R
+  kind: step
+  phase: "08"
+  track: sim
+  rollout: core
+  runs: local
+  after: [deploy:smoothing, 03_prepare_sim_panel.R, 03_prepare_who_monthly.R]
+  drivers: [stages/08_smoothing.sh]
+  outputs:
+    - "generated_data/sim_spatpomp/<run_tag>/tasks/task_NNNN.yml"
+    - "generated_data/sim_spatpomp/<run_tag>/who_scale.csv + who_scale_meta.yml (who_obs.scale_mode: estimated only)"
+
+- id: 08b_smoothing_spatpomp.R
+  file: 08b_smoothing_spatpomp.R
+  kind: step
+  phase: "08"
+  track: sim
+  rollout: core
+  runs: slurm
+  after: [08a_smoothing_tasks.R]
+  drivers: [stages/08_smoothing.sh]
+  outputs:
+    - "generated_data/sim_spatpomp/<run_tag>/parts/ (one .qs + _SUCCESS per (TU, chunk))"
+
+- id: 08c_smoothing_compile.R
+  file: 08c_smoothing_compile.R
+  kind: step
+  phase: "08"
+  track: sim
+  rollout: core
+  runs: slurm
+  after: [08b_smoothing_spatpomp.R]
+  drivers: [stages/08_smoothing.sh]
+  outputs:
+    - "generated_data/sim_spatpomp/<run_tag>/cache/hist_filter_tu=<TU>_*.qs (forecast handoff cache)"
+    - "generated_data/sim_spatpomp/<run_tag>/merged/ (ribbons)"
+
+# --- deploy: forecast / hindcast configs (non-step tool) ---------------------
+- id: deploy:gen_forecast
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: core
+  runs: local
+  after: [08c_smoothing_compile.R, deploy:deploy_fits]
+  drivers: []
+  outputs:
+    - "analysis/configs/forecast_country_by_group*/ + counterfactual configs"
+    - "analysis/configs/forecast_horizons.yml"
+    - "per-run Lenssen counterfactual cache (simulator.enso.counterfactual.cache_path) when deploy.enso_counterfactual.match: library"
+  note: "--stage gen_forecast, via utils/make_forecast_configs.R; prints the submit command. Library-mode counterfactual analogs: builds / verifies the per-run cache in-process and records its digest in the manifest (enso_counterfactual)."
+
+- id: deploy:gen_attrib
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: core
+  runs: local
+  after: [deploy:gen_forecast]
+  drivers: [tools/run_pipeline.sh]
+  outputs:
+    - "analysis/configs/forecast_country_by_group*/forecast_<unit>_attrib.yml (factual launched at the counterfactual handoff)"
+    - "analysis/configs/forecast_attribution_run*.yml (attribution manifest, results.inputs.attrib_manifest)"
+  note: "--stage gen_attrib (deploy.outputs.forecast_attrib_manifest; no-op when unset), via utils/make_forecast_attrib_configs.R; prints the stages/07_forecast_groups.sh --arm attrib submit. run_pipeline.sh runs it in its sim phase, or alone with --from attrib."
+
+- id: deploy:gen_hindcast
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: core
+  runs: local
+  after: [08c_smoothing_compile.R, deploy:deploy_fits]
+  outputs:
+    - "analysis/configs/hindcast_by_group*/ + analysis/configs/hindcast_horizons.yml"
+  note: "--stage gen_hindcast, via utils/make_hindcast_configs.R; --align-results also runs deploy:align_results."
+
+- id: deploy:gen_events
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: sim
+  rollout: optional
+  runs: local
+  after: [08c_smoothing_compile.R, deploy:deploy_fits]
+  drivers: [tools/run_pipeline.sh]
+  inputs:
+    - "analysis/configs/enso_events_v2.yml (past-ENSO-event registry, with the one-event La Nina 2020-23 in per-winter sub-windows; deploy.event_attribution.registry)"
+  outputs:
+    - "analysis/configs/event_attribution_run*/ (factual + counterfactual per event x unit)"
+    - "analysis/configs/event_attribution_horizons_run*.yml (schema 3 with events.<id>.sub_windows when an event has them)"
+  note: "--stage gen_events (deploy.event_attribution), via utils/make_event_attribution_configs.R; prints the per-event 03_prepare_lenssen_analogs.R builds and the stages/07_event_attribution.sh submit. run_pipeline.sh runs it in its sim phase when deploy.event_attribution.events is set (after gen_hindcast), preflights 07_event_attribution.sh --list and submits the event arrays with the forecast / hindcast ones; results waits on them (--event-replicates N -> --n_replicates N, else each config's simulator.n_replicates)."
+
+- id: deploy:align_results
+  file: utils/deploy_prod_run.R
+  kind: tool
+  phase: "--"
+  track: results
+  rollout: core
+  runs: local
+  after: [deploy:gen_forecast, deploy:gen_attrib, deploy:gen_hindcast]
+  outputs:
+    - "analysis/configs/results/manuscript.yml (or the --results-config file): deploy_config + the deploy-derived inputs.* leaves (text edit, comments kept)"
+  note: "--stage align_results (or --align-results on gen_forecast / gen_hindcast); re-read + all-match verified; --dry-run prints the line diff and comments still naming another run. --results-config (also on tools/run_pipeline.sh) aligns another results config than manuscript.yml (a run reviewed before the headline moves to it)."
+
+# --- 07 simulator ------------------------------------------------------------
+- id: 07b_simulator_spatpomp.R
+  file: 07b_simulator_spatpomp.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: core
+  runs: slurm
+  after: [deploy:gen_forecast, deploy:gen_attrib, deploy:gen_hindcast, deploy:gen_events, 08c_smoothing_compile.R, 03_prepare_sim_panel_projection.R, 03_prepare_lenssen_analogs.R, 03_prepare_enso_cfsv2_calibration.R, 03_prepare_enso_continuation_library.R]
+  drivers: [stages/07_forecast_groups.sh, stages/07_hindcast.sh, stages/07_event_attribution.sh]
+  outputs:
+    - "generated_data/sim_spatpomp/<run_tag>/ partitions"
+  note: "Forecast, attribution-factual (stages/07_forecast_groups.sh --arm attrib|all), counterfactual and hindcast arrays; SLURM calls it directly (07_simulator_run.R is the local entry)."
+
+- id: 07c_simulator_postprocess.R
+  file: 07c_simulator_postprocess.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: core
+  runs: local+slurm
+  after: [07b_simulator_spatpomp.R]
+  drivers: [stages/07_forecast_groups.sh, stages/07_hindcast.sh]
+  outputs:
+    - "<sim outdir>/<run_tag>/ aggregates + validation/metrics.rds"
+
+- id: 07d_simulator_figures.R
+  file: 07d_simulator_figures.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: core
+  runs: local+slurm
+  after: [07c_simulator_postprocess.R]
+  drivers: [stages/07_forecast_groups.sh, stages/07_hindcast.sh]
+  outputs:
+    - "figures/sim/<run_tag>/ diagnostic figures"
+
+- id: 07d_simulator_figures_counterfactual.R
+  file: 07d_simulator_figures_counterfactual.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: core
+  runs: local
+  after: [07c_simulator_postprocess.R]
+  drivers: []
+  outputs:
+    - "figures/sim/<manifest-stem>/counterfactual/"
+
+- id: 07_simulator_run.R
+  file: 07_simulator_run.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: optional
+  runs: local
+  after: [03_prepare_sim_panel.R]
+  outputs:
+    - "(routes to 07b_simulator_<backend>.R from simulator.backend)"
+  note: "Dispatcher; local entry point for both simulator backends."
+
+- id: 07a_simulator_tasks.R
+  file: 07a_simulator_tasks.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: optional
+  runs: local
+  after: [03_prepare_sim_panel.R]
+  drivers: []
+  outputs:
+    - "generated_data/sim/<run_tag>/tasks/task_NNNN.yml"
+  note: "v1 path only; independent of 08."
+
+- id: 07b_simulator_v1.R
+  file: 07b_simulator_v1.R
+  kind: step
+  phase: "07"
+  track: sim
+  rollout: optional
+  runs: local+slurm
+  after: [07a_simulator_tasks.R, 03_prepare_sim_panel.R]
+  dispatched_by: 07_simulator_run.R
+  drivers: []
+  outputs:
+    - "generated_data/sim/<run_tag>/ partitions"
+  note: "Pure-R historical replay; not part of the spatPomp rollout."
+
+# --- 09-11 manuscript --------------------------------------------------------
+- id: 09a_postprocess_results_tasks.R
+  file: 09a_postprocess_results_tasks.R
+  kind: step
+  phase: "09"
+  track: results
+  rollout: core
+  runs: local+slurm
+  after: [07b_simulator_spatpomp.R, 07c_simulator_postprocess.R, 08b_smoothing_spatpomp.R, deploy:deploy_fits, deploy:gen_hindcast, deploy:align_results, 05_fit_postprocess_loo_lags.R, 05_fit_postprocess_kl_sweep.R, 03_prepare_rain_adm1.R]
+  drivers: [stages/09_postprocess_results.sh]
+  outputs:
+    - "generated_data/results/<config stem>/tasks/<submission>/task_NNNN.yml (one per results step, with its dependency wave; one folder per submission)"
+  note: "Builds the results context and writes one task per step of the registry in utils/results_derive.R; derives nothing."
+
+- id: 09b_postprocess_results.R
+  file: 09b_postprocess_results.R
+  kind: step
+  phase: "09"
+  track: results
+  rollout: core
+  runs: local+slurm
+  after: [09a_postprocess_results_tasks.R]
+  drivers: [stages/09_postprocess_results.sh]
+  outputs:
+    - "generated_data/results/manuscript/*.qs (stamped with the results: config)"
+    - "generated_data/results/manuscript/{hindcast_runs,hindcast_occ,hindcast_cases,report_hindcast}_v1.qs (hindcast skill)"
+    - "generated_data/results/manuscript/{convergence_v1_track-<track>,report_convergence,report_lags,report_anchor,report_software,report_kl_sweep}_v1.qs (supplementary tables)"
+    - "generated_data/results/manuscript/{group_labels_v1,lag_averaging_v1_track-<track>,report_membership_v1}.qs (group display lags + S30 season ends; lag averaging from the 05 lag sidecars; membership uncertainty from the 05 kl-sweep comparison)"
+  note: "Run alone for a full serial derivation (no 09a needed), or per step (--steps / --task) as wave-chained arrays by the stage driver. Hindcast skill reads each manifest run's 07c --hindcast validation/metrics + merged summary."
+
+- id: 10_manuscript_figures.R
+  file: 10_manuscript_figures.R
+  kind: step
+  phase: "10"
+  track: results
+  rollout: core
+  runs: local
+  after: [09b_postprocess_results.R]
+  drivers: [stages/10_manuscript_figures.sh]
+  outputs:
+    - "figures/manuscript/"
+    - "figures/manuscript/hindcast/ (figure H)"
+    - "figures/manuscript/supplementary/figS5_convergence, figS6_lag_loo (--figures S5,S6)"
+    - "figures/manuscript/supplementary/figS_forecast_country_{cases,onsets}, figS_smoothing_country_{cases,onsets} (--figures FC,SC)"
+  note: "Plots only; refuses stale or decision-mismatched artefacts."
+
+- id: 10_manuscript_figures_legacy.R
+  file: 10_manuscript_figures_legacy.R
+  kind: step
+  phase: "10"
+  track: results
+  rollout: optional
+  runs: local
+  after: [09b_postprocess_results.R]
+  drivers: []
+  outputs:
+    - "figures/manuscript_legacy/ (or $LEGACY_FIGURES_OUT_DIR; never figures/manuscript/)"
+  note: "Frozen copy of 10 (side-by-side rule): the earlier figure versions. Same inputs and CLI as 10; display only."
+
+- id: 11_manuscript_numbers.qmd
+  file: 11_manuscript_numbers.qmd
+  kind: report
+  phase: "11"
+  track: results
+  rollout: core
+  runs: local
+  after: [09b_postprocess_results.R]
+  drivers: [stages/10_manuscript_figures.sh]
+  outputs:
+    - "analysis/11_manuscript_numbers.html"
+    - "figures/manuscript/tables/<NN>_<slug>.csv (one per table; results.style.tables_dir)"
+  note: "quarto render analysis/11_manuscript_numbers.qmd; display only."
+

@@ -1,0 +1,3 @@
+outdir: "generated_data"
+population:
+  raster_dir: "data/worldpop/"

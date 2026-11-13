@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# analysis/configs/sim_templates/counterfactual.yml -- RUN-AGNOSTIC SKELETON
+# ---------------------------------------------------------------------------
+# ENSO-counterfactual arm of a prod_run<N> rollout: identical to the factual
+# forecast arm EXCEPT the ENSO trajectory over the horizon, which is drawn from
+# the Lenssen et al. analog pool instead of the CFSv2 forecast, so the paired
+# contrast isolates the ENSO effect.
+#
+# This is NOT a runnable config. `deploy_prod_run.R --stage gen_templates` builds
+# the run's counterfactual TEMPLATE as
+#     this skeleton  +  deploy `sim.shared`  +  deploy `sim.counterfactual`  +  derived leaves
+# and writes it to analysis/configs/<run_tags.counterfactual>/<run_tags.counterfactual>.yml;
+# `--stage gen_forecast` then emits one config per (ENSO group x analog set),
+# overwriting enso.counterfactual.analog_set and the per-group leaves listed in
+# forecast.yml.
+#
+# Leaves this skeleton deliberately leaves out: as forecast.yml (run_tag,
+# run_id, grouping.{source,fits_dir}, nbr_contagion.{enable,rho_km},
+# episodes.key and filter.smoothing_input derived; filter.measurement required
+# from the overlay).
+
+baseline: "1990_2019"
+seed:     20261002
+
+simulator:
+  backend: spatpomp        # routes 07_simulator_run.R dispatcher to 07b_simulator_spatpomp.R
+
+  grouping:
+    enable:          true
+    duration_enable: true
+    monthly_enable:  true
+
+  climate_panel:  generated_data/sim_climate_panel_projection_base-1990_2019.rds
+
+  location_frame:
+    hmm_clusters_path:      data/hmm_country_clusters.csv
+    outbreak_metadata_path: generated_data/outbreak_metadata.rds
+    size_data_path:         generated_data/outbreak_size_analysis_data.rds
+    # base_rate_table_paths injected per group by gen_forecast from the
+    # deployed fits' own training opts (only for anchored fits).
+
+  # Distance-weighted neighbour-contagion kernel term (enable / rho_km derived;
+  # the counterfactual arm must score the same kernel as the factual arm).
+  nbr_contagion:
+    gadm_path: "data/geodata/gadm_valid.gpkg"
+    cache_dir: "generated_data/"
+
+  horizon: { start: "2026-06-01", end: "2027-03-01" }   # .end patched per group
+
+  n_replicates: 1000
+  draws_per_replicate: 1
+  max_draws: 200
+  posterior_strategy: paired
+  seed: 20261002
+
+  enso:
+    source:    oni
+    cache_dir: generated_data/
+    counterfactual:
+      scenario:      lenssen
+      cache_path:    generated_data/lenssen_nino34_analogs.rds
+      lenssen_horizon_start: "2026-05-01"   # pinned; must equal the cache's meta$horizon_start
+      mean_offset:     0.0     # optional mean shift of the analog Nino 3.4
+      log_var_scaling: 0.0     # optional variance rescale (log-space)
+      # all / nina / neutral / elnino; OVERWRITTEN per generated config by
+      # gen_forecast's analog_sets loop.
+      analog_set:      all
+
+  filter:
+    enable:            true
+    Np:                10000
+    rerun_filter:      false
+    partition_by:      country     # overwritten per generated config from deploy.partition_by
+    block_granularity: adm1
+    forecast_window:
+      start: "2026-06-01"   # = horizon.start = handoff_month when set (sim_io.R::assert_arm_launch()); set per run in deploy sim.<arm>
+      end:   "2027-03-01"   # patched per group by gen_forecast (= horizon.end)
+    delta_fn: 0.10
+    delta_fp: 0.001
+    n_draws_in_filter: 1
+    forecast_engine:   kernel_09a
+
+  scope:
+    transmission_units: all
+    countries:          all    # patched per group by gen_forecast
+    admin_level:        ADM2
+    unseen_adm1:        restrict
+
+  scenario:
+    climate: factual     # climate held factual; only ENSO is counterfactual
+
+  output:
+    format:               qs
+    aggregate:            adm2_month
+    keep_event_table:     true
+    keep_monthly_summary: true
+
+  parallel:
+    backend: furrr
+    over:    transmission_unit
+    chunk_size: 5
+    workers: 1

@@ -1,0 +1,215 @@
+# ---------------------------------------------------------------------------
+# synth_run1 deployment -- the prod_run pipeline on the SYNTHETIC world
+# ---------------------------------------------------------------------------
+# A small fake world (analysis/00_ingest_synthetic.R; four fake countries in
+# two ENSO groups, analysis/groupings/synthetic_countries.csv) run through every
+# step of the deployed analysis on a laptop, no restricted data, no cluster:
+#   bash analysis/bash/tools/run_synthetic_pipeline.sh --sandbox synthetic_world
+#
+# Same decisions as prod_run, including the seasonal cessation term on
+# duration (model terms, priors, episode rule, smoothing,
+# forecast / counterfactual / hindcast design), scaled down:
+#   * fits: batches synth_run1_{occ,dur,mon}_grouped_enso_singlelag
+#     (make_batch_configs.R::.derive_synth_run1()): lags -5, -3, -1, 1 around
+#     the simulated truth (group A -3, group B -1), 2 chains x (150 + 150);
+#   * fit grouping enso_grouping_synth, contagion partition hmm_clusters_synth;
+#     no kl class sweep (the grouping is given);
+#   * smoothing / forecast / counterfactual: few particles and replicates;
+#   * hindcast: three launch years, season windows from 10 onsets;
+#   * CFSv2: the sd correction (no hindcast calibration file), the synthetic
+#     C3S plume; ENSO continuation and counterfactual from the synthetic
+#     piControl library (03_prepare_enso_continuation_library.R);
+#   * past ENSO event attribution on the synthetic ONI's events
+#     (configs/enso_events_synth.yml), 200 replicates.
+# Never run --stage all or gen_grouping on it (the grouping is not derived).
+#
+# The run tag is derived from this filename -> generated_data/deploy/synth_run1/.
+deploy:
+  version: 1
+
+  fits:
+    occ_dir: "synth_run1_occ_grouped_enso_singlelag"
+    dur_dir: "synth_run1_dur_grouped_enso_singlelag"
+    mon_dir: "synth_run1_mon_grouped_enso_singlelag"
+    dest:    "generated_data/enso_best_lag_fits_ep-gs_nz60-r3_ae_a1c_synth_run1"
+    groups:  ["a", "b"]
+
+  lag_selection:
+    rule: best_elpd
+    se_mult: 2
+    min_lag: -5
+    occ_floor_offset: 4
+
+  contagion:
+    rho_km: 500
+    scale:  "rownorm"
+    partition: "registry"
+    partition_source: ""
+
+  nbr_contagion:
+    enable: true
+    rho_km: 500
+
+  episodes:
+    key: gid_season
+    national_zero_fill: true
+    national_zero_threshold: 60
+    national_zero_rule: "r3"
+    at_risk_start: after_episode
+    adm1_overlap: censor_orphan
+
+  templates:
+    historical:     "analysis/configs/sim_synth_run1_historical/sim_synth_run1_historical.yml"
+    forecast:       "analysis/configs/sim_synth_run1_forecast/sim_synth_run1_forecast.yml"
+    counterfactual: "analysis/configs/sim_synth_run1_counterfactual/sim_synth_run1_counterfactual.yml"
+  run_tags:
+    historical:     "sim_synth_run1_historical"
+    forecast:       "sim_synth_run1_forecast"
+    counterfactual: "sim_synth_run1_counterfactual"
+    hindcast:       "sim_synth_run1_hindcast"
+  outputs:
+    forecast_config_outdir: "analysis/configs/forecast_country_by_group_synth_run1"
+    forecast_manifest:      "analysis/configs/forecast_horizons_synth_run1.yml"
+    forecast_attrib_manifest: "analysis/configs/forecast_attribution_synth_run1.yml"
+    hindcast_config_outdir: "analysis/configs/hindcast_by_group_synth_run1"
+    hindcast_manifest:      "analysis/configs/hindcast_horizons_synth_run1.yml"
+  smoothing_input: "generated_data/sim_spatpomp/sim_synth_run1_historical/cache"
+
+  grouping:           "enso_grouping_synth"
+  kl_sweep:
+    batch:     ""
+    cell:      ""
+    chains:    "agree"
+    n_agree:   3
+    mode_tol:  1.5
+    fill_from: ""
+    meta_from: ""
+
+
+  analog_sets:        "all,nina,neutral,elnino"
+  primary_analog_set: "neutral"
+  partition_by:       "registry"
+  partition_source:   "hmm_clusters_synth"
+
+  enso_continuation:
+    method: analog
+    library: generated_data/enso_continuation_library.qs
+    k: 30
+    blend_months: 3
+    min_sep: 24
+    max_per_model: .inf
+    exclude_models: []
+    seam: last_full_oni
+
+  enso_counterfactual:
+    match: library
+    n_analogs: 20
+    min_sep_months: 12
+    blend_months: 3
+    winters: all_read
+    read_span: direct
+    other_winters: neutral
+    min_set_size: 5
+    seam_at: launch
+
+  convergence:
+    action: warn
+    scope: population
+    rhat_max: 1.05
+    ess_min: default
+    max_divergent: 0
+    allow: []
+
+  hindcast:
+    launch_month:        "05-01"
+    launch_years:        "2018:2020"
+    season_end:          "by_country_from_panel"
+    season_min_window_months: 6
+    season_end_by_group: "grp_a=11,grp_b=5"
+    horizon_months:      12
+    param_draw_mode:     ""
+    n_replicates:        0
+    add_best_lag:        true
+    climate_panel:       "generated_data/sim_climate_panel_base-1990_2019_ep-gs.rds"
+    season_window:
+      enable:             true
+      launch_floor_month: 5
+      trough_rule:        "onset_rate"
+      min_onsets:         10
+      min_stability:      0.8
+      trough_years:       "2010:2024"
+      smooth_months:      3
+      bootstrap:          50
+      seed:               1
+      survival_panel:     ""
+
+  event_attribution:
+    events:              "elnino_2015,lanina_2019"
+    registry:            "analysis/configs/enso_events_synth.yml"
+    analog_set:          "neutral"
+    lenssen_dir:         "generated_data/lenssen_events_synth_run1"
+    climate_panel:       "generated_data/sim_climate_panel_base-1990_2019_ep-gs_to-2026-08.rds"
+    season_end:          ""
+    season_end_by_group: "grp_a=11,grp_b=5"
+    run_tag_base:        "sim_synth_run1_event"
+    config_outdir:       "analysis/configs/event_attribution_synth_run1"
+    manifest:            "analysis/configs/event_attribution_horizons_synth_run1.yml"
+    param_draw_mode:     "cycle"
+    n_replicates:        200
+
+  sim:
+    shared:
+      simulator.filter.measurement:      occurrence_duration_mon_NB_state_detect_act
+      simulator.filter.covariate_feed:   detected
+      simulator.filter.monthly_case_obs: zero_filled
+      simulator.location_frame.size_data_path: generated_data/outbreak_size_analysis_data_ep-gs.rds
+      simulator.location_frame.pop_year: season_year
+    historical:
+      simulator.filter.partition_by: registry
+      simulator.filter.measurement: occurrence_duration_mon_NB_state_detect_act_who
+      simulator.filter.block_granularity: country
+      simulator.filter.who_obs.enable: true
+      simulator.filter.who_obs.path: generated_data/who_dashboard_monthly_africa.rds
+      simulator.filter.who_obs.start: "2023-01-01"
+      simulator.filter.who_obs.end: "2026-09-01"
+      simulator.filter.who_obs.phi: 5
+      simulator.filter.who_obs.mu_floor: 1
+      simulator.filter.who_obs.scale: 1
+      simulator.filter.who_obs.block_share: pop
+      simulator.filter.who_obs.scale_mode: estimated
+      simulator.filter.who_obs.scale_est.fallback: fixed
+      simulator.filter.who_obs.scale_est.shrink_cases: 0
+      simulator.filter.who_obs.db_overlap: skip_who
+      simulator.parallel.chunk_size: 1
+      simulator.n_replicates: 20
+      simulator.filter.Np: 2000
+      simulator.climate_panel: generated_data/sim_climate_panel_base-1990_2019_ep-gs_to-2026-08.rds
+      simulator.horizon.end: "2026-09-01"
+      simulator.filter.forecast_window.end: "2026-09-01"
+    forecast:
+      simulator.horizon.start: "2026-09-01"
+      simulator.filter.forecast_window.start: "2026-09-01"
+      simulator.filter.handoff_month: "2026-09-01"
+      simulator.enso.c3s_plume: data/precalc_plume_quantiles_ENSO_NINO34_synthetic.png
+      simulator.climate_panel: generated_data/sim_climate_panel_projection_base-1990_2019_ep-gs.rds
+      simulator.enso.cfsv2_sd_correction: true
+      simulator.enso.cfsv2_calibration: ""
+      simulator.enso.cfsv2_calibration_target: ersst
+      simulator.enso.clamp_to_knots: true
+      simulator.enso.clamp_margin: 0.25
+      simulator.forecast.param_draw_mode: cycle
+      simulator.forecast.handoff_weighting: shuffled
+      simulator.max_draws: 20
+      simulator.n_replicates: 100
+    counterfactual:
+      simulator.horizon.start: "2026-05-01"
+      simulator.filter.forecast_window.start: "2026-05-01"
+      simulator.filter.handoff_month: "2026-05-01"
+      simulator.climate_panel: generated_data/sim_climate_panel_projection_base-1990_2019_ep-gs.rds
+      simulator.enso.clamp_to_knots: true
+      simulator.enso.clamp_margin: 0.25
+      simulator.forecast.param_draw_mode: cycle
+      simulator.forecast.handoff_weighting: shuffled
+      simulator.max_draws: 20
+      simulator.n_replicates: 100
+      simulator.enso.counterfactual.cache_path: generated_data/lenssen_synth_run1/lenssen_nino34_analogs.rds

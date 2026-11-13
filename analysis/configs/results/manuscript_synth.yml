@@ -1,0 +1,507 @@
+# ---------------------------------------------------------------------------
+# Manuscript results of the SYNTHETIC world (deploy configs/deploy/synth_run1.yml)
+# ---------------------------------------------------------------------------
+# manuscript.yml's decision set on the synthetic run (fake countries,
+# analysis/00_ingest_synthetic.R), so 09 -> 10 -> 11 run end to end without the
+# restricted data:
+#
+#   Rscript analysis/utils/deploy_prod_run.R -C analysis/configs/deploy/synth_run1.yml \
+#     --stage align_results --results-config analysis/configs/results/manuscript_synth.yml
+#   Rscript analysis/09b_postprocess_results.R -C analysis/configs/results/manuscript_synth.yml
+#   Rscript analysis/10_manuscript_figures.R  -C analysis/configs/results/manuscript_synth.yml
+#   quarto render analysis/11_manuscript_numbers.qmd -P config_path:analysis/configs/results/manuscript_synth.yml
+#
+# Differences from manuscript.yml: the synth_run1 inputs, no kl class sweep, the
+# synthetic past-event manifest, the West-only WHO ratio on group A, and fewer IRR draws
+# and attribution replicates. Everything else is manuscript.yml's. Artefacts land
+# in generated_data/results/manuscript_synth/ (tag = this filename).
+
+results:
+
+  # --- Deploy coupling (optional) ----------------------------------------
+  # "" (default) => this config is fully self-contained: every inputs.* leaf
+  # below is the authoritative value, nothing is derived elsewhere. (Empty
+  # string, not null, is the "unset" sentinel -- the recursive config merge
+  # drops a null leaf, so null could not be restated here; see config.R.)
+  #
+  # When set to a deploy config path (e.g. analysis/configs/deploy/prod_run.yml),
+  # resolve_results_inputs_from_deploy() DERIVES the overlapping inputs.* leaves
+  # (manifest, grouping, sim_root, smoothing_parts_dir, lag_loo_batch,
+  # best_lag_dir, hindcast_manifest, episode_key) from that deploy block, with explicit-over-inherited
+  # precedence: any inputs.* key physically present below still wins. The deploy
+  # config's mtime also joins this config's freshness inputs, so a deploy change
+  # invalidates the 09 artefacts. Keeps 09/10 pointed at the deployed run
+  # (the deployed run overwrites the shared forecast/hindcast manifests;
+  # currently synth_run1).
+  deploy_config: "analysis/configs/deploy/synth_run1.yml"
+  # inputs.* leaves (manifest, grouping, sim_root, smoothing_parts_dir,
+  # lag_loo_batch, best_lag_dir, hindcast_manifest, episode_key) allowed to DIFFER from what deploy_config
+  # derives. Any other explicit leaf that disagrees is refused by 09/10
+  # (utils/deploy_core.R::resolve_results_inputs_from_deploy()), so a mixed-run
+  # results block is a stated decision, never a leftover. Empty: every input
+  # comes from the deployed run. Not a stamped block (a validation policy, not
+  # an output decision).
+  allow_overrides: []
+  # Forked worker processes for 09's per-group fit loads and per-run hindcast
+  # scoring (09b_postprocess_results.R --workers overrides). Artefacts are
+  # identical for any value; not a stamped block (speed and memory only).
+  workers: 1
+  # brms_kl class-sweep comparison (05_fit_postprocess_kl_sweep.R on the
+  # registered sweep batch) behind the grouping-model comparison table; "" =
+  # the report_kl_sweep step is off. Not a stamped block (only report_kl_sweep
+  # reads it; its files are that artefact's freshness inputs). Rewritten by
+  # deploy_prod_run.R --stage align_results when the deploy derives its
+  # grouping from a sweep (deploy.kl_sweep.batch); otherwise left as is.
+  kl_sweep_dir: ""
+  # The sweep cell the deployed grouping was derived from (deploy.kl_sweep.cell;
+  # rewritten by --stage align_results with kl_sweep_dir). With kl_sweep_dir it
+  # turns on report_membership: responsibilities, p_max,
+  # stability and sensitivity of the deployed classes, and the membership-
+  # weighted effects M1 (kl model) and M2 (deployed ERFs). 09 checks that this
+  # cell's agreeing-chain MAP partition is the deployed registry. Not stamped.
+  kl_sweep_cell: ""
+  # Past-ENSO-event attribution manifest (deploy_prod_run.R --stage gen_events,
+  # deploy.event_attribution.manifest) behind report_event_attrib; "" = that
+  # step is off. Not a stamped block (the manifest and its run configs are the
+  # artefact's freshness inputs). Rewritten by --stage align_results when the
+  # deploy sets event_attribution.events.
+  event_manifest: "analysis/configs/event_attribution_horizons_synth_run1.yml"
+  # Posterior interval of the attributable fraction / number (09 steps
+  # af_posterior, event_af_posterior). Needs fixed-draw runs (param_draw_mode
+  # cycle), as the deployed run's forecast and event runs are.
+  # Not a stamped block (it only selects those two steps).
+  af_posterior: true
+  # Replicates each (unit, posterior draw) needs after the explosive drop
+  # (default 20; the deployed run uses 200 draws x 25 replicates).
+  # Unstamped: a change re-derives a present artefact only with --redo_cache.
+  af_posterior_min_reps: 5
+
+  # --- Reported series ----------------------------------------------------
+  # "latent" = the simulated epidemic as modelled (pre-existing tables);
+  # "detected" = the series surveillance would have recorded, which is the one
+  # comparable with the observed record. "detected" needs runs simulated with
+  # simulator.filter.covariate_feed: detected.
+  series: "latent"
+
+  # --- Inputs -------------------------------------------------------------
+  # Read by 09 only. 10 has no path to a fit object or a particle filter.
+  inputs:
+    manifest:            "analysis/configs/forecast_horizons_synth_run1.yml"
+    attrib_manifest:     "analysis/configs/forecast_attribution_synth_run1.yml"   # deploy-derived (outputs.forecast_attrib_manifest; set by --stage align_results)
+    # Skill of the analog ENSO continuation by lead (CRPSS vs climatology, method
+    # "analog"), written by 03_prepare_enso_continuation_library.R --validate
+    # (deployed settings: CM2.1-NMME excluded, 48-month pool, 3 seeds); table
+    # S28 reports it at each group's longest continuation lead.
+    enso_continuation_skill: "generated_data/enso_continuation_skill.csv"
+    # Curated literature table T1a (ENSO-rainfall link per group); 09 rain_enso
+    # copies it into its artefact, 11 prints it. "" = no T1a.
+    enso_rain_mechanisms: "analysis/tables/enso_rain_mechanisms_synth.yml"
+    grouping:            "analysis/groupings/enso_grouping_synth.csv"
+    sim_root:            "generated_data/sim_spatpomp"
+    # MUST stay in step with simulator.filter.smoothing_input in
+    # analysis/configs/forecast_country_by_group_<run>/*.yml — Figure 3 splices
+    # this smoothing arm onto the forecast arm built from those configs, so a
+    # stale value silently glues two different filter runs together.
+    smoothing_parts_dir: "generated_data/sim_spatpomp/sim_synth_run1_historical/parts"
+    # Per-track batch prefix; the track stub is interpolated ->
+    # analysis/configs/<batch>_<stub>_grouped_enso_singlelag/. `default`
+    # applies to any track without its own entry. Each track's batch MUST be
+    # the one its best_lag_dir archive entry below was selected from, or
+    # Figure 1's reported lag will not be the lag its fit was estimated at.
+    # The three tracks deploy from the deploy's fit batches (canonical
+    # cross-track episodes, episodes.key: gid_season). Size is
+    # retired downstream and has no entry.
+    lag_loo_batch:
+      default:    "synth_run1"
+      occurrence: "synth_run1"
+      duration:   "synth_run1"
+      monthly:    "synth_run1"
+    # gid_season (`_ep-gs`) archive of the deploy_fits stage.
+    best_lag_dir:        "generated_data/enso_best_lag_fits_ep-gs_nz60-r3_ae_a1c_synth_run1"
+    # Hindcast manifest written by the deploy's gen_hindcast stage (deploy-
+    # derived from outputs.hindcast_manifest). 09 scores every run it lists from
+    # the run's validation/metrics.qs and merged/monthly_summary.qs; 07c's
+    # hindcast_summary/ directory is not read.
+    hindcast_manifest:   "analysis/configs/hindcast_horizons_synth_run1.yml"
+    # Cross-track episode definition (lp_season | gid_season) every 09/10/11
+    # panel is read under, so the observed survival / monthly / duration / size
+    # panels match the episodes the deployed fits were estimated on.
+    # Deploy-derived from deploy.episodes.key and copied onto the top-level
+    # episodes.key; a top-level episodes.key that disagrees is refused.
+    episode_key:         "gid_season"
+    # national zero-fill occurrence panel ("_nz"; gid_season only). Deploy-derived
+    # from deploy.episodes.national_zero_fill and copied onto the top-level
+    # episodes.national_zero_fill; false = the panel without national zero-fill rows.
+    episode_national_zero_fill: true
+    # its threshold: 0 = the exact-zero "_nz" panel; N > 0 = the "_nz<N>" panel
+    # (WHO country-years under N cases also national zeros). Deploy-derived from
+    # deploy.episodes.national_zero_threshold.
+    episode_national_zero_threshold: 60
+    # its rule (analysis/national_zero_rules.yml; "" = legacy, the pre-r3 panel;
+    # "r2" = the "_nz<N>-r2" panel). Deploy-derived from deploy.episodes.national_zero_rule.
+    episode_national_zero_rule: "r3"
+    # the panel's at-risk start ("season" = the legacy panel; "after_episode" =
+    # "_ae") and ADM1-overlap treatment ("drop"; "censor_orphan" = "_a1c").
+    # Deploy-derived from deploy.episodes.{at_risk_start,adm1_overlap}.
+    episode_at_risk_start: "after_episode"
+    episode_adm1_overlap: "censor_orphan"
+
+  # --- Scope --------------------------------------------------------------
+  # Read by BOTH: selects what 09 derives AND what 10 plots.
+  scope:
+    # The analog set behind every main-text figure.
+    main_set:       "neutral"
+    # Additional sets built only when `supplementary: true`.
+    supp_sets:      ["all", "nina", "elnino"]
+    supplementary:  true
+    # Fit groups dropped from Figures 3–4. Figures 1–2 always show every group
+    # regardless. Empty: enso_central is not
+    # a group of the kl registry this run uses (09 refuses a name that is not
+    # in inputs.grouping); artefacts stamped ["enso_central"] stay fresh
+    # (results_core.R::.RESULTS_STAMP_NORMALISE).
+    exclude_groups: []
+    fig1_tracks:    ["occurrence", "duration", "monthly"]
+    # 10 only — which main figures to render from the derived tables (the
+    # supplementary S5 / S6 are rendered with 10 --figures S5,S6).
+    build_figures:  ["1", "2", "3", "4", "H"]
+    # Hindcast forecast skill (09 derives; 10 figure H; notebooks/hindcast_skill.qmd).
+    # Headline = the fair variants: occurrence scored against each gid's own
+    # onset rate OUTSIDE the scored window (loo_gid), case totals on the
+    # surveillance-defined support (sim gids at risk in the window). The
+    # in-sample basis (in-sample climatology; obs-positive keys) is derived
+    # alongside as labelled siblings.
+    hindcast:
+      enable:                 true
+      headline_occ_reference: "loo_gid"
+      headline_case_support:  "atrisk_gids"
+      headline_case_skill_reference: "clim_pooled"
+    # Partition units mixing fit groups (v2 manifests only; no effect here):
+    # "drop" = each country up to its own firm horizon, "flag" = keep later
+    # months flagged beyond_firm_horizon.
+    beyond_firm_horizon: "drop"
+    # One Africa for every attribution step: every included group (all 30 countries) from the
+    # attribution start to 2027-10 (South's firm horizon). West (firm horizon
+    # 2026-10) and East (2027-05) are read on into the simulated analog ENSO
+    # continuation to the end (to_end; S28 gives each group's longest
+    # continuation lead per track and the analog CRPSS there); Horn and NGA are
+    # cut at 2027-10. Caveat: West's leads make its months after 2027-02 read
+    # the DJF 2027/28 ONI, unconstrained in the counterfactual (only DJF 2026/27
+    # is). To cap West where it starts reading DJF 2027/28
+    # set max_counterfactual_winter: "2026/27". "legacy" = the former windows.
+    africa:
+      window_end:                "2027-10-01"
+      continuation_max_lead:     "to_end"
+      max_counterfactual_winter: ""
+
+  # --- Derivation ---------------------------------------------------------
+  # Read by 09 only. Changing any of these invalidates the derived artefacts.
+  derivation:
+    # First month shown for Figure 3's smoothing arm.
+    smoothing_start:   "2011-01-01"
+    # Posterior draws subsampled for the ADM1 IRR credible intervals.
+    n_irr_draws:       200
+    # ENSO exposure-response lag selection: for duration/monthly, require the
+    # select_best_lag() pick to be ≥ the occurrence track's pick for the same
+    # group (select_best_lag_downstream()'s hybrid rule). false uses each
+    # track's own unconstrained pick — which is what the deployed
+    # enso_best_lag_fits archive was built under.
+    enforce_occ_floor: false
+    # The forecast arms may launch at different months from the same smoothing
+    # cache (counterfactual at the Lenssen analog anchor, factual later, to keep
+    # the smoothed observations after the anchor). "stitch": Figures 3-4's
+    # window starts at the earlier launch and the factual series is the
+    # smoothing output up to its own launch, paired by replicate through 07b's
+    # handoff_map.csv; the ratio is then labelled "ENSO + post-handoff
+    # information". "common_start": the window starts at the later launch.
+    # Equal factual / counterfactual launches give the same tables either way.
+    arm_alignment: stitch
+    # Paired-bootstrap resamples (report_attrib_exposure / report_attrib_metrics
+    # / report_event_attrib): the Monte-Carlo precision of the replicate means.
+    # 0 = off: at 9,950 replicates it is ~0.3 pp; the posterior interval
+    # (af_posterior) carries the uncertainty of the ENSO effect.
+    attrib_boot_b: 0
+    # Explosive-replicate guard: every attribution cell is
+    # derived with the pairs that reach thresholds.explosive_case_cap in either
+    # arm dropped ("drop") and with every pair kept ("none"); table S29 gives the
+    # dropped pairs per arm and the AF difference. No winsor mode.
+    explosive_modes: ["drop", "none"]
+    # Explosive guard scope of the af_posterior steps: a replicate explosive in
+    # any group leaves its whole simulation unit, so Africa sums the groups of a
+    # unit per replicate without a missing group. "group" = drop per group.
+    af_guard_scope: unit
+    # Phase-11 "key numbers" report. pop_ref_year is the year the canonical
+    # gid_population table is joined at for the population-covered and
+    # significant-effect-population tables; duration_ratio_horizon is the K-month
+    # truncation for the duration restricted-mean-duration (RMD) ratio (the real
+    # duration-ratio estimand, not 1/HR).
+    pop_ref_year:            2025
+    # Per-capita rates (inc_ann_100k, an_per_100k): ref = pop_ref_year; window =
+    # the month-weighted mean population over the months read (deployed run:
+    # window). Counts of people living in an area stay on
+    # pop_ref_year.
+    rate_pop_year:           "window"
+    duration_ratio_horizon:  24
+    # ONI values (vs neutral 0) at which the composite ADM1 IRRs, the
+    # significant- and ENSO-sensitive-population tables and the duration RMD
+    # ratios are evaluated. Labels ("La Niña (−1.5)", ...) are built from these.
+    # Also Figure 2's map columns.
+    enso_conds:              [-1.5, -1.0, 1.0, 1.5, 2.0]
+    # Figure 1d's rainfall tables (rain_enso step, from 03_prepare_rain_adm1.R's
+    # ADM1 series). Correlation tiles:
+    # Pearson r of the group-mean 3-month rainfall deviation (sd units vs the
+    # baseline) with ONI at each lag; calendar months with a baseline mean
+    # under dry_mm_month dropped; r needs min_n years. Season outlines: a month
+    # is in a group's main season when >= season_share of its season_pop_year
+    # population lives in ADM1s where it is above the ADM1's average month.
+    rain_enso:
+      baseline:             "1990_2019"
+      lags:                 [-11, 11]
+      dry_mm_month:         10
+      min_n:                30
+      season_share:         0.5
+      season_min_annual_mm: 100
+      # The population year of every other count (pop_ref_year). Stamped.
+      season_pop_year:      2025
+    # Supplement fig. SE (seasonality step): per ENSO group and calendar month,
+    # the observed onset rate (survival panel), cessation rate (duration
+    # panel) and cases per active episode-month (monthly panel) on the rows the
+    # fits keep under admin_level (gid.R::applyAdminLevelFilter()), against
+    # rain_enso's rainfall climatology and rainy season. A month with fewer than
+    # min_n events (cases: episode-months) is sparse and takes no part in the
+    # peak; intervals at `interval`.
+    seasonality:
+      admin_level: "ADM1-ADM2"
+      min_n:       5
+      interval:    0.95
+    # Supplement fig. WR (report_who_enso_ratio): observed 2026 vs
+    # ENSO-neutral years (WHO) against the smoothing vs the ENSO counterfactual
+    # (modelled), West group only. Stamped;
+    # back-filled at these values.
+    who_enso_ratio:
+      groups:           ["grp_a"]
+      year_definitions: ["annual_mean", "lag_occ", "djf_start", "djf_end"]
+      first_year:       2010
+      censor_weeks:     8
+      pseudo_count:     1.0
+      interval:         0.95
+      n_boot:           2000
+      seed:             20261107
+    # Supplementary table of ENSO contrasts, all outbreaks vs the subset with a
+    # confirmed case (report_confirmed_agreement; see config_defaults.yml).
+    confirmed_agreement:
+      min_confirmed: 1
+      min_neutral:   2
+      min_phase:     5
+      window:        "confirmed"
+      boot_b:        1000
+      seed:          20261110
+      level:         0.95
+    # ENSO phase rule of 11's smoothing table: "threshold"
+    # (monthly ONI at +/-0.5, no persistence) keeps the legacy table; the
+    # deployed record sets "episode" (NOAA CPC episodes, as the figure shading).
+    enso_phase:
+      smoothing: "episode"
+    # Lag averaging (09 step lag_averaging): from the
+    # 05 lag sidecars of every single-lag fit (05_fit_postprocess_loo_lags.R
+    # --lag_sidecar; the step is skipped with a message until they
+    # exist), Pareto-k per lag, the elpd difference after dropping the rows with
+    # k > k_threshold in any lag, stacking (main) and pseudo-BMA+ weights over
+    # every lag (`all`, the headline sensitivity, free of the selection and of
+    # the West bound) and over the deploy's eligible lags, the stacked
+    # population ERF and the IRR at enso_conds next to the deployed, rank-2 and
+    # unbounded rank-1 lags. report_min_weight: display cut of the weight table.
+    lag_averaging:
+      enable:            true
+      methods:           ["stacking", "pseudobma_plus"]
+      lag_sets:          ["all", "eligible"]
+      k_threshold:       0.7
+      report_min_weight: 0.01
+    # Hindcast scoring (utils/hindcast_skill.R::hindcast_skill_bundle()).
+    hindcast:
+      # Lead classes, months after each country's launch (season windows):
+      # 0-3 early, 4-8 peak, 9+ late season.
+      lead_breaks:      [3, 8]
+      # Occurrence target: onsets over the run's window per gid (headline) or
+      # per calendar year (legacy).
+      occ_grains:       ["window", "calendar_year"]
+      occ_references:   ["insample_gid", "loo_gid", "loo_gid_fullhist", "regional", "zero", "persistence"]
+      # crps_emp = energy-form ensemble CRPS; crps_fair = the
+      # unbiased form, fair across ensemble sizes.
+      occ_rules:        ["crps_emp", "crps_fair"]
+      case_supports:    ["obs_positive_keys", "exact_gid", "atrisk_gids", "atrisk_keys", "footprint"]
+      case_references:  ["loo_climatology", "zero", "persistence"]
+      case_rules:       ["crps_raw", "crps_log1p", "pinball"]
+      pinball_taus:     [0.05, 0.25, 0.5, 0.75, 0.95]
+      interval_widths:  [0.5, 0.8, 0.9, 0.95, 0.99]
+      reliability_bins: 10
+      # Floor log-score probabilities at 1/(2 n_rep) (cells no replicate fired).
+      zero_floor:       true
+      rank_seed:        42
+      # Monthly and season case skill (hindcast_skill.R section 5b):
+      # monthly units per (country | ADM1, month) and season totals
+      # per (country, lead class) on the headline support and exact_gid (C);
+      # references on each run's fixed support, scaled to the scored year's
+      # population with WPP2024 growth outside the gid table's years, scored on
+      # surveilled ADM1-months only. clim_pooled (the headline) = same calendar
+      # month +/- 1 in the other season years, leaving out the scored season and
+      # every season overlapping it; clim_launch_state = the same years with the
+      # launch-month activity of the scored year. twcrps counts errors above the
+      # 50-case outbreak threshold (per month and per season total).
+      case_skill_supports:      ["atrisk_gids", "exact_gid"]
+      case_month_grains:        ["country", "adm1"]
+      case_skill_references:    ["clim_pooled", "clim_launch_state", "persistence_season", "persistence_last"]
+      case_skill_rules:         ["crps_raw", "crps_log1p", "twcrps"]
+      case_clim_halfwidth:      1
+      case_pop_scale:           "wpp"
+      case_mask:                "coverage"
+      case_tw_threshold_month:  50.0
+      case_tw_threshold_season: 50.0
+      case_season_min_ref:      5
+      # Season-year block bootstrap: 95% CIs on every CRPSS (occurrence and
+      # cases); median per-area CRPSS and share of areas with positive skill.
+      bootstrap_n:          1000
+      bootstrap_seed:       20261101
+      bootstrap_level:      0.95
+      skill_area_summaries: true
+
+  # --- Thresholds ---------------------------------------------------------
+  # Read by BOTH: 09 computes against them, 10 states them in captions. These
+  # are decisions an mtime-only cache rule could not see.
+  thresholds:
+    # Fractional shift threshold for Figure 3b's attribution classification.
+    prob_threshold: 0.50
+    # Figure 3b greys out ADM1s whose mean total is below this.
+    low_signal:     2.0
+    # report_forecast's threshold-population grid (derived in 09; kept in the
+    # artefact, not printed by 11):
+    # for each (cutoff p × magnitude m) pair, population in admin units with ≥ p
+    # probability of a ≥ m fractional increase (or decrease) in the horizon.
+    # pop_prob_cutoffs is also the certainty axis of report_enso_exposure.
+    pop_prob_cutoffs:  [0.5, 0.8, 0.95]
+    pop_magnitudes:    [0.25, 0.5]
+    # Unused ENSO-sensitive population rule (|log IRR| > log(1 + x) on any
+    # track, either direction); report_enso_exposure's `either` direction
+    # covers it. No registered step uses this key; it stays because it is
+    # stamped (removing it would mark every artefact stale).
+    sensitive_irr:     0.10
+    # Phase-11 ENSO exposure tables (report_enso_exposure): population exposed
+    # to an ENSO effect of at least m (IRR beyond 1 + m) in the ADVERSE or the
+    # PROTECTIVE direction per track, any track, or >= 2 concordant tracks;
+    # 0 = any effect in that direction. Reported per draw (mean, 95% CrI) and
+    # as a probability-threshold grid over pop_prob_cutoffs (no interval).
+    # Directions: adverse, protective, either. The headlined cell is
+    # style.enso_headline.
+    enso_magnitudes:   [0.0, 0.10, 0.25, 0.50]
+    # Population in ADM1s with more ENSO-attributable cases, forecast vs
+    # counterfactual (report_attrib_exposure). Childs et al. 2025 convention: an
+    # ADM1 counts when mean forecast >= (1 + m) x mean counterfactual (point +
+    # paired-bootstrap 95% interval). IPCC AR6 Atlas robustness, with m as the
+    # variability threshold: "robust" when >= robust_exceed of the paired
+    # replicates have forecast > (1 + m) x counterfactual AND >= robust_agree
+    # have forecast > counterfactual (ties disagree); "conflicting" when only
+    # the first holds. The headlined m is style.attrib_headline. Write 1.0, not
+    # 1: a mixed [0.25, 0.5, 1] reads as a YAML list and never matches the stamp.
+    attrib_magnitudes: [0.25, 0.5, 1.0]
+    robust_exceed:     0.66
+    robust_agree:      0.80
+    # report_attrib_metrics (attributable fraction / number, probability ratio,
+    # signal-to-noise of the same paired runs): the cases_ge event is window
+    # cases >= pr_case_threshold (the database's >= 50-case outbreak
+    # convention); pr_alpha is the one-sided level of the exact PR lower bound
+    # when no counterfactual replicate has the event; sn_levels are the |S/N|
+    # emergence levels of the population tables.
+    pr_case_threshold: 50
+    pr_alpha:          0.05
+    sn_levels:         [1.0, 2.0]
+    # Explosive-replicate caps of the "drop" mode: a replicate whose group window
+    # cases reach explosive_case_cap, or with any gid of the group at or above
+    # explosive_gid_month_cap in any window month, in either arm, is dropped
+    # from that group's pair. Revisit with table S29.
+    # The per-gid monthly cap is the intended guard (200k); the group window
+    # cap is 1M.
+    explosive_case_cap: 1000000.0
+    explosive_gid_month_cap: 200000.0
+    # Unidentified posterior spread: a scope or ADM1 whose Monte-Carlo noise share reaches 0.8 has its
+    # adjusted interval set to NA (pooled value and raw interval kept); the
+    # Childs population interval runs over identified ADM1s and the rest is
+    # reported apart.
+    af_noise_share_max: 0.8
+
+  # --- Style --------------------------------------------------------------
+  # Read by 10 only. Presentation, not estimand: changing these does not
+  # invalidate a derived table.
+  style:
+    out_dir:  "figures/manuscript"
+    formats:  ["pdf", "png"]
+    font:     "Arial"
+    dpi:      600
+    # Shared IRR colour-scale limits (Figure 1a y-axis and 1b map fill).
+    map_lo:   0.1
+    map_hi:   3
+    # Shared exposure-response x-limits (Figures 1a and 3a).
+    erf_xlim: [-2.5, 2.5]
+    # 11 only: one CSV per printed table (Science's machine-readable tables).
+    tables_dir: "figures/manuscript/tables"
+    # 11 only: the ENSO-exposure cell the manuscript headlines -- population of
+    # ADM1s where P(IRR beyond 1 + magnitude in `direction`) >= cutoff, on
+    # `track` ("any_credible" = some single track has P >= cutoff on its own,
+    # the track-wise union; "any" = certainty of the union, which inflates with
+    # several weak tracks; "concordant2" = >= 2 agree on the draw; or one track). magnitude must be one of thresholds.enso_magnitudes and
+    # cutoff one of thresholds.pop_prob_cutoffs (11 stops otherwise).
+    enso_headline:
+      direction: "adverse"
+      track:     "any_credible"
+      magnitude: 0.25
+      cutoff:    0.95
+    # 10 + 11: the report_attrib_exposure magnitude the manuscript headlines
+    # (figure AE, 11 §4c); must be one of thresholds.attrib_magnitudes.
+    attrib_headline:
+      magnitude: 0.5
+      # The headlined attribution cell (10 Figure 4, 11 §5): attribution_common
+      # = every group over the common Africa window (scope.africa).
+      window:    "attribution_common"
+      # The headlined explosive mode: "none" keeps
+      # every pair (the unconditional AF estimand); "drop" is the sensitivity.
+      explosive: "none"
+    # 11: the report_attrib_metrics cells the manuscript headlines (11 §4d):
+    # S/N level (one of thresholds.sn_levels) and PR event (onset_any | cases_ge).
+    attrib_metrics_headline:
+      sn_level: 1.0
+      pr_event: "onset_any"
+    # 10 + 11: group display labels. "lag" = class
+    # letters ordered by each group's deployed OCCURRENCE lag, longest lead
+    # first, read from the fits (09 step group_labels): "Class A (ENSO lead 6)",
+    # short "A −6"; "registry" = the grouping sidecar's names (East, Horn, ...);
+    # "centroid" = the sidecar's centroid names, "West [GW]" / short "GW", in the
+    # order GW, GG, GH, GE, GS.
+    # Ids (enso_east, ...) and colours are unchanged in every mode.
+    group_labels: "centroid"
+    # 10 + 11: a country whose largest posterior class probability (p_max,
+    # report_membership) is below this is marked as uncertainly assigned
+    # (outlines, footnotes, table columns). Display only (not stamped).
+    membership_low: 0.6
+    # 10, supplement fig. WR: the year definition and the
+    # counterfactual analogue set drawn (every one is derived). Not stamped.
+    who_enso_ratio:
+      year_definition: "annual_mean"
+      analog_set:      "neutral"
+    # 11: data release of each D / T table. "supp" =
+    # Supplementary Data with the manuscript, "github" = the repository's data
+    # folder (every other D / T table). 11 copies each CSV into
+    # <tables_dir>/supp_data/ or <tables_dir>/github/ and writes
+    # data_release_manifest.csv (file, source, data_id, release, caption).
+    # Display only (not stamped).
+    # "supp" holds the policy tables --
+    # country ENSO effects (T3), population exposed by region / country (D10,
+    # D12), past-event attributable fractions (T4), the 2026-27 forecast AF (T5)
+    # and the population with more attributable cases by country / ADM1 (D18).
+    # Supporting (D2, D13, D14, D19, D20) and technical / validation tables
+    # (D11, D15, D16, D17, D21, D30) go to github.
+    data_release: {
+      D1: github, D2: github, D3: github, D4: github, D5: github, D6: github,
+      D7: github, D8: github, D9: github, D10: supp, D11: github, D12: supp,
+      D13: github, D14: github, D15: github, D16: github, D17: github, D18: supp,
+      D19: github, D20: github, D21: github, D22: github, D23: github, D24: github,
+      D25: github, D26: github, D27: github, D28: github, D29: github, D30: github,
+      D31: github, D32: github, D33: github, D34: github, D35: github, D36: github, D37: github, D38: github, D39: github, T1: github,
+      T2: github, T3: supp, T4: supp, T5: supp}

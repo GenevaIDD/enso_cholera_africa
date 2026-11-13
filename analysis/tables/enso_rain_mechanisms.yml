@@ -1,0 +1,57 @@
+# Curated literature table T1a of the supplement: the main ENSO-rainfall link of
+# each deployed ENSO group (rainy season, stage of the ENSO cycle, main lag, El
+# Nino signal, mechanism, references). Not data: nothing derives it. It is the
+# stamped results input results.inputs.enso_rain_mechanisms: 09 step rain_enso
+# copies it into its artefact (`mechanisms`, checked against the registry's
+# groups) and 11 prints it (section "Supplementary tables T1-T5", slug
+# T1a_enso_rain_mechanisms) under the display labels of
+# results.style.group_labels, in their display order.
+#
+# Source: literature (Cai et al. 2025, Nat. Rev. Earth Environ. 6, 503-520, and
+# the papers it cites). Keys are registry group ids (never renamed); members are
+# printed from the fit registry, `members_note` adds the sub-regions of a mixed
+# class. Lag convention: rainfall in month t vs ONI at t - L (L > 0: ENSO leads),
+# the model crossbasis and 09 rain_enso convention.
+#
+# Edit by hand; keep one entry per group of the deployed registry.
+groups:
+  enso_east:
+    members_note: ""
+    season: "Oct-Dec short rains; Mar-May long rains"
+    stage: "short rains: developing to mature (about 2 months before the peak); long rains: decay (+3 to +5 months)"
+    main_lag: "concurrent (L ~ 0, from -2 to +2) in Oct-Dec; weak and inconsistent in Mar-May"
+    el_nino_signal: "wetter in Oct-Dec (+0.38 mm/day/degC), still wetter in Dec-Feb (+0.29); long rains: little signal after El Nino, drier during multi-year Central Pacific La Nina"
+    mechanism: "Weaker Walker circulation induces a positive Indian Ocean Dipole: easterlies along the equatorial Indian Ocean, a warm western Indian Ocean and a stronger ITCZ there bring more moist convergence onto the East African coast. In Dec-Feb the South Indian Convergence Zone and its cloud bands move north-east, off southern Africa. ENSO-IOD coupling sets the strength of the link (r 0.30 in 1931-70 vs 0.61 in 1971-2010)."
+    references: "Cai et al. 2025; Saji et al. 1999; Black, Slingo & Sperber 2003; Goddard & Graham 1999; Palmer et al. 2023"
+  enso_horn:
+    members_note: "ETH SDN SSD: Ethiopian plateau and Sudan; COG GIN GNB SLE: Guinea coast and Congo"
+    season: "Jun-Sep (Kiremt / summer monsoon)"
+    stage: "developing (about 5 months before the peak)"
+    main_lag: "concurrent (L ~ 0, from -1 to +1)"
+    el_nino_signal: "drier"
+    mechanism: "Ethiopia and Sudan: the tropospheric-temperature mechanism (a more stable atmosphere suppresses convection); Rossby waves weaken the Tropical Easterly Jet, so less upper-level divergence over the Horn; the Somali Jet starts later and is weaker. Guinea-coast members: El Nino often comes with an Atlantic Nina, so a drier Guinea coast, plus subsidence from upper-level convergence over West Africa."
+    references: "Cai et al. 2025; Gleixner et al. 2017; Diro, Grimes & Black 2011; Rodriguez-Fonseca et al. 2015"
+  enso_west:
+    members_note: "Sahel, Guinea coast and Central Africa; SOM an odd member"
+    season: "Jun-Sep (West African monsoon)"
+    stage: "developing (about 5 months before the peak)"
+    main_lag: "concurrent (L ~ 0, from -1 to +1)"
+    el_nino_signal: "drier in the Sahel (-0.42 mm/day/degC; -0.73 for Eastern Pacific El Nino, -0.12 for Central Pacific); Guinea coast drier"
+    mechanism: "Tropospheric-temperature mechanism; a high-pressure anomaly over the tropical Atlantic whose easterlies cut moisture transport into the Sahel; El Nino with an Atlantic Nina gives a Guinea-coast-dry / Sahel-wet dipole whose Sahel side is offset by the tropospheric warming. The link is not stationary (r -0.43 in 1931-70 vs -0.59 in 1971-2010), modulated by the AMV, the IPO and Mediterranean SST. SOM is an odd member: its Oct-Dec rains behave like East (wetter)."
+    references: "Cai et al. 2025; Rowell 2001; Janicot, Trzaska & Poccard 2001; Giannini, Saravanan & Chang 2003; Joly & Voldoire 2009; Rodriguez-Fonseca et al. 2015"
+  enso_nga:
+    members_note: ""
+    season: "May-Oct (Guinea-coast bimodal rains; monsoon in northern Nigeria)"
+    stage: "developing; the state of ENSO in boreal spring matters (decay of the previous event or onset of the next)"
+    main_lag: "concurrent to a few months (L ~ 0 to +3)"
+    el_nino_signal: "drier (Guinea coast); La Nina wetter in Jun-Sep"
+    mechanism: "As West: Atlantic Nina co-occurrence (Guinea-coast drying), tropospheric warming, subsidence. Remnant SST anomalies of a decaying event can carry into the following summer (the 1983 Sahel drought after the 1982/83 El Nino). Eastern Pacific El Nino also dries the Guinea coast in Dec-Feb."
+    references: "Cai et al. 2025; Rodriguez-Fonseca et al. 2011, 2015; Joly & Voldoire 2009; Chang et al. 2006"
+  enso_south:
+    members_note: "CIV (Guinea coast) and the COD interior are odd members"
+    season: "Oct-Apr (austral summer; core Dec-Mar)"
+    stage: "mature and decay (from the peak to about 3 months after)"
+    main_lag: "concurrent with the peak (L 0 to +4)"
+    el_nino_signal: "drier: Oct-Dec -0.15, Dec-Feb -0.37, Mar-May -0.19 mm/day/degC; Eastern Pacific El Nino much stronger than Central Pacific (Dec-Feb -0.70 vs -0.003 mm/day)"
+    mechanism: "Warming over the Indian Ocean basin weakens the ocean-land pressure gradient, so seasonal convergence weakens. The South Indian Convergence Zone shifts north-east; fewer tropical-temperate troughs; the Angola Low weaker and shifted north; the Botswana High stronger; the Mozambique Channel Trough shallower; negative SAM in Dec-Feb. Opposite pole to East in Oct-Dec and Dec-Feb. The link is not stationary (r 0.15 in 1931-70 vs -0.69 in 1971-2010) and varies from event to event (1997/98). CIV (Guinea coast) and the COD interior are odd members."
+    references: "Cai et al. 2025; Cook 2000; Cretat et al. 2019; Driver & Reason 2017; Blamey et al. 2018; Hart, Washington & Reason 2018"

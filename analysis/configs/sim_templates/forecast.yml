@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# analysis/configs/sim_templates/forecast.yml -- RUN-AGNOSTIC SKELETON
+# ---------------------------------------------------------------------------
+# Factual forecast arm of a prod_run<N> rollout: forward simulation from the
+# run's historical smoothing cache under the CFSv2 ENSO forecast.
+#
+# This is NOT a runnable config. `deploy_prod_run.R --stage gen_templates` builds
+# the run's forecast TEMPLATE as
+#     this skeleton  +  deploy `sim.shared`  +  deploy `sim.forecast`  +  derived leaves
+# and writes it to analysis/configs/<run_tags.forecast>/<run_tags.forecast>.yml;
+# `--stage gen_forecast` then patches that template per ENSO group (run_tag,
+# run_id, scope.countries, horizon.end, filter.forecast_window.end,
+# filter.partition_by, location_frame.base_rate_table_paths).
+# The horizon / forecast_window dates below are nominal for that reason.
+#
+# Leaves this skeleton deliberately leaves out:
+#   * derived from the deploy block (an overlay naming them is refused):
+#     simulator.run_tag, simulator.run_id, simulator.grouping.{source,fits_dir},
+#     simulator.nbr_contagion.{enable,rho_km}, episodes.key,
+#     simulator.filter.smoothing_input (= generated_data/sim_spatpomp/<run_tags.historical>/cache,
+#     asserted equal to deploy.smoothing_input)
+#   * required from the overlay: simulator.filter.measurement
+#   * per-run overlay leaves seen so far: simulator.enso.c3s_plume (changes with
+#     the forecast month), simulator.filter.covariate_feed,
+#     simulator.filter.monthly_case_obs
+
+baseline: "1990_2019"
+seed:     20261002
+
+simulator:
+  backend: spatpomp        # routes 07_simulator_run.R dispatcher to 07b_simulator_spatpomp.R
+
+  grouping:
+    enable:          true
+    duration_enable: true
+    monthly_enable:  true
+
+  # Projection panel (extends past the climate-DB max with zero-filled climate +
+  # C3S ENSO).
+  climate_panel:  generated_data/sim_climate_panel_projection_base-1990_2019.rds
+
+  location_frame:
+    hmm_clusters_path:      data/hmm_country_clusters.csv
+    outbreak_metadata_path: generated_data/outbreak_metadata.rds
+    size_data_path:         generated_data/outbreak_size_analysis_data.rds
+    # base_rate_table_paths is injected per group by gen_forecast from the
+    # deployed fits' own training opts (only for anchored fits).
+
+  # Distance-weighted neighbour-contagion kernel term (enable / rho_km derived).
+  nbr_contagion:
+    gadm_path: "data/geodata/gadm_valid.gpkg"
+    cache_dir: "generated_data/"
+
+  # Forward output window. horizon.end is patched per group by gen_forecast.
+  horizon: { start: "2026-06-01", end: "2027-03-01" }
+
+  n_replicates: 1000
+  draws_per_replicate: 1
+  max_draws: 200
+  posterior_strategy: paired
+  seed: 20261002
+
+  enso:
+    source:    oni       # observed ONI for months <= ONI cache max
+    cache_dir: generated_data/
+    cfsv2_sd_correction: yes
+
+  filter:
+    enable:            true
+    Np:                10000
+    rerun_filter:      false
+    partition_by:      country     # overwritten per generated config from deploy.partition_by
+    block_granularity: adm1
+    forecast_window:
+      start: "2026-06-01"   # = horizon.start = handoff_month when set (sim_io.R::assert_arm_launch()); set per run in deploy sim.<arm>
+      end:   "2027-03-01"   # patched per group by gen_forecast (= horizon.end)
+    delta_fn: 0.10
+    delta_fp: 0.001
+    n_draws_in_filter: 1
+    forecast_engine:   kernel_09a
+
+  scope:
+    transmission_units: all
+    countries:          all    # patched per group by gen_forecast
+    admin_level:        ADM2
+    unseen_adm1:        restrict
+
+  scenario:
+    climate: factual     # only 'factual' supported (counterfactual climate = v2)
+
+  output:
+    format:               qs
+    aggregate:            adm2_month
+    keep_event_table:     true
+    keep_monthly_summary: true
+
+  parallel:
+    backend: furrr
+    over:    transmission_unit
+    chunk_size: 5
+    workers: 1

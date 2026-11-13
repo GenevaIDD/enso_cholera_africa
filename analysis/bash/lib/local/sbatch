@@ -1,0 +1,154 @@
+#!/bin/bash
+# lib/local/sbatch — a stand-in for SLURM's sbatch that runs the job on this
+# machine, now. First on PATH under CHOLERA_BACKEND=local (lib/cluster.sh).
+#
+#   sbatch [options] payload.sh [args]    |    sbatch [options] --wrap "cmd"
+#
+# Honoured: --array (ranges, lists, :step, %cap), --job-name / -J (else the
+# payload's #SBATCH --job-name, else its basename), --parsable, --wrap,
+# --cpus-per-task / -c (else the payload's #SBATCH -c / --cpus-per-task).
+# --export=ALL,VAR=value exports those variables to the job.
+# Ignored: --dependency (jobs run synchronously, in submission order, so every
+# earlier job has finished), --partition, --mem, --time, --account, --qos,
+# --output and every other option.
+#
+# Array tasks run $CHOLERA_CORES at a time (capped by %cap and the task count)
+# through xargs -P; each task gets SLURM_ARRAY_TASK_ID, SLURM_ARRAY_JOB_ID,
+# SLURM_JOB_ID, SLURM_JOB_NAME, SLURM_SUBMIT_DIR and SLURM_CPUS_PER_TASK =
+# min(requested cpus, CHOLERA_CORES / parallel tasks), at least 1.
+# Each job / task logs to $CHOLERA_LOG_DIR/<name>_<jobid>[_<task>].log.
+# Prints a fake job id ("Submitted batch job N", or N with --parsable) once
+# every task has finished; a failed task makes it exit non-zero (after the
+# id is printed) and prints the tail of that task's log on stderr.
+
+set -uo pipefail
+
+LOG_DIR="${CHOLERA_LOG_DIR:-logs}"
+CORES="${CHOLERA_CORES:-$(nproc 2>/dev/null || echo 1)}"
+
+# --- internal: run one task (called back through xargs) ------------------------
+if [[ "${1:-}" == "--__task" ]]; then
+  task="$2"
+  log="$LOG_DIR/${SLURM_JOB_NAME}_${SLURM_ARRAY_JOB_ID}_${task}.log"
+  if SLURM_ARRAY_TASK_ID="$task" bash "$CHOLERA_LOCAL_PAYLOAD" "${@:3}" > "$log" 2>&1; then
+    exit 0
+  fi
+  echo "[local sbatch] ${SLURM_JOB_NAME} task ${task} FAILED; tail of ${log}:" >&2
+  tail -20 "$log" >&2
+  exit 1
+fi
+
+ARRAY=""; NAME=""; PARSABLE=false; WRAP=""; HAS_WRAP=false; CPUS=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --array=*)          ARRAY="${1#*=}"; shift ;;
+    --array|-a)         ARRAY="$2"; shift 2 ;;
+    --job-name=*)       NAME="${1#*=}"; shift ;;
+    --job-name|-J)      NAME="$2"; shift 2 ;;
+    --parsable)         PARSABLE=true; shift ;;
+    --wrap=*)           WRAP="${1#*=}"; HAS_WRAP=true; shift ;;
+    --wrap)             WRAP="$2"; HAS_WRAP=true; shift 2 ;;
+    --export=*)         # ALL[,VAR=value...]: the job sees this environment plus those
+                        IFS=',' read -r -a _ex <<< "${1#*=}"
+                        for _e in "${_ex[@]}"; do [[ "$_e" == *=* ]] && export "${_e?}"; done
+                        shift ;;
+    --cpus-per-task=*)  CPUS="${1#*=}"; shift ;;
+    --cpus-per-task|-c) CPUS="$2"; shift 2 ;;
+    -c[0-9]*)           CPUS="${1#-c}"; shift ;;
+    --*=*)              shift ;;
+    --hold|--exclusive|--requeue|--no-requeue|--wait|--test-only|--quiet|--verbose|--overcommit|--contiguous|--oversubscribe|--no-kill)
+                        shift ;;
+    --*|-?)             shift 2 ;;
+    *)                  break ;;
+  esac
+done
+
+mkdir -p "$LOG_DIR"
+if [[ "$HAS_WRAP" == true ]]; then
+  PAYLOAD=$(mktemp "${TMPDIR:-/tmp}/local_sbatch_wrap.XXXXXX")
+  trap 'rm -f "$PAYLOAD"' EXIT
+  printf '#!/bin/bash\n%s\n' "$WRAP" > "$PAYLOAD"
+  set --
+  [[ -n "$NAME" ]] || NAME="wrap"
+else
+  [[ $# -ge 1 ]] || { echo "sbatch (local): no payload script given" >&2; exit 1; }
+  PAYLOAD="$1"; shift
+  [[ -f "$PAYLOAD" ]] || { echo "sbatch (local): $PAYLOAD: no such file" >&2; exit 1; }
+  # The payload's own #SBATCH lines, as sbatch reads them.
+  hdr() { sed -n "s/^#SBATCH[[:space:]]\{1,\}$1[[:space:]=]\{1,\}\([^[:space:]]*\).*/\1/p" "$PAYLOAD" | head -1; }
+  [[ -n "$NAME" ]] || NAME=$(hdr --job-name)
+  [[ -n "$NAME" ]] || NAME=$(hdr -J)
+  [[ -n "$NAME" ]] || NAME=$(basename "$PAYLOAD")
+  [[ -n "$CPUS" ]] || CPUS=$(hdr --cpus-per-task)
+  [[ -n "$CPUS" ]] || CPUS=$(hdr -c)
+fi
+[[ "$CPUS" =~ ^[0-9]+$ ]] || CPUS=1
+
+# Fake job id: a counter shared by every local sbatch of this log dir.
+ID_FILE="$LOG_DIR/.local_sbatch_last_id"
+next_id() {
+  local id
+  id=$(( $(cat "$ID_FILE" 2>/dev/null || echo 100000) + 1 ))
+  echo "$id" > "$ID_FILE"
+  echo "$id"
+}
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$ID_FILE.lock"; flock 9; JOB_ID=$(next_id); flock -u 9; exec 9>&-
+else
+  JOB_ID=$(next_id)
+fi
+
+export SLURM_JOB_ID="$JOB_ID" SLURM_JOB_NAME="$NAME" SLURM_SUBMIT_DIR="$PWD"
+export SLURM_JOB_PARTITION="local"
+
+print_id() { if [[ "$PARSABLE" == true ]]; then echo "$JOB_ID"; else echo "Submitted batch job $JOB_ID"; fi; }
+
+if [[ -z "$ARRAY" ]]; then
+  export SLURM_CPUS_PER_TASK=$(( CPUS < CORES ? CPUS : CORES ))
+  (( SLURM_CPUS_PER_TASK >= 1 )) || SLURM_CPUS_PER_TASK=1
+  log="$LOG_DIR/${NAME}_${JOB_ID}.log"
+  status=0
+  bash "$PAYLOAD" "$@" > "$log" 2>&1 || status=$?
+  print_id
+  if (( status != 0 )); then
+    echo "[local sbatch] ${NAME} (job ${JOB_ID}) FAILED (exit ${status}); tail of ${log}:" >&2
+    tail -20 "$log" >&2
+    exit "$status"
+  fi
+  exit 0
+fi
+
+# --- array: expand "0-9,12,20-30:5%4" ------------------------------------------
+CAP=""
+[[ "$ARRAY" == *%* ]] && { CAP="${ARRAY##*%}"; ARRAY="${ARRAY%\%*}"; }
+TASKS=()
+IFS=',' read -r -a parts <<< "$ARRAY"
+for p in "${parts[@]}"; do
+  step=1
+  [[ "$p" == *:* ]] && { step="${p##*:}"; p="${p%%:*}"; }
+  if [[ "$p" == *-* ]]; then
+    for ((t = ${p%%-*}; t <= ${p##*-}; t += step)); do TASKS+=("$t"); done
+  else
+    TASKS+=("$p")
+  fi
+done
+(( ${#TASKS[@]} > 0 )) || { echo "sbatch (local): empty --array '$ARRAY'" >&2; exit 1; }
+
+P="$CORES"
+[[ -n "$CAP" ]] && (( CAP < P )) && P="$CAP"
+(( ${#TASKS[@]} < P )) && P=${#TASKS[@]}
+(( P >= 1 )) || P=1
+PER=$(( CORES / P )); (( PER >= 1 )) || PER=1
+export SLURM_CPUS_PER_TASK=$(( CPUS < PER ? CPUS : PER ))
+export SLURM_ARRAY_JOB_ID="$JOB_ID" SLURM_ARRAY_TASK_COUNT="${#TASKS[@]}"
+export SLURM_ARRAY_TASK_MIN="${TASKS[0]}" SLURM_ARRAY_TASK_MAX="${TASKS[${#TASKS[@]}-1]}"
+export CHOLERA_LOCAL_PAYLOAD="$PAYLOAD" CHOLERA_LOG_DIR="$LOG_DIR"
+
+status=0
+printf '%s\n' "${TASKS[@]}" | xargs -P "$P" -I{} "$0" --__task {} "$@" || status=$?
+print_id
+if (( status != 0 )); then
+  echo "[local sbatch] ${NAME} (array job ${JOB_ID}): at least one task failed." >&2
+  exit 1
+fi
+exit 0

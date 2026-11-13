@@ -1,0 +1,7 @@
+# Display metadata for smoke_grouping.csv (test registry; also the smoke
+# partition registry: grp_a = ETH+KEN spans the enso_horn / enso_east fit groups).
+label_prefix: "grp_"
+order: [grp_a, grp_b]
+groups:
+  grp_a: {label: "Group A (ETH, KEN)", short: "A"}
+  grp_b: {label: "Group B (NGA, CMR)", short: "B"}

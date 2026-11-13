@@ -1,0 +1,58 @@
+# analysis/bash/cluster.profile.example — the cluster profile every driver
+# and payload reads through analysis/bash/lib/cluster.sh. Copy it to
+# analysis/bash/cluster.profile (or anywhere, and export
+# CHOLERA_CLUSTER_PROFILE=<path>) and fill in your cluster. Plain bash: only
+# variable assignments. Every variable is optional; without a profile, jobs go
+# to the cluster's default partition with each payload's #SBATCH mem / time /
+# cpus, and nothing is loaded before Rscript runs.
+#
+# No cluster at all: run with the local backend instead (no profile needed),
+#   CHOLERA_BACKEND=local bash analysis/bash/tools/run_pipeline.sh --deploy D.yml --local
+#
+# Check what a submission would look like:
+#   bash -c 'source analysis/bash/lib/cluster.sh; cholera_sbatch_cmd SHORT --job-name x analysis/bash/slurm/submit_results.sh; echo "${CHOLERA_SBATCH_CMD[*]}"'
+
+# --- software environment (cholera_env [STACK]) ---------------------------------
+# Shell code eval'ed before every Rscript (payloads and login-node drivers).
+# Stacks: (default) fits / postprocess / simulator / smoothing; GEO 00-03,
+# population and 09 (needs sf + GDAL); MANUSCRIPT 10 + 11 (+ quarto); REPORTS 12
+# (+ quarto, LibreOffice optional). A stack left unset falls back to
+# CHOLERA_ENV_SETUP. CHOLERA_ENV_PURGE runs first where a payload asks for a
+# clean environment (cholera_env --purge).
+CHOLERA_ENV_SETUP=""
+# CHOLERA_ENV_SETUP='module load R/4.3.2'
+# CHOLERA_ENV_SETUP='source ~/miniforge3/etc/profile.d/conda.sh && conda activate cholera'
+# CHOLERA_ENV_SETUP_GEO='module load R/4.3.2 GDAL/3.7.1'
+# CHOLERA_ENV_SETUP_MANUSCRIPT='module load R/4.3.2 GDAL/3.7.1 quarto'
+# CHOLERA_ENV_SETUP_REPORTS="$CHOLERA_ENV_SETUP_MANUSCRIPT"
+# CHOLERA_ENV_PURGE='module purge'
+
+# --- job classes (cholera_sbatch SHORT | LONG | BIGMEM) --------------------------
+# SHORT: <= 12 h (postprocess, simulator arrays, 09-12, relay jobs);
+# LONG: up to 4 days (fits, preprocessing); BIGMEM: smoothing (75 GB a task).
+CHOLERA_PARTITION_SHORT=""
+CHOLERA_PARTITION_LONG=""
+CHOLERA_PARTITION_BIGMEM=""
+# CHOLERA_ACCOUNT=""            # --account, every job (or CHOLERA_ACCOUNT_<CLASS>)
+# CHOLERA_QOS=""                # --qos, every job (or CHOLERA_QOS_<CLASS>)
+# Class-wide sizes override every payload's #SBATCH line of that class; leave
+# unset unless your cluster needs them.
+# CHOLERA_MEM_LONG="32G"; CHOLERA_TIME_LONG="2-00:00:00"; CHOLERA_CPUS_LONG=8
+
+# --- per-payload overrides ----------------------------------------------------------
+# CHOLERA_RES_<KEY>: sbatch options (--opt=value words) for one payload, above the
+# class defaults. KEY = the payload name without submit_ and .sh, upper-cased
+# (slurm/submit_smoothing.sh -> SMOOTHING), or a driver's job key: RELAY
+# (run_pipeline.sh relay jobs), POP_COMPILE (02c), CROSSWALK.
+# CHOLERA_RES_RESULTS="--partition=bigmem --mem=160G"
+# CHOLERA_RES_FIT="--time=2-00:00:00"
+
+# --- run_pipeline.sh sizes (defaults shown) ------------------------------------------
+# CHOLERA_RELAY_TIME="03:00:00"
+# CHOLERA_RESULTS_MEM="160G"          # 09 array tasks (the attribution steps peak at ~100 GB)
+# CHOLERA_HINDCAST_PP_WORKERS=8
+# CHOLERA_HINDCAST_PP_MEM="240G"
+
+# --- logs and the local backend ---------------------------------------------------
+# CHOLERA_LOG_DIR="logs"              # job logs, relative to the repository root
+# CHOLERA_CORES=4                     # local backend: array tasks run at once

@@ -1,0 +1,5 @@
+# Test fixture: the simulator design keys of a historical smoothing template
+# (deploy.templates.historical), read by results_derive.R::run_design_table().
+simulator:
+  n_replicates: 100
+  max_draws: 200

@@ -1,0 +1,2652 @@
+---
+title: "Cholera–Climate Manuscript — Key Numbers"
+subtitle: "Every headline number, read from the phase-09 report artefacts"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-expand: true
+    embed-resources: true
+    df-print: kable
+params:
+  config_path: "analysis/configs/results/manuscript.yml"
+---
+
+<!--
+  Phase-11 "key numbers" report — DISPLAY ONLY.
+
+  This notebook mirrors the derivation/plotting split the repo already enforces
+  for figures: analysis/09b_postprocess_results.R DERIVES the report_*
+  artefacts under generated_data/results/<tag>/, and this notebook only READS
+  them (via results_require(), the same contract 10_manuscript_figures.R uses)
+  and renders kable tables. It never touches a fit, a particle filter, or a raw
+  dataset. All numbers are stored NUMERIC in the artefacts; the formatters,
+  table shaping and emission live in analysis/utils/results_report.R. The one
+  exception to "summaries come from 09": the Section 1 gtsummary tables
+  summarise and test 09's per-outbreak rows (report_dataset$outbreaks) at
+  render time.
+
+  Structure: Sections 1-5 are the manuscript headline numbers in the order of
+  the manuscript; "Supplementary tables" keeps every other table and the
+  S-numbered CSVs.
+
+  Reporting conventions:
+    * every estimate with its 95% interval; a number that has none by
+      construction (an observed count, a posterior / replicate classification,
+      a skill score) says so
+    * modelling outputs (BRMS effect sizes)  -> posterior median + 95% CrI
+    * attributable fraction / number / ratio of means -> adjusted posterior
+      median + 95% posterior interval (results.af_posterior), else the replicate
+      means + 95% paired bootstrap
+    * simulation outputs (smoothing/forecast) -> median + 95% (q025/q975)
+    * observed descriptors -> median [IQR]
+
+  Number-formatting convention:
+    * case / onset counts -> nearest 10 below 1,000, nearest 100 at or above
+    * IRR / hazard ratio / ratio of means -> 2 digits
+    * shares and AF -> whole percent (population shares 1 digit)
+    * populations -> millions, 1 digit
+
+  Every emitted table gets an automatic "Table N." label, numbered in
+  document order.
+
+  If any artefact is missing or stale, results_require() stops with the exact
+    Rscript analysis/09b_postprocess_results.R -C <config>
+  command that regenerates it.
+-->
+
+```{r}
+#| label: root
+#| include: false
+# quarto runs a document in its own directory (analysis/); the sourced modules
+# use project-root-relative paths, so pin knitr's working directory to the
+# project root (the dir containing analysis/utils/results_core.R).
+.find_root <- function() {
+  # CHOLERA_PROJECT_ROOT pins it explicitly (the synthetic sandbox, whose
+  # analysis/ is a symlink that normalizePath() would follow back to the repo).
+  env <- Sys.getenv("CHOLERA_PROJECT_ROOT")
+  if (nzchar(env)) return(normalizePath(env))
+  d <- normalizePath(getwd())
+  while (!file.exists(file.path(d, "analysis/utils/results_core.R"))) {
+    parent <- dirname(d)
+    if (identical(parent, d)) stop("project root not found from ", getwd())
+    d <- parent
+  }
+  d
+}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = .find_root())
+```
+
+```{r}
+#| label: init
+suppressPackageStartupMessages({
+  library(dplyr); library(tibble); library(stringr); library(tidyr)
+  library(knitr); library(kableExtra); library(qs2); library(yaml)
+})
+
+# results_core.R: makeResultsRunFile(), results_require(), RESULTS_SCHEMA, the
+# registries, enso_conds_named() (via figures_cb). deploy_core.R: so a set
+# results.deploy_config resolves exactly as in 09/10. results_report.R: the
+# formatters, report_wide(), report_emit_html(), report_loader().
+for (.m in c("results_core", "deploy_core", "results_report"))
+  source(file.path("analysis/utils", paste0(.m, ".R")))
+
+# Resolve the config the way 09 and 10 do, so RES is the block 09 stamped.
+CONFIG_PATH <- params$config_path
+# capture.output(): make_options_from_config() cat()s its "Setting default" lines.
+invisible(utils::capture.output(
+  opt <- suppressMessages(make_options_from_config(option_list = list(),
+                                                   cli_argv = c("--config", CONFIG_PATH),
+                                                   model = NULL))))
+RES         <- opt$results
+MAIN_SET    <- as.character(RES$scope$main_set)
+FIG1_TRACKS <- as.character(RES$scope$fig1_tracks)
+SETS        <- resolve_results_sets(RES)
+LV          <- report_levels(RES)   # region / cond / scope / scenario(sets) orderings
+AF_POST     <- isTRUE(RES$af_posterior)
+
+.table_n <- report_table_counter()
+# Every table is also written as CSV under results.style.tables_dir (one file
+# per table, "<NN>_<slug>.csv"; the Data S1 ones are slugged "D<n>_...").
+# Cleared first: table numbers shift when sections change.
+TABLES_DIR <- RES$style$tables_dir %||% ""
+if (nzchar(TABLES_DIR)) {
+  dir.create(TABLES_DIR, recursive = TRUE, showWarnings = FALSE)
+  unlink(list.files(TABLES_DIR, "\\.csv$", full.names = TRUE))
+}
+# Data release (results.style.data_release): at the end of the report
+# every D / T CSV is also copied into <tables_dir>/supp_data/ or
+# <tables_dir>/github/ with a manifest (chunk data-release). Captions are
+# collected here by slug as the tables are emitted.
+# Unset in the config -> the default map of get_default_options() (config.R).
+DATA_RELEASE <- RES$style[["data_release"]] %||% get_default_options()$results$style$data_release
+.CAPTIONS <- new.env(parent = emptyenv())
+note_caption <- function(slug, cap) if (!is.null(slug) && nzchar(slug)) assign(slug, cap, envir = .CAPTIONS)
+# Group display labels (results.style.group_labels): the
+# artefacts store group ids and the sidecar's short names; "lag" prints them as
+# classes lettered by the deployed occurrence lag (group_labels artefact),
+# "centroid" by the sidecar's centroid names ("West [GW]", short "GW"),
+# "registry" leaves every table as before. Applied in emit() and in every CSV
+# writer (report_write_csv() is wrapped below).
+GROUP_LABEL_MODE <- as.character(RES$style[["group_labels"]] %||% "registry")
+.mp <- as.character(RES$inputs$manifest %||% "")
+GROUP_META <- results_group_meta(if (nzchar(.mp) && file.exists(.mp)) list(MAN = yaml::read_yaml(.mp)) else NULL)
+R0_ <- report_loader(opt, CONFIG_PATH, RES)
+GROUP_DISP <- group_display_meta(
+  GROUP_META, if (identical(GROUP_LABEL_MODE, "lag")) R0_("results_group_labels")$groups else NULL,
+  GROUP_LABEL_MODE)
+relab <- function(df, cols = NULL) relabel_groups(df, GROUP_DISP, cols)
+# Under "centroid" the region / scope orderings follow the display order (GW,
+# GG, GH, GE, GS) instead of the sidecar order; other modes are unchanged.
+if (identical(GROUP_LABEL_MODE, "centroid")) {
+  LV$region <- unname(GROUP_META$short[GROUP_DISP$order])
+  LV$scope  <- c("Africa", LV$region)
+}
+.report_write_csv_raw <- report_write_csv
+report_write_csv <- function(df, path) .report_write_csv_raw(relab(df), path)
+# A group's short display token: the id without "enso_" under "registry" (as
+# before), the class short label ("A −6") under "lag", "GW" under "centroid".
+grp_token <- function(id) if (!identical(GROUP_LABEL_MODE, "registry")) unname(GROUP_DISP$short[id]) else sub("^enso_", "", id)
+# Membership certainty of the deployed classes (report_membership):
+# p_max = a country's largest posterior class probability in the deployed
+# sweep cell; "†" below style.membership_low. NULL when results.kl_sweep_dir /
+# kl_sweep_cell are unset (no p_max columns).
+MB <- if (nzchar(RES$kl_sweep_dir %||% "") && nzchar(RES[["kl_sweep_cell"]] %||% ""))
+  R0_("results_report_membership") else NULL
+MB_LOW <- as.numeric(RES$style[["membership_low"]] %||% 0.6)
+pmax_lab <- function(iso3) {
+  p <- stats::setNames(MB$country$p_max, MB$country$iso3)[as.character(iso3)]
+  ifelse(is.na(p), "—", sprintf("%.2f%s", p, ifelse(p < MB_LOW, "†", "")))
+}
+# "n / median p_max" of a group, from its id or its stored short name.
+grp_pmax_lab <- function(g) {
+  g <- as.character(g)
+  id <- ifelse(g %in% GROUP_META$order, g, names(GROUP_META$short)[match(g, GROUP_META$short)])
+  x <- MB$group[match(id, MB$group$group), , drop = FALSE]
+  ifelse(is.na(x$group), "—", sprintf("%d / %.2f", x$n_hard, x$p_max_median))
+}
+# Add a p_max column (by country) or an "n / median p_max" column (by group) to
+# a table about to be emitted; unchanged without report_membership.
+with_pmax <- function(df, col, by = c("country", "group")) {
+  by <- match.arg(by)
+  if (is.null(MB) || is.null(df) || !nrow(df)) return(df)
+  if (by == "country") df[["p_max"]] <- pmax_lab(df[[col]])
+  else df[["n / median p_max"]] <- grp_pmax_lab(df[[col]])
+  df
+}
+# with_afro() / AFRO_COL / AFRO_NOTE: the WHO-AFRO subregion column (utils/results_report.R).
+# A printed table: relabelled values, and the "ENSO group" header says what
+# the labels are under "lag".
+relab_tab <- function(df) {
+  df <- relab(df)
+  if (!is.null(df) && identical(GROUP_LABEL_MODE, "lag"))
+    names(df)[names(df) == "ENSO group"] <- "ENSO lag class"
+  df
+}
+emit <- function(df, cap, pack_by = NULL, slug = NULL, raw = NULL) {
+  if (identical(pack_by, "ENSO group") && identical(GROUP_LABEL_MODE, "lag")) pack_by <- "ENSO lag class"
+  if (!is.null(df) && AFRO_COL %in% names(df) && any(grepl("‡", df[[AFRO_COL]], fixed = TRUE)))
+    cap <- paste(cap, AFRO_NOTE)
+  note_caption(slug, cap)
+  report_emit_html(relab_tab(df), cap, pack_by, .table_n, slug = slug, csv_dir = TABLES_DIR, raw = relab(raw))
+}
+# A gtsummary table, numbered and written as CSV like emit(). gtsummary is
+# optional: without it the Section 1
+# summaries and tests are skipped with a note.
+HAS_GT <- requireNamespace("gtsummary", quietly = TRUE)
+emit_gt <- function(tbl, cap, slug = NULL) {
+  note_caption(slug, cap)
+  n <- .table_n()
+  if (nzchar(TABLES_DIR))
+    report_write_csv(gtsummary::as_tibble(tbl, col_labels = TRUE),
+                     file.path(TABLES_DIR, report_csv_name(n, cap, slug)))
+  k <- gtsummary::as_kable_extra(tbl, format = "html", escape = FALSE,
+                                 caption = sprintf("Table %d. %s", n, cap)) |>
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = FALSE, position = "left")
+  # gtsummary escapes "<" in its p-values once more than kable expects.
+  cat(gsub("&amp;lt;", "&lt;", as.character(k), fixed = TRUE), "\n\n")
+}
+R_   <- report_loader(opt, CONFIG_PATH, RES)
+# ENSO condition labels are shortened for display ("La Niña (−2.0)" -> "(−2)").
+cond_fct <- function(x) factor(short_enso(x), levels = LV$cond)
+.has <- function(v, x) isTRUE(length(x) == 1L && any(abs(v - as.numeric(x)) < 1e-9))
+bold <- function(x) paste0("**", x, "**")
+# Bold (raw HTML) when a 95% interval excludes 0 (AF, AN).
+bold0 <- function(txt, lo, hi) ifelse(!is.na(lo) & !is.na(hi) & (lo > 0 | hi < 0),
+                                      paste0("<strong>", txt, "</strong>"), txt)
+fmt_irr <- function(m, lo, hi) fmt_ratio_bold(m, lo, hi, 2)
+# AF / AN with their interval; the point alone where the artefact has none
+# (e.g. the paired bootstrap with attrib_boot_b = 0).
+.no_ci  <- function(lo, hi) is.na(lo) & is.na(hi)
+.nz     <- function(x) gsub("(^|[ (])-0%", "\\10%", x)   # "-0%" -> "0%"
+fmt_af  <- function(m, lo, hi) .nz(ifelse(.no_ci(lo, hi), fmt_pct(m), bold0(fmt_pct_ci(m, lo, hi, 0), lo, hi)))
+fmt_an  <- function(metric, m, lo, hi) ifelse(.no_ci(lo, hi),
+  ifelse(metric == "onsets", fmt_int(m), fmt_cases(m)),
+  bold0(ifelse(metric == "onsets", fmt_ci_int(m, lo, hi), fmt_ci_cases(m, lo, hi)), lo, hi))
+scope_lab <- function(level, region) ifelse(level == "continent", "Africa", as.character(region))
+scope_fct <- function(x) factor(x, levels = unique(c(LV$scope, sort(unique(as.character(x))))))
+```
+
+This report is keyed to config **`r CONFIG_PATH`** (deploy
+`r RES$deploy_config %||% "—"`; analog sets: `r paste(SETS, collapse = ", ")`;
+main counterfactual set: **`r MAIN_SET`**). Every estimate comes with its 95%
+interval; numbers without one (observed counts, classifications, skill scores)
+are marked as such.
+
+# 1 — Description of observations
+
+```{r}
+#| label: r1-load
+d  <- R_("results_report_dataset")
+rc <- d$raw_counts
+cv <- d$coverage
+cn <- setNames(d$counts$value, d$counts$metric)
+```
+
+Observed counts (no uncertainty interval); distributions as median [IQR].
+National-level (ADM0) outbreaks are excluded throughout.
+
+- **Raw outbreak set** (all outbreaks extracted from the time-series database,
+  African countries): **`r fmt_int(rc$n_outbreaks)` outbreaks** in
+  **`r fmt_int(rc$n_locations)` locations** across
+  **`r fmt_int(rc$n_countries)` countries**
+  (`r fmt_cases(rc$n_suspected_cases)` suspected cases).
+- **Analysis dataset**: **`r fmt_int(cv$n_gids_panel)` locations** in
+  **`r fmt_int(cv$n_countries_panel)` countries**;
+  **`r fmt_int(cv$n_location_months_panel)` location-months** at risk
+  (`r format(cv$date_min, "%b %Y")` – `r format(cv$date_max, "%b %Y")`);
+  **`r fmt_pop(cv$total_pop_covered, 1)` people** covered in
+  `r cv$pop_ref_year` (`r fmt_int(cv$n_adm1_covered)` ADM1 units, observed
+  sub-unit population).
+- **Outbreaks in the analysis dataset**: **`r fmt_int(cn[["n_outbreaks"]])`**
+  (canonical episodes) in `r fmt_int(cn[["n_gids"]])` locations,
+  `r fmt_cases(cn[["n_suspected_cases"]])` suspected cases. The analysis
+  dataset has ADM1 and ADM2 locations only (no ADM3).
+
+```{r}
+#| label: r1
+#| results: asis
+emit(d$raw_table1 |> transmute(
+       `Admin level`                    = admin_level,
+       Outbreaks                        = fmt_int(n_outbreaks),
+       Locations                        = fmt_int(n_locations),
+       Countries                        = fmt_int(n_countries),
+       `Total cases`                    = fmt_cases(total_cases),
+       `Cases, median [IQR]`            = fmt_iqr(cases_med, cases_q25, cases_q75, fmt_int),
+       `Duration (weeks), median [IQR]` = fmt_iqr(dur_wk_med, dur_wk_q25, dur_wk_q75, fmt_num, digits = 1),
+       `Population (thousands), median [IQR]` = fmt_iqr(pop_med / 1e3, pop_q25 / 1e3, pop_q75 / 1e3, fmt_int),
+       `Attack rate /1,000, median [IQR]` = fmt_iqr(ar_med, ar_q25, ar_q75, fmt_num, digits = 2)),
+     "Raw outbreak set: outbreak descriptors by admin level (Zheng et al. 2022 layout; ADM0 excluded)",
+     slug = "outbreaks_raw_by_level", raw = d$raw_table1)
+
+# Data S1 / GitHub, D35: the analysis set by admin level
+# (report_dataset$table1, the same layout on the analysis outbreak set; ADM0
+# excluded; duration months from the duration panel's episodes).
+emit(report_analysis_set_table(d$table1),
+     "Analysis set: outbreak descriptors by admin level (Zheng et al. 2022 layout; ADM0 excluded; D35)",
+     slug = "D35_analysis_set_by_level",
+     raw = if (!is.null(d$table1)) d$table1[as.character(d$table1$admin_level) != "ADM0", , drop = FALSE])
+
+# GitHub, D35b / D35c (supplementary tables S2 and S3): the same
+# descriptors by admin level (incl. All) and outbreaks by season-year ENSO
+# state, for Africa and each WHO-AFRO subregion (report_dataset v5).
+emit(report_analysis_set_region_table(d$table1_region),
+     "Analysis set: outbreak descriptors by admin level, Africa and WHO-AFRO subregion (SOM and SDN under Eastern Africa; D35b)",
+     pack_by = "region", slug = "D35b_analysis_set_by_level_region", raw = d$table1_region)
+emit(report_enso_region_table(d$enso_region, d$enso_region_p),
+     "Analysis set: outbreaks by season-year ENSO state, Africa and WHO-AFRO subregion (share of the block's outbreaks; Kruskal-Wallis p across the three states, unadjusted; D35c)",
+     pack_by = "region", slug = "D35c_outbreaks_by_enso_region",
+     raw = report_enso_region_table(d$enso_region, d$enso_region_p, raw = TRUE))
+
+ENSO_STATES <- c("La Niña", "Neutral", "El Niño")
+ob <- d$outbreaks |>
+  mutate(enso_state  = factor(enso_state, levels = ENSO_STATES),
+         region      = factor(region, levels = LV$region),
+         admin_level = factor(admin_level),
+         pop         = pop / 1e3) |>   # thousands
+  relab("region")
+GT_VARS <- c("cases", "duration_weeks", "duration_months", "attack_rate_1k", "pop")
+GT_LAB  <- list(cases = "Suspected cases", duration_weeks = "Duration (weeks)",
+                duration_months = "Duration (months, monthly track)",
+                attack_rate_1k = "Attack rate (/1,000)", pop = "Population (thousands)",
+                admin_level = "Admin level",
+                region = if (identical(GROUP_LABEL_MODE, "lag")) "ENSO lag class" else "ENSO group")
+GT_DIG  <- list(cases = 0, duration_weeks = 1, duration_months = 0, attack_rate_1k = 2, pop = 0)
+GT_STAT <- list(gtsummary::all_continuous() ~ "{median} [{p25}–{p75}]",
+                gtsummary::all_categorical() ~ "{n} ({p}%)")
+gt_sum <- function(x, by, include)
+  gtsummary::tbl_summary(x, by = all_of(by), include = all_of(include),
+                         label = GT_LAB[intersect(names(GT_LAB), include)],
+                         digits = GT_DIG[intersect(names(GT_DIG), include)],
+                         statistic = GT_STAT, missing = "no")
+gt_p <- function(t)
+  gtsummary::add_p(t, test = list(gtsummary::all_continuous() ~ "kruskal.test",
+                                  gtsummary::all_categorical() ~ "chisq.test")) |>
+  gtsummary::bold_p(t = 0.05)
+
+if (HAS_GT) {
+  emit_gt(gt_sum(ob, "admin_level", c(GT_VARS, "region")) |> gtsummary::add_overall(),
+          "Analysis dataset: outbreak descriptors by admin level", slug = "outbreaks_analysis_by_level")
+} else cat("*gtsummary is not installed: the analysis-dataset and ENSO-condition summaries are skipped.*\n\n")
+```
+
+**By ENSO condition.** Each outbreak takes the ENSO state of its cholera
+season-year: the ONI of the DJF whose December lies in that season-year,
+El Niño at ≥ +0.5 and La Niña at ≤ −0.5 (`r if (is.null(d$enso_state_rule)) "threshold phase of the DJF ONI, no persistence" else d$enso_state_rule$label`; not the CPC episode rule). Differences are tested with
+Kruskal–Wallis (continuous) and χ² (categorical) tests; p < 0.05 in bold. These
+are observed differences, not adjusted for location, season or year (the
+models of Section 2 are).
+
+```{r}
+#| label: r1-enso
+#| results: asis
+#| eval: !expr HAS_GT
+t_enso <- gt_sum(ob, "enso_state", c(GT_VARS, "admin_level", "region")) |>
+  gtsummary::add_overall() |> gt_p()
+sig <- t_enso$table_body |> filter(row_type == "label", !is.na(p.value), p.value < 0.05)
+cat(if (nrow(sig))
+      paste0("Outbreak characteristics that differ between ENSO states (p < 0.05): ",
+             paste(sprintf("%s (%s)", bold(sig$label),
+                         ifelse(sig$p.value < 1e-3, "p < 0.001", sprintf("p = %s", signif(sig$p.value, 2)))),
+                   collapse = "; "), ".\n\n")
+    else "No outbreak characteristic differs between ENSO states at p < 0.05.\n\n")
+emit_gt(t_enso, "Analysis dataset: outbreak descriptors by season-year ENSO state",
+        slug = "outbreaks_by_enso")
+emit_gt(gtsummary::tbl_strata(ob, strata = admin_level,
+          .tbl_fun = ~ gt_sum(.x, "enso_state", c(GT_VARS, "region")) |> gt_p()),
+        "Analysis dataset: outbreak descriptors by season-year ENSO state, within admin level",
+        slug = "outbreaks_by_enso_level")
+```
+
+# 2 — ENSO effects
+
+```{r}
+#| label: r2-load
+EFF <- setNames(lapply(FIG1_TRACKS, function(t) R_("results_report_effects", track = t)), FIG1_TRACKS)
+TRACK_FCT <- function(x) factor(x, levels = FIG1_TRACKS)
+eff_long <- function(el) bind_rows(lapply(FIG1_TRACKS, function(t) mutate(EFF[[t]][[el]], track = t)))
+```
+
+Effects are the posterior median incidence-rate ratio (IRR) at each ONI
+condition of Figure 2 vs. neutral (ONI 0), with its 95% CrI; bold = CrI
+excludes 1. Estimands per track:
+`r paste(sprintf("**%s**: %s", FIG1_TRACKS, vapply(EFF, function(e) e$estimand, "")), collapse = "; ")`.
+For duration, a hazard ratio < 1 means longer outbreaks.
+
+```{r}
+#| label: r2
+#| results: asis
+emit(eff_long("best_lag") |>
+       mutate(val = sprintf("%+d", as.integer(best_lag)), track = TRACK_FCT(track)) |>
+       report_wide("region", "track", "val", levels = list(region = LV$region),
+                   rename = c(`ENSO group` = "region")) |>
+       with_pmax("ENSO group", "group"),
+     "Deployed ENSO lag by ENSO group and track (months; negative = ENSO leads the outcome; selected by LOO, no interval — Δelpd in the supplementary lag tables)",
+     slug = "enso_lags")
+
+emit(eff_long("effects_region") |>
+       mutate(track = TRACK_FCT(track), enso_label = cond_fct(enso_label),
+              val = fmt_irr(IRR, IRR_lo, IRR_hi)) |>
+       report_wide(c("track", "region"), "enso_label", "val", levels = list(region = LV$region),
+                   rename = c(Track = "track", `ENSO group` = "region")) |>
+       with_pmax("ENSO group", "group"),
+     "Exposure-response by ENSO group and track at the Figure 2 ONI conditions (IRR vs neutral, posterior median, 95% CrI; conditional on the other model terms; for occurrence, a direct effect given outbreak history and contagion)",
+     pack_by = "Track", slug = "enso_erf_group", raw = eff_long("effects_region"))
+
+# Largest / smallest country effect per group: highest / lowest median IRR on
+# the adverse scale (duration: the lowest cessation hazard ratio is the largest).
+ext <- eff_long("effects_country") |>
+  mutate(adv = TRACK_ADVERSE_SIGN[track] * log(IRR),
+         cell = if (is.null(MB)) sprintf("%s %s", country, fmt_irr(IRR, IRR_lo, IRR_hi))
+                else sprintf("%s [p_max %s] %s", country, pmax_lab(country), fmt_irr(IRR, IRR_lo, IRR_hi))) |>
+  group_by(track, region, enso_label) |>
+  summarise(largest = cell[which.max(adv)], smallest = cell[which.min(adv)], .groups = "drop") |>
+  pivot_longer(c(largest, smallest), names_to = "which", values_to = "val") |>
+  mutate(track = TRACK_FCT(track), enso_label = cond_fct(enso_label))
+emit(ext |> report_wide(c("track", "region", "which"), "enso_label", "val",
+                        levels = list(region = LV$region),
+                        rename = c(Track = "track", `ENSO group` = "region", Country = "which")),
+     "Largest and smallest country effect within each ENSO group (country: IRR vs neutral, posterior median, 95% CrI; adverse scale, so for duration 'largest' = lowest hazard ratio)",
+     pack_by = "Track", slug = "enso_erf_country_extremes")
+```
+
+# 3 — ENSO-sensitive areas
+
+```{r}
+#| label: r3-load
+ex <- R_("results_report_enso_exposure")
+HL <- RES$style$enso_headline
+TRACK_KEYS <- c(ex$tracks, "any", "any_credible", "concordant2")
+if (is.null(HL) || !isTRUE(HL$direction %in% unique(ex$exposure$direction)) ||
+    !isTRUE(HL$track %in% TRACK_KEYS) || !.has(ex$magnitudes, HL$magnitude) || !.has(ex$cutoffs, HL$cutoff))
+  stop("results.style.enso_headline must name a cell of report_enso_exposure: direction in {",
+       paste(unique(ex$exposure$direction), collapse = ", "), "}, track in {",
+       paste(TRACK_KEYS, collapse = ", "), "}, magnitude in {", paste(ex$magnitudes, collapse = ", "),
+       "} (thresholds.enso_magnitudes), cutoff in {", paste(ex$cutoffs, collapse = ", "),
+       "} (thresholds.pop_prob_cutoffs).", call. = FALSE)
+HL_M <- ex$magnitudes[which.min(abs(ex$magnitudes - HL$magnitude))]
+HL_P <- ex$cutoffs[which.min(abs(ex$cutoffs - HL$cutoff))]
+TRACK_LAB <- c(stats::setNames(ex$tracks, ex$tracks), any = "any track (union)",
+               any_credible = "some single track", concordant2 = "≥2 tracks")
+DIR_LAB   <- c(adverse = "adverse", protective = "protective", either = "either direction")
+MAG_LEVELS <- fmt_pct(ex$magnitudes)
+lab <- function(d) d |> mutate(enso_label = cond_fct(enso_label),
+                               mag = factor(fmt_pct(magnitude), levels = MAG_LEVELS),
+                               trk = factor(TRACK_LAB[track], levels = TRACK_LAB[TRACK_KEYS]),
+                               dir = factor(DIR_LAB[direction], levels = DIR_LAB))
+e5 <- lab(ex$exposure)
+g5 <- lab(ex$grid) |> mutate(pcut = factor(fmt_pct(cutoff), levels = fmt_pct(ex$cutoffs)))
+at_mag <- function(d, m) filter(d, abs(magnitude - m) < 1e-9)
+at_cut <- function(d, cut) filter(d, abs(cutoff - cut) < 1e-9)
+hl_grid <- at_mag(filter(g5, direction == HL$direction, track == HL$track), HL_M)
+# CSVs carry the artefact's own columns, not the display factors added by lab().
+unlab <- function(d) select(d, -any_of(c("mag", "trk", "dir", "pcut")))
+# The certainty rule as a phrase, for a direction and a cutoff text `pt`.
+rule_txt <- function(dir, pt, m = HL_M, track = HL$track) {
+  eff <- sprintf("%s effect beyond %s", DIR_LAB[[dir]], fmt_pct(m))
+  if (track == "any_credible") sprintf("P(%s) ≥ %s on at least one track on its own", eff, pt)
+  else sprintf("P(%s, %s) ≥ %s", eff, TRACK_LAB[[track]], pt)
+}
+hl_rule <- function(pt) rule_txt(HL$direction, pt)
+cert_cell <- function(n, pop, pct) sprintf("%s ADM1 · %s (%s)", fmt_int(n), fmt_pop(pop, 1), fmt_pct(pct, 1))
+```
+
+An ADM1's ENSO effect on a track is **adverse** when it means more cholera
+(higher onset or case rate; for duration a *lower* cessation hazard, i.e.
+longer outbreaks) and **protective** otherwise. For a magnitude m, an ADM1 is
+exposed on a posterior draw when its drawn IRR lies beyond 1 + m in that
+direction. Across the `r paste(ex$tracks, collapse = ", ")` tracks, "some
+single track" counts an ADM1 when at least one track **on its own** meets the
+certainty cutoff; "any track (union)" takes the certainty of the union (it
+inflates with several weak tracks: three tracks at 0.65 give 0.96); "≥2 tracks"
+needs two tracks on the same draw. Population: observed sub-unit population in
+`r ex$pop_ref_year`; `r ex$n_draws` posterior draws.
+
+Two readings of the same draws:
+
+- **ENSO-sensitive ADM1 units** (the headline): ADM1s with posterior
+  probability ≥ p of the effect. A classification of the posterior, so it has
+  **no interval by construction**; its sensitivity to m, p and the cross-track
+  rule is shown instead.
+- **Expected exposed population**: on each draw, the population of the ADM1s
+  exposed on that draw; mean + **95% CrI** across draws (per track).
+
+**Headline definition** (`results.style.enso_headline`): an ADM1 is
+ENSO-sensitive when **`r hl_rule(fmt_pct(HL_P))`**.
+
+```{r}
+#| label: r3-fun
+# One block per direction: Africa bullets, the headline table by region, the
+# expected exposed population per track, and the alternative definitions.
+# (`dr`, not `dir`: lab() adds a `dir` column that would mask the argument.)
+exposure_block <- function(dr, tag) {
+  hg <- at_cut(at_mag(filter(g5, direction == dr, track == HL$track), HL_M), HL_P)
+  afr <- filter(hg, level == "continent") |> arrange(enso_label)
+  cat(paste0("- ", bold(as.character(afr$enso_label)), ": ", bold(fmt_int(afr$n_adm1)),
+             " ADM1 units, ", bold(fmt_pop(afr$pop, 1)), " people (", bold(fmt_pct(afr$pct, 1)),
+             " of the covered population)", collapse = "\n"), "\n\n")
+
+  emit(hg |> filter(level != "country") |>
+         mutate(val = cert_cell(n_adm1, pop, pct)) |>
+         report_wide("scope", "enso_label", "val", levels = list(scope = LV$scope),
+                     rename = c(Scope = "scope")),
+       sprintf("ENSO-sensitive ADM1 units (%s): %s — Africa + by ENSO group (N ADM1 · population (share of the scope's population); no interval by construction)",
+               DIR_LAB[[dr]], rule_txt(dr, fmt_pct(HL_P))),
+       slug = paste0("enso_sensitive_", tag), raw = unlab(filter(hg, level != "country")))
+
+  emit(at_mag(filter(e5, direction == dr, track %in% ex$tracks, level != "country"), HL_M) |>
+         mutate(val = sprintf("%s · %s", fmt_pop_ci(pop_mean, pop_lo, pop_hi, 1),
+                              fmt_pct_ci(pct_mean, pct_lo, pct_hi, 0))) |>
+         report_wide(c("scope", "trk"), "enso_label", "val", levels = list(scope = LV$scope),
+                     rename = c(Scope = "scope", Track = "trk")),
+       sprintf("Expected exposed population (%s effect beyond %s on the track), per posterior draw — Africa + by ENSO group (population · share; mean, 95%% CrI)",
+               DIR_LAB[[dr]], fmt_pct(HL_M)),
+       pack_by = "Scope", slug = paste0("enso_expected_", tag),
+       raw = unlab(at_mag(filter(e5, direction == dr, level != "country"), HL_M)))
+
+  ga <- filter(g5, direction == dr, level == "continent")
+  alt <- bind_rows(
+    at_cut(at_mag(ga, HL_M), HL_P) |>
+      mutate(varied = "Cross-track rule", def = as.character(trk)),
+    at_cut(filter(ga, track == HL$track), HL_P) |>
+      mutate(varied = "Magnitude m", def = paste0("m = ", fmt_pct(magnitude))),
+    at_mag(filter(ga, track == HL$track), HL_M) |>
+      mutate(varied = "Probability cutoff p", def = paste0("p = ", fmt_pct(cutoff)))) |>
+    mutate(def = ifelse((varied == "Cross-track rule" & track == HL$track) |
+                          (varied == "Magnitude m" & abs(magnitude - HL_M) < 1e-9) |
+                          (varied == "Probability cutoff p" & abs(cutoff - HL_P) < 1e-9),
+                        paste(def, "(headline)"), def),
+           varied = factor(varied, levels = c("Cross-track rule", "Magnitude m", "Probability cutoff p")),
+           def = factor(def, levels = unique(def)),
+           val = cert_cell(n_adm1, pop, pct))
+  emit(alt |> report_wide(c("varied", "def"), "enso_label", "val",
+                          rename = c(Varied = "varied", Definition = "def")),
+       sprintf("ENSO-sensitive ADM1 units (%s), alternative definitions — Africa; one element of the headline definition varied at a time (N ADM1 · population (share); no interval by construction)",
+               DIR_LAB[[dr]]),
+       pack_by = "Varied", slug = paste0("enso_sensitive_alt_", tag), raw = unlab(alt))
+}
+```
+
+## Adverse effects (more cholera)
+
+```{r}
+#| label: r3-adverse
+#| results: asis
+exposure_block("adverse", "adverse")
+```
+
+## Protective effects (less cholera)
+
+```{r}
+#| label: r3-protective
+#| results: asis
+exposure_block("protective", "protective")
+```
+
+# 4 — Historical smoothing and attribution of past ENSO events
+
+```{r}
+#| label: r4-load
+EV_ON <- nzchar(RES$event_manifest %||% "")
+# The headlined forecast-attribution cell (results.style.attrib_headline.window;
+# 09's attrib_cells()): "attribution" = each group over its own firm window,
+# "attribution_common" = every group over the common Africa window
+# (results.scope.africa). Every forecast-attribution headline filters on it.
+HL_WIN <- as.character(RES$style$attrib_headline[["window"]] %||% "attribution")
+WIN_LAB <- c(attribution = "each group to its firm horizon",
+             post_fork = "each group to its firm horizon, post-fork months only",
+             attribution_common = "common Africa window",
+             post_fork_common = "common Africa window, post-fork months only",
+             attribution_firm = "common window, each group cut at its firm horizon (no continuation)")
+# The headlined explosive mode (results.style.attrib_headline.explosive):
+# "drop" = pairs reaching thresholds.explosive_case_cap in either arm
+# dropped (explosive_guard TRUE), "none" = every pair kept (FALSE).
+HL_EXPLOSIVE <- as.character(RES$style$attrib_headline[["explosive"]] %||% "drop")
+if (!HL_EXPLOSIVE %in% as.character(unlist(RES$derivation$explosive_modes)))
+  stop("results.style.attrib_headline$explosive must be one of results.derivation.explosive_modes {",
+       paste(unlist(RES$derivation$explosive_modes), collapse = ", "), "}.", call. = FALSE)
+HL_GUARD <- identical(HL_EXPLOSIVE, "drop")
+EXPL_CAP <- as.numeric(RES$thresholds$explosive_case_cap)
+EXPL_LAB <- if (HL_GUARD)
+  sprintf("explosive replicates (group window cases ≥ %s in either arm) dropped",
+          format(EXPL_CAP, big.mark = ",", scientific = FALSE)) else "every replicate kept (no explosive guard)"
+INT_LAB <-if (AF_POST) "95% posterior interval (uncertainty of the ENSO effect)" else
+           "95% paired-bootstrap interval (Monte-Carlo precision)"
+# Attributable fraction / number per (cell, scope, metric) in one shape:
+# af, af_lo, af_hi, an, an_lo, an_hi. Posterior: the adjusted posterior median
+# and interval (as Figures 3 and 4); bootstrap: the replicate means. A scope
+# whose posterior spread is unidentified (noise share >=
+# results.thresholds.af_noise_share_max) prints its pooled value with no
+# interval; af_unidentified_txt() lists those scopes.
+af_rows <- function(d, post) if (post) {
+  ni  <- if ("af_identified" %in% names(d)) d$af_identified %in% FALSE else rep(FALSE, nrow(d))
+  nin <- if ("an_identified" %in% names(d)) d$an_identified %in% FALSE else rep(FALSE, nrow(d))
+  mutate(d, af = ifelse(ni, af_pool, af_adj_med), af_lo = af_adj_lo, af_hi = af_adj_hi,
+         an = ifelse(nin, an_pool, an_adj_med), an_lo = an_adj_lo, an_hi = an_adj_hi)
+} else mutate(d, af = af_of_means, an = an_mean)
+#' One sentence naming the non-country scopes of a posterior table whose AF
+#' spread is unidentified, and how many country rows are; "" when none.
+af_unidentified_txt <- function(d, what) {
+  if (!"af_identified" %in% names(d)) return("")
+  ni <- filter(d, af_identified %in% FALSE)
+  if (!nrow(ni)) return("")
+  nc <- filter(ni, level != "country")
+  where <- c(if (nrow(nc)) paste(unique(sprintf("%s (%s)", nc$scope, nc$metric)), collapse = ", "),
+             if (any(ni$level == "country"))
+               sprintf("%d of %d country rows", sum(ni$level == "country"), sum(d$level == "country")))
+  sprintf(paste0("%s: posterior spread not identified (Monte-Carlo noise share ≥ %s; pooled value shown, ",
+                 "no interval) for %s%s. "),
+          what, fmt_num(RES$thresholds$af_noise_share_max %||% 0.8, 2), paste(where, collapse = " and "),
+          if (!nrow(nc)) "; every Africa and ENSO-group scope is identified" else "")
+}
+af_wide <- function(d, rows, rename)
+  d |> mutate(metric = factor(metric, levels = c("cases", "onsets")),
+              AF = fmt_af(af, af_lo, af_hi), AN = fmt_an(as.character(metric), an, an_lo, an_hi)) |>
+    select(all_of(rows), metric, AF, AN) |>
+    pivot_wider(names_from = metric, values_from = c(AF, AN), names_glue = "{metric}: {.value}") |>
+    select(all_of(rows), starts_with("cases"), starts_with("onsets")) |>
+    rename(all_of(rename))
+```
+
+```{r}
+#| label: r4-events
+#| results: asis
+#| eval: !expr EV_ON
+if (AF_POST) {
+  evp <- R_("results_event_af_posterior")
+  ev_af <- evp$scope |> filter(analog_set == evp$analog_set, explosive_guard == HL_GUARD, level != "country") |>
+    af_rows(TRUE)
+  EVS <- evp$events; EV_SET <- evp$analog_set; EV_FS <- evp$factual_source
+} else {
+  ea <- R_("results_report_event_attrib")
+  ev_af <- ea$af_scope |> filter(factual_source == "simulation", explosive_guard == HL_GUARD, level != "country") |>
+    af_rows(FALSE)
+  EVS <- ea$events; EV_SET <- ea$analog_set; EV_FS <- "simulation"
+}
+ev_lab <- setNames(sprintf("%s (launch %s)", EVS$label, format(EVS$launch, "%Y-%m")), EVS$event)
+ev_af <- ev_af |> mutate(Event = factor(ev_lab[event], levels = ev_lab),
+                         Scope = scope_fct(scope_lab(level, region)))
+# How the 2020-23 La Nina enters: as three annual launches
+# (registry v1) and / or as one event read in per-winter sub-windows (v2).
+EV_HAS_SW <- !is.null((if (AF_POST) evp else ea)$sub_windows)
+EV_ANNUAL <- any(grepl("^lanina_202[012]$", EVS$event))
+cat(sprintf(paste0(
+  "Each strong ENSO event is simulated twice from the historical smoothing, handed off at the ",
+  "event launch (the month before ONI crossed ±0.5 into the event): factual = %s with observed ENSO, ",
+  "counterfactual = Lenssen piControl analogs (set **%s**). AF = 1 − CF / F of the expected window ",
+  "totals, AN = F − CF; %s; %s. Each ENSO group's window ends with the ",
+  "cholera season containing the peak plus its largest positive deployed lag.%s%s\n\n"),
+  if (EV_FS == "simulation") "free simulation" else EV_FS, EV_SET, EXPL_LAB, INT_LAB,
+  if (EV_ANNUAL) " The 2020–23 La Niña as three annual launches: their windows overlap, not additive." else "",
+  if (EV_HAS_SW) paste0(" A multi-winter event (La Niña 2020–23) is one launch and one pair of runs, its ",
+                        "window cut per group into consecutive per-winter sub-windows (each ending with the ",
+                        "season containing its winter's peak plus the largest positive lag); the event row ",
+                        "covers all of them, the sub-windows are in the supplementary table D13 (sub-windows).")
+  else ""))
+afr <- filter(ev_af, Scope == "Africa") |> arrange(Event)
+for (ev in levels(droplevels(afr$Event))) {
+  r <- filter(afr, Event == ev)
+  rc_ <- filter(r, metric == "cases"); ro_ <- filter(r, metric == "onsets")
+  cat(sprintf("- %s: AF of cases **%s**, of outbreak onsets **%s** (Africa)\n", bold(ev),
+              fmt_pct_ci(rc_$af, rc_$af_lo, rc_$af_hi), fmt_pct_ci(ro_$af, ro_$af_lo, ro_$af_hi)))
+}
+cat("\n")
+emit(ev_af |> arrange(Event, Scope) |> af_wide(c("Event", "Scope"), character(0)),
+     sprintf("Attributable fraction (AF) and number (AN) of cases and outbreak onsets per past ENSO event — Africa + by ENSO group (%s; bold = interval excludes 0)",
+             INT_LAB),
+     pack_by = "Event", slug = "event_af", raw = ev_af)
+```
+
+```{r}
+#| label: r4-hindcast
+#| results: asis
+if (isTRUE(RES$scope$hindcast$enable)) {
+  h <- R_("results_report_hindcast")
+  GRP_LAB <- setNames(EFF[[1]]$best_lag$region, EFF[[1]]$best_lag$enso_group)
+  hs <- h$skill_tbl |> mutate(Scope = scope_fct(ifelse(scope == "africa", "Africa", unname(GRP_LAB[scope]))))
+  ha <- filter(hs, Scope == "Africa")
+  cat(sprintf(paste0(
+    "\n**Hindcast performance** (%s runs, launch years %s; skill scores over the runs, no interval). ",
+    "In-sample upper bounds: the hindcast years lie inside the fitting period, the launch states come from ",
+    "the full-record reconstruction and the ENSO index is observed, so these scores do not establish ",
+    "prospective forecast skill (GitHub issue 13). ",
+    "Occurrence: onset counts over each run's window against each location's own onset rate outside it ",
+    "(%s); cases: window totals on %s against the leave-one-year-out climatology. Skill > 0 beats the ",
+    "reference.\n\n",
+    "- Africa: occurrence CRPSS **%s** (lead %s: **%s**), AUC **%s**, Brier skill **%s**; case CRPSS **%s**, ",
+    "simulated / observed cases **%s**, 95%% interval coverage **%s**\n\n"),
+    h$counts$n_runs, h$counts$launch_years, h$headline$occ_reference, h$headline$case_support,
+    fmt_num(ha$occ_crpss, 2), h$headline$short_lead, fmt_num(ha$occ_crpss_short, 2),
+    fmt_num(ha$auc, 2), fmt_num(ha$bss, 3), fmt_num(ha$case_crpss, 2),
+    fmt_num(ha$sim_obs_ratio, 2), fmt_pct(ha$cov95)))
+  emit(hs |> arrange(Scope) |>
+         transmute(Scope = as.character(Scope), Runs = fmt_int(n_runs),
+                   `Occ. CRPSS` = fmt_num(occ_crpss, 2),
+                   !!paste0("Occ. CRPSS, lead ", h$headline$short_lead) := fmt_num(occ_crpss_short, 2),
+                   `Occ. CRPSS, legacy basis` = fmt_num(occ_crpss_legacy, 2),
+                   BSS = fmt_num(bss, 3), AUC = fmt_num(auc, 2),
+                   `Case CRPSS` = fmt_num(case_crpss, 2),
+                   `Case sim / obs` = fmt_num(sim_obs_ratio, 2),
+                   `Case 95% cov.` = fmt_pct(cov95)),
+       paste0("Hindcast skill — Africa + by ENSO group (skill scores, no interval; legacy basis = ",
+              "calendar-year counts vs the in-sample per-location climatology)"),
+       slug = "hindcast_skill", raw = h$skill_tbl)
+  cat(paste0("- ", h$caveats, collapse = "\n"), "\n\n")
+}
+```
+
+# 5 — Forecast for 2026
+
+```{r}
+#| label: r5-load
+f  <- R_("results_report_forecast", sets = SETS)
+ae <- R_("results_report_attrib_exposure", sets = SETS)
+HLA <- RES$style$attrib_headline
+if (is.null(HLA) || !.has(ae$magnitudes, HLA$magnitude))
+  stop("results.style.attrib_headline$magnitude must be one of thresholds.attrib_magnitudes {",
+       paste(ae$magnitudes, collapse = ", "), "}.", call. = FALSE)
+HLA_M <- ae$magnitudes[which.min(abs(ae$magnitudes - as.numeric(HLA$magnitude)))]
+if (!HL_WIN %in% ae$exposure$window)
+  stop("results.style.attrib_headline$window '", HL_WIN, "' is not a cell of the attribution artefacts {",
+       paste(unique(ae$exposure$window), collapse = ", "), "} (a common cell needs results.scope.africa.window_end).",
+       call. = FALSE)
+fc_af <- if (AF_POST) {
+  R_("results_af_posterior", sets = SETS)$scope |>
+    filter(cell == HL_WIN, analog_set == MAIN_SET, explosive_guard == HL_GUARD, level != "country") |>
+    af_rows(TRUE)
+} else {
+  R_("results_report_attrib_metrics", sets = SETS)$af_scope |>
+    filter(window == HL_WIN, analog_set == MAIN_SET, explosive_guard == HL_GUARD, level != "country") |>
+    af_rows(FALSE)
+}
+# Scope-level IPCC class of Figure 4a (report_attrib_metrics v2 ipcc_scope), at
+# the headline magnitude.
+ipcc5 <- R_("results_report_attrib_metrics", sets = SETS)$ipcc_scope
+fc_af <- mutate(fc_af, Scope = scope_fct(scope_lab(level, region)))
+if (!is.null(ipcc5))
+  fc_af <- left_join(fc_af, ipcc5 |>
+                       filter(window == HL_WIN, explosive_guard == HL_GUARD, analog_set == MAIN_SET,
+                              level != "country", abs(magnitude - HLA_M) < 1e-9) |>
+                       select(level, scope, metric, ipcc_class = class),
+                     by = c("level", "scope", "metric"))
+inv_af <- function(af) ifelse(af < 1, 1 / (1 - af), Inf)
+ax5 <- ae$exposure |>
+  filter(window == HL_WIN, explosive_guard == HL_GUARD, analog_set == MAIN_SET, level != "country") |>
+  mutate(Scope = scope_fct(as.character(scope)), mag = factor(fmt_pct(magnitude), levels = fmt_pct(ae$magnitudes)),
+         metric = factor(metric, levels = c("cases", "onsets")))
+BOOT_ON <- isTRUE(ae$n_boot > 0)
+# Childs population interval: the posterior one when results.af_posterior
+# (attrib_exposure_posterior, variant adj: the Childs rule per posterior draw on
+# the noise-adjusted ADM1 AF), else the paired bootstrap's (none when
+# attrib_boot_b = 0). The point stays report_attrib_exposure's.
+# The posterior adj variant covers the ADM1s whose
+# posterior spread is identified; its point replaces the all-ADM1 point so the
+# point and interval describe the same ADM1s, and the unidentified ADM1s are
+# reported apart (unid_*: their population; unid_pass_pop: those whose pooled
+# estimate passes the rule). The reported value is the
+# posterior mean over draws (pop_mean / pct_mean / n_adm1_mean) with its 95%
+# CrI, as the main text and table S11; the posterior point (rule on the
+# posterior point AF) and adj + unid_pass = the all-ADM1 Childs point stay in
+# the artefact.
+if (AF_POST) {
+  axp <- R_("results_attrib_exposure_posterior", sets = SETS)$exposure |>
+    filter(window == HL_WIN, explosive_guard == HL_GUARD, analog_set == MAIN_SET, level != "country") |>
+    mutate(metric = factor(metric, levels = c("cases", "onsets")), scope = as.character(scope), class = "childs")
+  vv <- function(v, ...) filter(axp, variant == v) |> select(metric, magnitude, level, scope, class, ...)
+  ax5 <- ax5 |>
+    left_join(vv("adj", post_pop = pop_mean, post_pct = pct_mean, post_n = n_adm1_mean,
+                 post_lo = pop_lo, post_hi = pop_hi, post_pct_lo = pct_lo, post_pct_hi = pct_hi),
+              by = c("metric", "magnitude", "level", "scope", "class")) |>
+    mutate(pop = ifelse(class == "childs" & !is.na(post_pop), post_pop, pop),
+           pct = ifelse(class == "childs" & !is.na(post_pct), post_pct, pct),
+           n_adm1 = ifelse(class == "childs" & !is.na(post_n), post_n, n_adm1),
+           pop_lo = ifelse(class == "childs", post_lo, pop_lo), pop_hi = ifelse(class == "childs", post_hi, pop_hi),
+           pct_lo = ifelse(class == "childs", post_pct_lo, pct_lo),
+           pct_hi = ifelse(class == "childs", post_pct_hi, pct_hi)) |>
+    select(-starts_with("post_"))
+  if (any(axp$variant == "unidentified"))
+    ax5 <- ax5 |>
+      left_join(vv("unidentified", unid_pop = pop_point, unid_n = n_adm1_point),
+                by = c("metric", "magnitude", "level", "scope", "class")) |>
+      left_join(vv("unidentified_pass", unid_pass_pop = pop_point, unid_pass_n = n_adm1_point),
+                by = c("metric", "magnitude", "level", "scope", "class"))
+}
+#' The sentence on the unidentified ADM1s of one Childs row, "" when none.
+childs_unid_txt <- function(r) {
+  if (!nrow(r) || !"unid_n" %in% names(r) || is.na(r$unid_n[1]) || r$unid_n[1] == 0) return("")
+  sprintf(paste0(" A further %s people live in %s ADM1s whose posterior spread is not identified (Monte-Carlo ",
+                 "noise share ≥ %s); on their pooled estimate %s people in %s of them pass the rule."),
+          fmt_pop(r$unid_pop[1], 1), fmt_int(r$unid_n[1]), fmt_num(RES$thresholds$af_noise_share_max %||% 0.8, 2),
+          fmt_pop(r$unid_pass_pop[1], 1), fmt_int(r$unid_pass_n[1]))
+}
+CHILDS_INT <- if (AF_POST) "95% posterior interval" else if (BOOT_ON) "95% paired-bootstrap interval" else NA
+ft <- f$horizon_totals |> filter(run == "forecast", level != "country") |>
+  mutate(Scope = scope_fct(as.character(scope)))
+ft_af <- filter(ft, Scope == "Africa")
+q_ <- function(d, q) filter(d, quantity == q)
+# Which factual the attribution metrics use (09: results.inputs.attrib_manifest):
+# "attrib" = the factual launched at the counterfactual handoff, the displayed
+# forecast (totals) staying the factual launched at the latest data month.
+ATTRIB_F <- identical(f$attrib_factual %||% "forecast", "attrib")
+FAC_LAUNCH <- as.Date(f$arm_starts$factual %||% NA)
+ATT_LAUNCH <- as.Date(f$attrib_arm_starts$factual %||% NA)
+# The Africa of the attribution (09: results.scope.africa) and
+# Data S1, D23 (attribution$africa_scope): which groups are read past their firm
+# horizon on the analog ENSO continuation, how far, and which counterfactual
+# winters the window reads.
+AW <- f$africa_window
+AW_COMMON <- identical(AW$mode, "common")
+a28 <- R_("results_attribution", sets = SETS)$africa_scope
+GRP_LAB5 <- function(g) unname(ifelse(is.na(GROUP_SHORT[g]), g, GROUP_SHORT[g]))
+cont5 <- if (AW_COMMON) filter(a28, months_past_firm > 0) else a28[0, ]
+cut5  <- if (AW_COMMON) filter(a28, firm_horizon > group_end) else a28[0, ]
+unc5  <- filter(a28, nzchar(cf_winters_unconstrained))
+AFRICA_TXT <- if (AW_COMMON) paste0(
+  sprintf("Africa is every included ENSO group over one calendar window, **%s** (%d months, %d groups). ",
+          AW$label, AW$n_months, length(AW$groups)),
+  if (nrow(cont5)) sprintf("Groups whose firm horizon ends earlier are read on into the simulated analog continuation of ENSO: %s. ",
+    paste(sprintf("%s from %s (longest continuation lead %d months, analog CRPSS vs climatology %s)",
+                  GRP_LAB5(cont5$enso_group), format(cont5$firm_horizon + 31, "%b %Y"), cont5$lead_max,
+                  ifelse(is.na(cont5$crpss_at_lead_max), "n/a", fmt_num(cont5$crpss_at_lead_max, 2))),
+          collapse = "; ")) else "",
+  if (nrow(cut5)) sprintf("Groups forecast further (%s) are cut at %s. ", paste(GRP_LAB5(cut5$enso_group), collapse = ", "),
+                         format(AW$end, "%b %Y")) else "",
+  if (length(AW$censored)) sprintf("Groups ending before the window end (continuation capped): %s. ",
+                                   paste(GRP_LAB5(AW$censored), collapse = ", ")) else "",
+  "The forecast totals of each group cover its own forecast window; the attribution metrics (ratio of means, AF, AN, ",
+  "populations) and every Africa row cover the Africa window, Africa summing the groups (Data S1, D23). ",
+  "Sensitivities: each group cut at its firm horizon (no continuation) and the former mixed windows.") else sprintf(paste0("Two windows: the **forecast totals** (cases, onsets, incidence) cover each group's forecast window, ",
+                      "and Africa the window all groups share (%s months), so the Africa total is not the sum of the ",
+                      "groups; the **attribution metrics** (ratio of means, AF, AN, populations) cover the attribution ",
+                      "window from %s to each group's firm horizon, Africa summing the groups."),
+               fmt_int(f$n_months$n_months_window[f$n_months$level == "continent"]), format(ae$attrib_start, "%B %Y"))
+# The counterfactual constrains only the winter its analogs are classified on;
+# a later winter read by a group's window compares the factual's continuation
+# with an unconstrained counterfactual winter.
+CAVEAT_TXT <- if (nrow(unc5)) sprintf(paste0(
+  "Caveat: the counterfactual analogs are selected on DJF %s only, but %s read%s the ONI of DJF %s through %s ",
+  "deployed lead%s, a winter the counterfactual does not constrain (D23)."),
+  unc5$cf_winter_constrained[1] %||% "n/a", paste(GRP_LAB5(unc5$enso_group), collapse = ", "),
+  if (nrow(unc5) == 1L) "s" else "", paste(unique(unc5$cf_winters_unconstrained), collapse = ", "),
+  if (nrow(unc5) == 1L) "its" else "their", if (nrow(unc5) == 1L) "s" else "s") else ""
+```
+
+Forecast = the factual simulation with the calibrated CFSv2 ENSO forecast;
+counterfactual = the same replicates (same smoothing handoff state and
+posterior draw) with ENSO analogs of set **`r MAIN_SET`**. Each ENSO group is
+forecast to its own firm horizon (the last month its deployed ENSO lags read the
+firm ENSO forecast). `r AFRICA_TXT`
+`r CAVEAT_TXT`
+Forecast totals: median + 95% across replicates. Ratio of means,
+AF and AN: `r INT_LAB`. Headline attribution cell: **`r if (HL_WIN %in% names(WIN_LAB)) WIN_LAB[[HL_WIN]] else HL_WIN`**.
+`r if (AF_POST) af_unidentified_txt(filter(R_("results_af_posterior", sets = SETS)$scope, cell == HL_WIN, analog_set == MAIN_SET, explosive_guard == HL_GUARD), "Forecast attribution") else ""`
+`r if (ATTRIB_F) sprintf("The attribution metrics compare the counterfactual with a factual launched at the counterfactual handoff (**%s**), from the same smoothing state, seed and posterior draw of every replicate; the forecast totals are the factual launched at the latest data month (**%s**), its earlier months taken from the data-conditioned smoothing. Their difference is the information component (supplementary tables).", format(ATT_LAUNCH, "%B %Y"), format(FAC_LAUNCH, "%B %Y")) else if (!is.na(FAC_LAUNCH) && FAC_LAUNCH > ae$attrib_start) sprintf("The factual series is the data-conditioned smoothing up to its launch (**%s**), a free simulation after.", format(FAC_LAUNCH, "%B %Y")) else ""`
+
+- **Africa**: **`r fmt_ci_cases(q_(ft_af, "tot_cases")$med, q_(ft_af, "tot_cases")$lo, q_(ft_af, "tot_cases")$hi)`**
+  forecast cases and **`r fmt_ci_int(q_(ft_af, "tot_onsets")$med, q_(ft_af, "tot_onsets")$lo, q_(ft_af, "tot_onsets")$hi)`**
+  outbreak onsets over the forecast window; annualised incidence
+  **`r fmt_rate(q_(ft_af, "inc_ann_100k")$med, q_(ft_af, "inc_ann_100k")$lo, q_(ft_af, "inc_ann_100k")$hi)`**
+  per 100,000 person-years.
+- **ENSO-attributable**: ratio of means (forecast ÷ counterfactual) of cases
+  **`r with(filter(fc_af, Scope == "Africa", metric == "cases"), fmt_ci(inv_af(af), inv_af(af_lo), inv_af(af_hi), 2))`**,
+  AF **`r with(filter(fc_af, Scope == "Africa", metric == "cases"), fmt_pct_ci(af, af_lo, af_hi))`**
+  (**`r with(filter(fc_af, Scope == "Africa", metric == "cases"), fmt_ci_cases(an, an_lo, an_hi))`** cases);
+  onsets AF **`r with(filter(fc_af, Scope == "Africa", metric == "onsets"), fmt_pct_ci(af, af_lo, af_hi))`**.
+- **Robust increase** (IPCC AR6, m = `r fmt_pct(HLA_M)`): **`r with(filter(ax5, Scope == "Africa", metric == "cases", class == "robust", abs(magnitude - HLA_M) < 1e-9), sprintf("%s (%s, %s ADM1)", fmt_pop(pop, 1), fmt_pct(pct, 1), fmt_int(n_adm1)))`**
+  people live in ADM1s with a robust ENSO-driven increase in cases (no
+  interval by construction).
+- **Childs** (mean forecast ≥ `r fmt_num(1 + HLA_M, 2)` × mean
+  counterfactual): **`r with(filter(ax5, Scope == "Africa", metric == "cases", class == "childs", abs(magnitude - HLA_M) < 1e-9), if (!is.na(CHILDS_INT)) sprintf("%s (%s, %s ADM1)", fmt_pop_ci(pop, pop_lo, pop_hi, 1), fmt_pct_ci(pct, pct_lo, pct_hi), fmt_int(n_adm1)) else sprintf("%s (%s, %s ADM1)", fmt_pop(pop, 1), fmt_pct(pct, 1), fmt_int(n_adm1)))`**
+  people`r if (is.na(CHILDS_INT)) " (no interval: the paired bootstrap is off, results.derivation.attrib_boot_b = 0, and results.af_posterior is false)" else paste0(" (", CHILDS_INT, if (AF_POST) "; the Childs rule applied per posterior draw to each ADM1's noise-adjusted attributable fraction, over the ADM1s whose posterior spread is identified" else "", ")")`.`r childs_unid_txt(filter(ax5, Scope == "Africa", metric == "cases", class == "childs", abs(magnitude - HLA_M) < 1e-9))`
+
+```{r}
+#| label: r5
+#| results: asis
+emit(ft |> filter(quantity %in% c("tot_cases", "tot_onsets", "inc_ann_100k")) |>
+       mutate(val = fmt_by_quantity(quantity, med, lo, hi),
+              Quantity = factor(QUANTITY_LABELS[quantity], levels = QUANTITY_LABELS)) |>
+       report_wide("Scope", "Quantity", "val") |>
+       left_join(f$scope_pop |> filter(level != "country") |>
+                   left_join(select(f$n_months, level, scope, n_months_window), by = c("level", "scope")) |>
+                   transmute(Scope = scope_fct(as.character(scope)), `Window (months)` = fmt_int(n_months_window),
+                             Population = fmt_pop(pop, 1)), by = "Scope") |>
+       arrange(Scope) |> relocate(`Window (months)`, Population, .after = Scope),
+     "Forecast cumulative cases, outbreak onsets and annualised incidence (/100,000 person-years) over each scope's forecast window — Africa + by ENSO group (median, 95% across replicates)",
+     slug = "forecast_totals", raw = ft)
+
+emit(fc_af |> arrange(Scope) |>
+       mutate(val = paste0(fmt_ratio_bold(inv_af(af), inv_af(af_lo), inv_af(af_hi), 2),
+                           if ("ipcc_class" %in% names(fc_af)) paste0(" · ", ipcc_class) else ""),
+              metric = factor(metric, levels = c("cases", "onsets"))) |>
+       report_wide("Scope", "metric", "val", rename = c(Cases = "cases", Onsets = "onsets")),
+     sprintf("Ratio of means, forecast ÷ counterfactual (%s), over the attribution window (Figure 4a) — Africa + by ENSO group (%s; bold = interval excludes 1%s)",
+             MAIN_SET, INT_LAB, if ("ipcc_class" %in% names(fc_af))
+               sprintf("; · IPCC AR6 class of the scope's paired totals at m = %s", fmt_pct(HLA_M)) else ""),
+     slug = "forecast_ratio_of_means", raw = fc_af)
+
+emit(fc_af |> arrange(Scope) |> af_wide("Scope", character(0)),
+     sprintf("ENSO-attributable fraction (AF) and number (AN) of forecast cases and outbreak onsets (counterfactual %s) — Africa + by ENSO group (%s; bold = interval excludes 0)",
+             MAIN_SET, INT_LAB),
+     slug = "forecast_af")
+
+CLS5 <- c(robust = "IPCC robust increase", conflicting = "IPCC conflicting",
+          childs = "Childs (ratio of means ≥ 1 + m)", childs_median = "Childs, ratio of medians")
+pop_cell <- function(cls, pop, lo, hi, pct, n) ifelse(
+  cls %in% c("childs", "childs_median") & !is.na(lo),
+  sprintf("%s · %s [%s ADM1]", fmt_pop_ci(pop, lo, hi, 1), fmt_pct(pct, 1), fmt_int(n)),
+  sprintf("%s · %s [%s ADM1]", fmt_pop(pop, 1), fmt_pct(pct, 1), fmt_int(n)))
+for (cl in list(c("robust", "conflicting"), c("childs", "childs_median"))) {
+  emit(ax5 |> filter(class %in% cl) |>
+         mutate(cls = factor(CLS5[class], levels = CLS5), val = pop_cell(class, pop, pop_lo, pop_hi, pct, n_adm1),
+                mag = paste0("m = ", mag, ifelse(abs(magnitude - HLA_M) < 1e-9, " (headline)", "")),
+                mag = factor(mag, levels = unique(mag[order(magnitude)]))) |>
+         arrange(metric, cls, Scope) |>
+         mutate(blk = paste(metric, "·", cls), blk = factor(blk, levels = unique(blk))) |>
+         report_wide(c("blk", "Scope"), "mag", "val"),
+       if ("robust" %in% cl)
+         sprintf("Population in ADM1s with a robust ENSO-driven increase (IPCC AR6 Atlas: ≥ %s of paired replicates with forecast > (1 + m) × counterfactual and ≥ %s with forecast > counterfactual; conflicting = only the first) — Africa + by ENSO group, each magnitude m (population · share [N ADM1]; no interval by construction)",
+                 fmt_pct(ae$robust_exceed), fmt_pct(ae$robust_agree))
+       else sprintf("Childs-type population: ADM1s whose forecast is at least (1 + m) × the counterfactual (%s) — Africa + by ENSO group, each m (population · share [N ADM1]; %s)",
+                    MAIN_SET, if (is.na(CHILDS_INT)) "no interval: the paired bootstrap is off, attrib_boot_b = 0"
+                              else if (AF_POST && !BOOT_ON) paste0("ratio of means with its ", CHILDS_INT,
+                                                                   "; ratio of medians: no interval")
+                              else paste("population with its", CHILDS_INT)),
+       pack_by = "blk", slug = paste0("forecast_pop_", cl[[1]]),
+       raw = filter(ae$exposure, class %in% cl))
+}
+```
+
+---
+
+# Supplementary tables
+
+Every other table of the phase-09 artefacts (and the S-numbered CSVs of the
+supplementary material).
+
+## Dataset: episodes and processing cascade
+
+```{r}
+#| label: s-dataset
+#| results: asis
+# Data S1, D2: canonical episodes by ENSO group, country and admin level.
+if (!is.null(d$episodes_by_country))
+  emit(d$episodes_by_country |>
+         transmute(`ENSO group` = enso_group, Country = country, `Admin level` = admin_level,
+                   Episodes = fmt_int(n_episodes), Units = fmt_int(n_gids),
+                   `Suspected cases` = fmt_int(total_cases),
+                   `First start` = as.character(first_start), `Last end` = as.character(last_end)) |>
+         with_afro("Country") |> with_pmax("Country"),
+       "Canonical episodes by ENSO group, country and admin level (Data S1, D2)",
+       pack_by = "ENSO group", slug = "D2_episodes_by_group_country_level",
+       raw = with_afro(d$episodes_by_country, "country", raw = TRUE))
+
+# Data S1, D1: processing cascade (00/01/02 count files + the 03 prep stamps).
+if (!is.null(d$cascade) && nrow(d$cascade))
+  emit(d$cascade |> transmute(Step = step, Metric = metric, Value = fmt_num(value, 0)),
+       "Processing cascade: counts recorded by each processing step (Data S1, D1)",
+       pack_by = "Step", slug = "D1_processing_cascade", raw = d$cascade)
+```
+
+## ENSO effect sizes by country (BRMS)
+
+IRR = posterior median (exp of the median log IRR) + 95% CrI at each ONI
+condition vs. neutral; for the **duration** track the cessation hazard ratio
+(higher ⇒ outbreaks end sooner), with the restricted-mean-duration (RMD) ratio
+as the "last N× longer" estimand.
+
+```{r}
+#| label: s-effects
+#| results: asis
+for (trk in FIG1_TRACKS) {
+  e <- EFF[[trk]]
+  cat(sprintf("\n\n### %s\n\n*Estimand: %s.*\n\n", trk, e$estimand))
+  emit(report_wide(mutate(e$effects_country, enso_label = cond_fct(enso_label),
+                          val = fmt_ratio_bold(IRR, IRR_lo, IRR_hi)),
+                   c("region", "country"), "enso_label", "val", levels = list(region = LV$region),
+                   rename = c(Region = "region", Country = "country")) |>
+         with_afro("Country") |> with_pmax("Country"),
+       sprintf("%s — IRR (posterior median, 95%% CrI) at each ENSO condition, by country (bold = CrI excludes 1)", trk),
+       pack_by = "Region")
+
+  prep <- function(d) mutate(d, region = factor(region, levels = LV$region), enso_label = cond_fct(enso_label))
+
+  if (!is.null(e$rmd_ratio) && nrow(e$rmd_ratio))
+    emit(prep(e$rmd_ratio) |>
+           arrange(region, enso_label) |>
+           transmute(
+             Region = region, Condition = enso_label,
+             `RMD ratio (med, 95% CrI)` = fmt_ratio_bold(ratio_med, ratio_lo, ratio_hi),
+             `RMD high (mo)` = fmt_num(rmd_hi_med, 1),
+             `RMD neutral (mo)` = fmt_num(rmd_lo_med, 1),
+             `Horizon (mo)` = horizon, `Tail mass` = fmt_num(tail_mass, 3),
+             `P(longer)` = fmt_pct(prob_longer)),
+         sprintf("%s — restricted-mean-duration ratio vs. neutral (over %d mo; bold = CrI excludes 1)",
+                 trk, e$rmd_ratio$horizon[1]),
+         pack_by = "Region")
+}
+```
+
+## Historical smoothing (simulation)
+
+Median + 95% across replicates. "Mean monthly" = per-replicate mean over months
+of the scope's monthly total, then summarised across replicates. Metric
+(cases / onsets) is shown as columns.
+
+```{r}
+#| label: s-smoothing
+#| results: asis
+s <- R_("results_report_smoothing")
+METRIC_REN <- c(`Cases (med, 95%)` = "cases", `Onsets (med, 95%)` = "onsets")
+fmt_metric <- function(d) mutate(d, val = fmt_by_quantity(metric, med, lo, hi))
+
+emit(report_wide(fmt_metric(s$monthly_overall), "scope", "metric", "val",
+                 levels = list(scope = LV$scope), rename = c(Scope = "scope", METRIC_REN)),
+     "Mean monthly outbreaks / cases — overall, by scope")
+
+emit(report_wide(fmt_metric(s$monthly_by_phase) |>
+                   mutate(phase = recode(phase, nina = "La Niña", neutral = "Neutral", elnino = "El Niño")),
+                 c("scope", "phase"), "metric", "val",
+                 levels = list(scope = LV$scope, phase = c("La Niña", "Neutral", "El Niño")),
+                 rename = c(Scope = "scope", Phase = "phase", METRIC_REN)),
+     paste0("Mean monthly outbreaks / cases — by ",
+            if (is.null(s$phase_rule)) "ONI threshold phase (±0.5, no persistence)" else s$phase_rule$label),
+     pack_by = "Scope")
+
+emit(report_wide(fmt_metric(filter(s$monthly_by_year, scope == "Africa")), "year", "metric", "val",
+                 rename = c(Year = "year", METRIC_REN)),
+     "Mean monthly outbreaks / cases — Africa, by year (region splits in the artefact)")
+```
+
+## Forecast vs. counterfactual (simulation)
+
+Median + 95% across replicates. Ratios are per-replicate paired
+forecast ÷ counterfactual over each group's own attribution horizon (Africa over
+the Africa window of Section 5, `r AW$label`, paired on replicate ids common to every group).
+Tables below show the **`r MAIN_SET`** counterfactual set unless stated; other
+sets are in the artefact. Forecast vs. counterfactual is shown as columns where
+both arms appear in the same table. The artefact also keeps the former
+threshold-population tables (`pop_grid`, `pop_shift`); the population in ADM1s
+with more ENSO-attributable cases is the next subsection; the headline numbers are Section 5.
+
+```{r}
+#| label: s-forecast
+#| results: asis
+SCEN_MAIN <- LV$scenario(MAIN_SET)
+scen <- function(d, levels) mutate(d, Scenario = factor(scenario_lab(run, analog_set), levels = levels))
+qty  <- function(d) mutate(d, val = fmt_by_quantity(quantity, med, lo, hi),
+                           Quantity = factor(QUANTITY_LABELS[quantity], levels = QUANTITY_LABELS))
+
+emit(f$horizon_totals |>
+       filter(is.na(analog_set) | analog_set == MAIN_SET, level != "country") |>
+       scen(SCEN_MAIN) |> qty() |>
+       report_wide(c("level", "scope", "Quantity"), "Scenario", "val",
+                   rename = c(Level = "level", Scope = "scope")),
+     "Horizon totals — continent + region (country rows in the artefact)",
+     pack_by = "Scope")
+
+ratio_tab <- function(d, cap)
+  emit(report_wide(mutate(filter(d, analog_set == MAIN_SET), val = fmt_ratio_prob(med, lo, hi, prob_increase)),
+                   c("level", "scope"), "metric", "val",
+                   rename = c(Level = "level", Scope = "scope", Cases = "cases", Onsets = "onsets")),
+       cap, pack_by = "Level")
+ratio_tab(f$cum_ratio,
+          "Cumulative forecast ÷ counterfactual ratio (med, 95% CI; [P(increase)]; bold = CI excludes 1)")
+ratio_tab(f$peak_ratio,
+          "Peak (per-replicate max monthly) forecast ÷ counterfactual ratio (med, 95% CI; [P(increase)]; bold = CI excludes 1)")
+```
+
+### Predicted burden by scenario (all analog sets)
+
+Total cases over each scope's horizon window and the **annualised incidence**
+per 100,000 person-years (window total ÷ simulated months × 12 ÷ population), so
+scopes with different horizons compare directly. Median + 95% across
+replicates; every scenario (forecast and each counterfactual analog set) is a
+column. The denominator is the population of the simulated gids
+`r if (identical(f$rate_pop_year, "window")) "averaged over the months of each window (month-weighted, results.derivation.rate_pop_year: window)" else paste("at the reference year", f$pop_ref_year)`
+(Table below the burden tables). The simulator resolved its population at
+`r if (is.null(f$sim_pop_year)) "2020 for every month (simulator.location_frame.pop_year default)" else paste0("simulator.location_frame.pop_year = ", f$sim_pop_year)`.
+
+```{r}
+#| label: s-forecast-burden
+#| results: asis
+SCEN_ALL <- LV$scenario(SETS)
+burden <- f$horizon_totals |>
+  filter(quantity %in% c("tot_cases", "inc_ann_100k")) |>
+  scen(SCEN_ALL) |> qty()
+
+emit(burden |> filter(level != "country") |>
+       mutate(scope = factor(scope, levels = LV$scope)) |>
+       report_wide(c("scope", "Quantity"), "Scenario", "val", rename = c(Scope = "scope")),
+     "Predicted total cases and annualised incidence (/100k person-years) — Africa + by region, all scenarios (med, 95%)",
+     pack_by = "Scope")
+
+emit(burden |> filter(level == "country") |>
+       mutate(region = factor(region, levels = LV$region)) |>
+       report_wide(c("region", "scope", "Quantity"), "Scenario", "val",
+                   rename = c(Region = "region", Country = "scope")) |>
+       with_afro("Country"),
+     "Predicted total cases and annualised incidence (/100k person-years) — by country, all scenarios (med, 95%)",
+     pack_by = "Region")
+
+emit(f$scope_pop |>
+       filter(level != "country") |>
+       left_join(select(f$n_months, level, scope, n_months, n_months_window), by = c("level", "scope")) |>
+       mutate(scope = factor(scope, levels = LV$scope)) |>
+       arrange(scope) |>
+       transmute(Scope = scope, `Months simulated` = fmt_int(n_months),
+                 `Months in window` = fmt_int(n_months_window),
+                 Population = fmt_pop(pop, digits = 1), `Simulated gids` = fmt_int(n_gid),
+                 `Gids missing pop` = fmt_int(n_gid_pop_missing),
+                 `ADM1 gids with ADM2 children` = fmt_int(n_gid_adm1_overlap)),
+     "Incidence denominators — months simulated in each horizon window and simulated-gid population (country rows in the artefact)")
+```
+
+## Population in ADM1s with more ENSO-attributable cases (all cells)
+
+```{r}
+#| label: s-ae-load
+ae <- R_("results_report_attrib_exposure", sets = SETS)
+HLA <- RES$style$attrib_headline
+if (is.null(HLA) || !.has(ae$magnitudes, HLA$magnitude))
+  stop("results.style.attrib_headline$magnitude must be one of thresholds.attrib_magnitudes {",
+       paste(ae$magnitudes, collapse = ", "), "}.", call. = FALSE)
+HLA_M <- ae$magnitudes[which.min(abs(ae$magnitudes - as.numeric(HLA$magnitude)))]
+CLASS_LAB <- c(childs = "Childs (mean ratio ≥ 1 + m)", childs_median = "Childs, ratio of medians",
+               robust = "IPCC robust", conflicting = "IPCC conflicting", none = "IPCC no robust signal")
+# Every table below is the headline slice (HL_WIN x HL_EXPLOSIVE, the
+# results.style.attrib_headline cell) unless it says otherwise; ax_all keeps
+# the other cells.
+ax_all <- ae$exposure |>
+  mutate(cls = factor(CLASS_LAB[class], levels = CLASS_LAB),
+         mag = factor(fmt_pct(magnitude), levels = fmt_pct(ae$magnitudes)),
+         scope = factor(as.character(scope), levels = unique(c(LV$scope, sort(as.character(scope))))))
+# With results.af_posterior the Childs class reports the posterior mean and
+# 95% CrI of the per-draw Childs population over the identified ADM1s
+# (attrib_exposure_posterior, variant adj; as the main text and
+# table S11), for every cell, level and scope; ratio of medians unchanged.
+if (AF_POST) {
+  apx <- R_("results_attrib_exposure_posterior", sets = SETS)$exposure |>
+    filter(variant == "adj") |>
+    transmute(window, explosive_guard, metric, magnitude, level, scope = as.character(scope), analog_set,
+              q_pop = pop_mean, q_pct = pct_mean, q_n = n_adm1_mean, q_lo = pop_lo, q_hi = pop_hi,
+              q_pct_lo = pct_lo, q_pct_hi = pct_hi, class = "childs")
+  ax_all <- ax_all |>
+    mutate(scope_chr = as.character(scope)) |>
+    left_join(apx, by = c("window", "explosive_guard", "metric", "magnitude", "level",
+                           "scope_chr" = "scope", "analog_set", "class")) |>
+    mutate(post = class == "childs" & !is.na(q_pop),
+           pop = ifelse(post, q_pop, pop), pct = ifelse(post, q_pct, pct), n_adm1 = ifelse(post, q_n, n_adm1),
+           pop_lo = ifelse(post, q_lo, pop_lo), pop_hi = ifelse(post, q_hi, pop_hi),
+           pct_lo = ifelse(post, q_pct_lo, pct_lo), pct_hi = ifelse(post, q_pct_hi, pct_hi)) |>
+    select(-scope_chr, -starts_with("q_"))
+  CLASS_LAB[["childs"]] <- "Childs (posterior mean, 95% CrI)"
+  ax_all <- mutate(ax_all, cls = factor(CLASS_LAB[class], levels = CLASS_LAB))
+} else ax_all$post <- FALSE
+ax <- filter(ax_all, window == HL_WIN, explosive_guard == HL_GUARD)
+# The Childs population's paired-bootstrap interval exists only when
+# results.derivation.attrib_boot_b > 0; with B = 0 the point is shown alone
+# (the posterior rows carry their CrI either way).
+BOOT_AE <- isTRUE(ae$n_boot > 0)
+ax_val <- function(d) mutate(d, val = ifelse((BOOT_AE & class %in% c("childs", "childs_median")) | post,
+  sprintf("%s [%s; %s ADM1]", fmt_pct(pct, 1), fmt_pop_ci(pop, pop_lo, pop_hi, 1), fmt_int(n_adm1)),
+  sprintf("%s [%s; %s ADM1]", fmt_pct(pct, 1), fmt_pop(pop, 1), fmt_int(n_adm1))))
+at_m <- function(d, m) filter(d, abs(magnitude - m) < 1e-9)
+unlab4c <- function(d) select(d, -any_of(c("cls", "mag", "val")))
+```
+
+Forecast vs. counterfactual per ADM1, over the attribution window and runs of the forecast tables above,
+with replicates **paired** by id: the two arms of a replicate share its
+smoothing handoff state and its posterior draw, so their difference is the
+ENSO effect plus epidemic noise. Headline: `r paste0(EXPL_LAB, if (HL_GUARD) "; a dropped replicate leaves every ADM1 of its group" else "")` (the
+other explosive mode is a sensitivity; Data S1, D24 lists the dropped pairs). For each magnitude m:
+
+- **Childs** (the impact-attribution convention of Childs et al. 2025): an ADM1
+  counts when its mean forecast total is positive and at least (1 + m) × its
+  mean counterfactual total (a zero counterfactual with a positive forecast is
+  an infinite ratio and counts; 0 vs 0 has no ratio and does not). Point
+  population`r if (BOOT_AE) sprintf(", with a 95%% interval from %d paired bootstrap resamples of the replicate ids within each group (Monte-Carlo precision)", ae$n_boot) else " (the paired bootstrap is off, results.derivation.attrib_boot_b = 0: no interval)"`.
+- **Childs, ratio of medians**: the same rule on the median replicate totals,
+  insensitive to the heavy upper tail of the replicates (a few explosive
+  outbreaks lift a mean ratio well above the typical replicate's). Where the
+  typical counterfactual replicate has no outbreak but the typical forecast
+  replicate does, the ratio is infinite and the ADM1 counts.
+- **IPCC robustness** (AR6 Atlas, m as the variability threshold): **robust**
+  when ≥ `r fmt_pct(ae$robust_exceed)` of the paired replicates have forecast >
+  (1 + m) × counterfactual **and** ≥ `r fmt_pct(ae$robust_agree)` have forecast >
+  counterfactual (ties disagree); **conflicting** when only the first holds;
+  **no robust signal** otherwise. No interval.
+
+Population is the observed sub-unit population at `r ae$pop_ref_year`; shares
+are of the scope's simulated ADM1 population. Two sensitivities are derived
+alongside the headline slice: the **post-fork window** (from the factual launch
+`r format(ae$windows[["post_fork"]])`; before it the factual series is the
+smoothing, conditioned on the surveillance data, while the counterfactual is
+simulated) and the **other explosive mode** (`r if (HL_GUARD) "every replicate kept" else "explosive pairs dropped"`).
+
+```{r}
+#| label: s-ae
+#| results: asis
+emit(ax |> filter(level != "country", analog_set == MAIN_SET) |> at_m(HLA_M) |> ax_val() |>
+       report_wide(c("scope", "cls"), "metric", "val",
+                   rename = c(Scope = "scope", Estimand = "cls", Cases = "cases", Onsets = "onsets")),
+     sprintf("Population in ADM1s with more ENSO-attributable cases / onsets at m = %s, counterfactual set %s — Africa + by region (share [population%s; N ADM1])",
+             fmt_pct(HLA_M), MAIN_SET, if (BOOT_AE) ", Childs with 95% bootstrap interval" else ""),
+     pack_by = "Scope",
+     raw = unlab4c(ax |> filter(level != "country", analog_set == MAIN_SET) |> at_m(HLA_M)))
+
+for (mt in c("cases", "onsets"))
+  emit(ax |> filter(level != "country", analog_set == MAIN_SET, metric == mt) |> ax_val() |>
+         report_wide(c("scope", "mag"), "cls", "val", rename = c(Scope = "scope", `m` = "mag")),
+       sprintf("Population in ADM1s with more ENSO-attributable %s, every magnitude m, counterfactual set %s — Africa + by region (share [population; N ADM1])",
+               mt, MAIN_SET),
+       pack_by = "Scope")
+
+emit(ax |> filter(level == "continent") |> at_m(HLA_M) |> ax_val() |>
+       report_wide(c("analog_set", "cls"), "metric", "val",
+                   rename = c(`Counterfactual set` = "analog_set", Estimand = "cls",
+                              Cases = "cases", Onsets = "onsets")),
+     sprintf("Sensitivity to the counterfactual analog set, m = %s — Africa", fmt_pct(HLA_M)),
+     pack_by = "Counterfactual set")
+
+emit(ax_all |> filter(level == "continent", analog_set == MAIN_SET, class != "none") |> at_m(HLA_M) |>
+       ax_val() |>
+       mutate(cell = paste0(WIN_LAB[window], if_else(explosive_guard, ", explosive pairs dropped", ", every pair kept")),
+              cell = factor(cell, levels = unique(cell[order(window != HL_WIN, explosive_guard != HL_GUARD)]))) |>
+       report_wide(c("cell", "cls"), "metric", "val",
+                   rename = c(Window = "cell", Estimand = "cls", Cases = "cases", Onsets = "onsets")),
+     sprintf("Sensitivity to the window and the explosive-replicate guard, m = %s, counterfactual set %s — Africa (first block = headline)",
+             fmt_pct(HLA_M), MAIN_SET),
+     pack_by = "Window", raw = unlab4c(filter(ax_all, level != "country")))
+```
+
+### Per country and per ADM1
+
+```{r}
+#| label: s-ae-supp
+#| results: asis
+emit(ax |> filter(analog_set == MAIN_SET, level == "region") |> at_m(HLA_M) |>
+       transmute(Scope = scope, Estimand = cls, Metric = metric,
+                 `ADM1 no ratio (forecast and counterfactual 0)` = fmt_int(n_adm1_undefined),
+                 `ADM1 paired` = fmt_int(n_adm1_paired), `ADM1 missing pop` = fmt_int(n_pop_missing)) |>
+       filter(Estimand == CLASS_LAB[["childs"]]),
+     "Attributable-exposure universe: ADM1s without a ratio, paired, and without population — by region (every level, set and m in the CSV)",
+     slug = "D18_attrib_exposure_scope", raw = unlab4c(ax_all))
+
+emit(ax |> filter(level == "country", analog_set == MAIN_SET) |> at_m(HLA_M) |> ax_val() |>
+       mutate(region = factor(region, levels = LV$region)) |>
+       report_wide(c("region", "scope", "cls"), "metric", "val",
+                   rename = c(Region = "region", Country = "scope", Estimand = "cls",
+                              Cases = "cases", Onsets = "onsets")) |>
+       with_afro("Country") |> with_pmax("Country"),
+     sprintf("Population in ADM1s with more ENSO-attributable cases / onsets at m = %s — by country", fmt_pct(HLA_M)),
+     slug = "D18_attrib_exposure_by_country", pack_by = "Region",
+     raw = with_afro(unlab4c(filter(ax, level == "country")), "scope", raw = TRUE))
+
+emit(ae$adm1 |> filter(window == HL_WIN, explosive_guard == HL_GUARD, analog_set == MAIN_SET) |> at_m(HLA_M) |>
+       mutate(region = factor(region, levels = LV$region),
+              class = factor(class, levels = c("robust", "conflicting", "none"))) |>
+       count(metric, region, class, childs, name = "n_adm1") |>
+       report_wide(c("metric", "region", "childs"), "class", "n_adm1",
+                   rename = c(Metric = "metric", Region = "region", `Childs hit` = "childs")),
+     sprintf("ADM1 counts by IPCC class and Childs hit, m = %s (per-ADM1 ratios, shares and classes for every set, m, window and guard in the CSV)",
+             fmt_pct(HLA_M)),
+     slug = "D18_attrib_exposure_adm1", pack_by = "Metric", raw = ae$adm1)
+```
+
+## Attribution metrics: attributable fraction, probability ratio, signal-to-noise
+
+```{r}
+#| label: s-am-load
+am <- R_("results_report_attrib_metrics", sets = SETS)
+HLM <- RES$style$attrib_metrics_headline
+if (is.null(HLM) || !.has(am$sn_levels, HLM$sn_level) || !isTRUE(HLM$pr_event %in% c("onset_any", "cases_ge")))
+  stop("results.style.attrib_metrics_headline: sn_level must be one of thresholds.sn_levels {",
+       paste(am$sn_levels, collapse = ", "), "} and pr_event one of onset_any, cases_ge.", call. = FALSE)
+HLM_L <- am$sn_levels[which.min(abs(am$sn_levels - as.numeric(HLM$sn_level)))]
+EV_LAB <- c(onset_any = "any onset in the window",
+            cases_ge  = sprintf("window cases ≥ %s", format(am$pr_case_threshold, big.mark = ",")))
+SN_DIR_LAB <- c(increase = "S/N ≥ +L (more)", decrease = "S/N ≤ −L (fewer)", either = "|S/N| ≥ L")
+hl4d <- function(d) filter(d, window == HL_WIN, explosive_guard == HL_GUARD)
+lvl4d <- function(d) mutate(d, scope = factor(as.character(scope),
+                                              levels = unique(c(LV$scope, sort(as.character(scope))))))
+af_hl  <- hl4d(am$af_scope) |> filter(level == "continent", analog_set == MAIN_SET)
+pr_hl  <- hl4d(am$pr_scope) |> filter(level == "continent", analog_set == MAIN_SET, event == HLM$pr_event)
+sn_hl  <- hl4d(am$sn_pop) |> filter(level == "continent", analog_set == MAIN_SET, abs(sn_level - HLM_L) < 1e-9)
+BOOT_AM <- isTRUE(am$n_boot > 0)
+# AF / AN with their interval: af_posterior when results.af_posterior (its cell
+# = the window), else the paired bootstrap of the replicate means. The means,
+# AN per 100k and every other column stay report_attrib_metrics'.
+am_af <- if (AF_POST) {
+  am$af_scope |> filter(level != "country") |>
+    select(window, explosive_guard, level, scope, metric, analog_set, mean_f, mean_cf, an_per_100k) |>
+    left_join(R_("results_af_posterior", sets = SETS)$scope |> filter(level != "country") |> af_rows(TRUE) |>
+                transmute(window = cell, explosive_guard, level, scope, metric, analog_set,
+                          af, af_lo, af_hi, an, an_lo, an_hi),
+              by = c("window", "explosive_guard", "level", "scope", "metric", "analog_set"))
+} else af_rows(filter(am$af_scope, level != "country"), FALSE)
+# PR with its interval where one exists (the exact bound when p0 = 0 always; the
+# bootstrap otherwise only when attrib_boot_b > 0), else the point alone.
+fmt_pr <- function(pr, lo, hi) ifelse(is.na(lo) & is.na(hi), .fmt_num_inf(pr, 1), fmt_ratio_inf(pr, lo, hi))
+```
+
+Three attribution families from the same paired runs, window and explosive
+guard as the previous subsection (headline slice: `r WIN_LAB[[HL_WIN]] %||% HL_WIN`, `r EXPL_LAB`,
+counterfactual set `r MAIN_SET`), so that one can be retained for the manuscript:
+
+- **Attributable number and fraction** (AN = forecast − counterfactual,
+  AF = AN / forecast; the health impact-attribution convention), with the
+  `r INT_LAB`; scope totals are sums of their ADM1s per replicate.
+- **Probability ratio** PR = p1 / p0 of an outbreak event in the window (World
+  Weather Attribution), with FAR = 1 − 1/PR (= the probability of necessary
+  causation, PN), the probability of sufficient causation PS = (p1 − p0)/(1 − p0)
+  and PNS = p1 − p0 (Hannart & Naveau). Events: `r EV_LAB[["onset_any"]]`; and
+  `r EV_LAB[["cases_ge"]]` (the database's outbreak-size convention). When no
+  counterfactual replicate has the event, PR is infinite (∞) and its lower bound is
+  p1 over the exact one-sided `r fmt_pct(1 - am$pr_alpha)` upper bound on p0.
+  At large scopes both arms almost always have the event (PR → 1): the
+  probability ratio is informative at ADM1 and country level.
+- **Signal-to-noise** S/N = mean / sd of the paired difference across replicates
+  (Hawkins & Sutton), and the population of the ADM1s where the signal has
+  emerged (|S/N| ≥ L, L ∈ {`r paste(am$sn_levels, collapse = ", ")`}); a
+  threshold-free companion of the IPCC robustness classes.
+
+
+```{r}
+#| label: s-am
+#| results: asis
+emit(hl4d(am_af) |> filter(analog_set == MAIN_SET) |> lvl4d() |>
+       mutate(AN = fmt_an(metric, an, an_lo, an_hi),
+              AF = fmt_af(af, af_lo, af_hi),
+              `AN per 100k` = fmt_num(an_per_100k, 1)) |>
+       arrange(metric, scope) |>
+       transmute(Metric = metric, Scope = scope, `Forecast (mean)` = ifelse(metric == "onsets", fmt_num(mean_f, 1), fmt_cases(mean_f)),
+                 `Counterfactual (mean)` = ifelse(metric == "onsets", fmt_num(mean_cf, 1), fmt_cases(mean_cf)),
+                 AN, AF, `AN per 100k`),
+     sprintf("Attributable number and fraction of cases and onsets, forecast vs counterfactual (%s) — Africa and regions (%s)", MAIN_SET, INT_LAB),
+     pack_by = "Metric", slug = "D19_attrib_af_scope", raw = am_af)
+
+emit(hl4d(am$pr_scope) |> filter(analog_set == MAIN_SET, level != "continent") |> lvl4d() |>
+       mutate(region = factor(region, levels = LV$region)) |>
+       arrange(event, region, level, scope) |>
+       transmute(Event = EV_LAB[event], Scope = scope, Level = level,
+                 p1 = fmt_pct(p1), p0 = fmt_pct(p0),
+                 PR = fmt_pr(pr, pr_lo, pr_hi), `FAR (PN)` = fmt_num(far, 2),
+                 PS = fmt_num(ps, 2), PNS = fmt_num(pns, 2)),
+     sprintf("Probability ratio of an outbreak event and probabilities of causation — regions and countries (%s; bold: 95%% interval excludes 1%s)", MAIN_SET,
+             if (BOOT_AM) "" else "; interval only where p0 = 0 (exact bound), the bootstrap is off"),
+     pack_by = "Event", slug = "D20_attrib_pr_scope", raw = am$pr_scope)
+
+emit(hl4d(am$pr_pop) |> filter(analog_set == MAIN_SET, level != "country", BOOT_AM | rule == "point") |> lvl4d() |>
+       mutate(val = sprintf("%s [%s; %s ADM1]", fmt_pct(pct, 1), fmt_pop(pop, 1), fmt_int(n_adm1)),
+              rule = c(point = "PR > 1", lower = "95% lower bound of PR > 1")[rule], event = EV_LAB[event]) |>
+       report_wide(c("event", "scope"), "rule", "val", rename = c(Event = "event", Scope = "scope")),
+     sprintf("Population in ADM1s where the outbreak event is more likely under the forecast (%s)", MAIN_SET),
+     pack_by = "Event", slug = "D20_attrib_pr_pop", raw = am$pr_pop)
+
+emit(hl4d(am$sn_pop) |> filter(analog_set == MAIN_SET, level != "country") |> lvl4d() |>
+       mutate(val = sprintf("%s [%s; %s ADM1]", fmt_pct(pct, 1), fmt_pop(pop, 1), fmt_int(n_adm1)),
+              col = sprintf("L = %s: %s", sn_level, SN_DIR_LAB[direction])) |>
+       report_wide(c("metric", "scope"), "col", "val", rename = c(Metric = "metric", Scope = "scope")),
+     sprintf("Population in ADM1s where the forecast-vs-counterfactual signal has emerged (|S/N| ≥ L; %s)", MAIN_SET),
+     pack_by = "Metric", slug = "D21_attrib_sn_pop", raw = am$sn_pop)
+
+emit(am_af |> filter(level == "continent", analog_set == MAIN_SET) |>
+       mutate(cell = paste(WIN_LAB[window], ifelse(explosive_guard, "explosive dropped", "explosive kept"), sep = ", "),
+              val = sprintf("AN %s | AF %s", fmt_an(metric, an, an_lo, an_hi), fmt_af(af, af_lo, af_hi))) |>
+       report_wide("metric", "cell", "val", rename = c(Metric = "metric")),
+     sprintf("Attributable number and fraction, Africa — window × explosive-guard sensitivity (%s; per-ADM1 AF in the CSV)", INT_LAB),
+     slug = "D19_attrib_af_adm1", raw = am$af_adm1)
+
+emit(hl4d(am$sn_scope) |> filter(analog_set == MAIN_SET, level != "country") |> lvl4d() |>
+       arrange(metric, scope) |>
+       transmute(Metric = metric, Scope = scope, `Mean difference` = ifelse(metric == "onsets", fmt_num(mean_diff, 1), fmt_cases(mean_diff)),
+                 `SD across replicates` = ifelse(metric == "onsets", fmt_num(sd_diff, 1), fmt_cases(sd_diff)),
+                 `S/N` = fmt_num(sn, 2), `P(forecast > counterfactual)` = fmt_pct(p_sign)),
+     sprintf("Signal-to-noise of the paired difference — Africa and regions (%s; per-ADM1 values in the CSVs)", MAIN_SET),
+     pack_by = "Metric", slug = "D21_attrib_sn_scope", raw = am$sn_scope)
+# Per-ADM1 PR and S/N tables: CSV only (too long for the report).
+if (nzchar(TABLES_DIR)) {
+  note_caption("D20_attrib_pr_adm1", "Forecast attribution, probability ratio per ADM1: one row per window x explosive guard x ADM1 x outbreak event (event: onset_any / cases_ge) x analogue set; p1 / p0 the factual / counterfactual probabilities of the event, PR, PN (far), PS and PNS")
+  report_write_csv(am$pr_adm1, file.path(TABLES_DIR, "D20_attrib_pr_adm1.csv"))
+  note_caption("D21_attrib_sn_adm1", "Forecast attribution, signal-to-noise per ADM1: one row per window x explosive guard x ADM1 x metric x analogue set; mean and SD of the paired factual - counterfactual difference, their ratio sn, and the share of pairs with the sign of the mean (p_sign)")
+  report_write_csv(am$sn_adm1, file.path(TABLES_DIR, "D21_attrib_sn_adm1.csv"))
+}
+```
+
+## Information component of the forecast attribution
+
+```{r}
+#| label: s-info-load
+# report_attrib_information (09): on with an attribution factual and the fixed
+# draw design (results.af_posterior).
+INFO_ON <- ATTRIB_F && AF_POST
+ai <- if (INFO_ON) R_("results_report_attrib_information", sets = SETS) else NULL
+```
+
+`r if (!INFO_ON) "Not derived: the attribution uses the displayed factual (no results.inputs.attrib_manifest), or results.af_posterior is off." else sprintf("Three factual / counterfactual pairs share every replicate's smoothing replicate and posterior draw: **total** = displayed factual (launched %s, earlier months from the smoothing) − counterfactual; **information** = displayed factual − attribution factual (launched %s); **ENSO** = attribution factual − counterfactual, the headline attribution. The attributable numbers add (total = information + ENSO, up to replicates the explosive guard drops differently per pair; the gap column), the fractions do not. Both factuals start each replicate from the same smoothing replicate; the attribution factual from its %s state, which the smoother traced back from the data up to the displayed factual's launch, so the information component measures the realised trajectory of the months between the two launches against their re-simulation, not the value of those months' data alone. %s.", format(as.Date(ai$display_factual_start), "%B %Y"), format(as.Date(ai$attrib_factual_start), "%B %Y"), format(as.Date(ai$attrib_factual_start) - 1, "%B %Y"), INT_LAB)`
+
+```{r}
+#| label: s-info
+#| results: asis
+#| eval: !expr INFO_ON
+COMP_LAB <- c(total = "Total (displayed factual − counterfactual)",
+              information = "Information (displayed − attribution factual)",
+              enso = "ENSO (attribution factual − counterfactual)")
+info_rows <- ai$scope |>
+  filter(cell == HL_WIN, explosive_guard == HL_GUARD, level != "country",
+         analog_set %in% c(MAIN_SET, "information")) |>
+  af_rows(TRUE) |>
+  mutate(Scope = scope_fct(scope_lab(level, region)),
+         Component = factor(COMP_LAB[component], levels = COMP_LAB))
+emit(info_rows |> arrange(Component, Scope) |> af_wide(c("Component", "Scope"), character(0)),
+     sprintf("Decomposition of the forecast attribution over the headline window (counterfactual %s, %s) — Africa + by ENSO group (AF and AN, %s; bold = interval excludes 0)",
+             MAIN_SET, EXPL_LAB, INT_LAB),
+     pack_by = "Component", slug = "D22_attrib_information_scope", raw = info_rows)
+emit(ai$decomposition |>
+       filter(cell == HL_WIN, explosive_guard == HL_GUARD, level != "country", analog_set == MAIN_SET) |>
+       mutate(Scope = scope_fct(as.character(scope)),
+              across(c(total, information, enso, gap), ~ ifelse(metric == "cases", fmt_int(round(.x)), fmt_num(.x, 1)))) |>
+       arrange(metric, Scope) |>
+       transmute(metric, Scope, Total = total, Information = information, ENSO = enso, Gap = gap),
+     sprintf("Attributable number of the pooled means, total = information + ENSO + gap (counterfactual %s, headline window, %s)",
+             MAIN_SET, EXPL_LAB),
+     pack_by = "metric", slug = "D22_attrib_information_decomposition", raw = ai$decomposition)
+if (nzchar(TABLES_DIR)) {
+  note_caption("D22_attrib_information_by_country", "Decomposition of the forecast attribution per country: one row per component (ENSO / information / total) x cell x analogue set x explosive guard x metric x country; posterior AF and AN quantiles, raw and noise-adjusted")
+  report_write_csv(filter(ai$scope, level == "country"),
+                   file.path(TABLES_DIR, "D22_attrib_information_by_country.csv"))
+}
+```
+
+## Africa window of the forecast attribution
+
+Africa (results.scope.africa): `r if (AW_COMMON) sprintf("every included ENSO group over %s; a group whose firm horizon ends earlier is read on into the simulated analog continuation of ENSO (continuation_max_lead %s%s).", AW$label, if (is.finite(AW$max_lead)) AW$max_lead else "to_end", if (nzchar(AW$max_cf_winter %||% "")) sprintf(", no ONI read past DJF %s", AW$max_cf_winter) else "") else sprintf("the legacy windows (Africa ribbon and forecast totals to %s; the attribution metrics sum each group over its own firm window).", format(AW$end, "%B %Y"))`
+Continuation lead of a track = the ONI month it reads at the group's last
+month (month − lag) minus the last month of the firm ENSO forecast
+(`r format(a28$firm_oni_end[1], "%B %Y")`); the CRPSS is the analog
+continuation's skill against climatology at that lead (perfect-seam
+re-forecasts, so optimistic). `r CAVEAT_TXT`
+
+```{r}
+#| label: s-africa-scope
+#| results: asis
+emit(a28 |>
+       transmute(`ENSO group` = GRP_LAB5(enso_group), Countries = fmt_int(n_countries),
+                 `Firm horizon` = format(firm_horizon, "%Y-%m"), `End in window` = format(group_end, "%Y-%m"),
+                 `Months past firm` = fmt_int(months_past_firm),
+                 `Occurrence lead (CRPSS)` = ifelse(lead_occurrence > 0, sprintf("%d (%s)", lead_occurrence,
+                   ifelse(is.na(crpss_occurrence), "n/a", fmt_num(crpss_occurrence, 2))), "0"),
+                 `Duration lead (CRPSS)` = ifelse(lead_duration > 0, sprintf("%d (%s)", lead_duration,
+                   ifelse(is.na(crpss_duration), "n/a", fmt_num(crpss_duration, 2))), "0"),
+                 `Monthly lead (CRPSS)` = ifelse(lead_monthly > 0, sprintf("%d (%s)", lead_monthly,
+                   ifelse(is.na(crpss_monthly), "n/a", fmt_num(crpss_monthly, 2))), "0"),
+                 `Counterfactual winters read` = cf_winters_read,
+                 `Unconstrained winters` = ifelse(nzchar(cf_winters_unconstrained), cf_winters_unconstrained, "—")),
+     sprintf("Definition of Africa for the forecast attribution: each ENSO group's window, its longest continuation lead per track (analog CRPSS vs climatology at that lead) and the counterfactual DJF winters its window reads (constrained: %s)",
+             a28$cf_winter_constrained[1] %||% "n/a"),
+     slug = "D23_africa_scope", raw = a28)
+```
+
+## Explosive replicates
+
+A replicate whose group window cases reach the cap
+(`r format(EXPL_CAP, big.mark = ",", scientific = FALSE)`) in either arm is dropped from that
+group's pair under the "drop" mode, and from Africa when it is explosive in any group. Dropping
+on the outcome is not neutral: where ENSO raises incidence the factual arm reaches the cap more
+often, so the guard pulls the attributable fraction towards 0. The table gives, per window and
+scope, the pairs dropped because of the factual arm only (F only), the counterfactual only (CF
+only) or both, the exact sign test of F-only against CF-only drops, the attributable cases of the
+dropped pairs and the AF with every pair minus the AF with the kept pairs (AF of the mean cases).
+Headline: `r EXPL_LAB`.
+
+```{r}
+#| label: s-explosive
+#| results: asis
+ea29 <- if (EV_ON) R_("results_report_event_attrib") else NULL
+ex29 <- bind_rows(
+  mutate(am$explosive_summary, source = paste0("forecast (", ifelse(factual == "attrib", "attribution factual", "displayed factual"), ")")),
+  if (INFO_ON && !is.null(ai$explosive_summary))
+    mutate(ai$explosive_summary, source = ifelse(comparison == "stitched_vs_cf", "displayed vs counterfactual",
+                                                 "displayed vs attribution factual")),
+  if (!is.null(ea29$explosive_summary))
+    mutate(ea29$explosive_summary, source = paste0("event ", event, " (factual = ", factual_source, ")")))
+emit(ex29 |> filter(analog_set %in% c(MAIN_SET, "information"), window %in% c(HL_WIN, unique(ea29$explosive_summary$window))) |>
+       mutate(Scope = ifelse(level == "continent", "Africa", GRP_LAB5(scope))) |>
+       transmute(Source = source, Window = window, Scope,
+                 `Pairs` = fmt_int(n_pairs), `F only` = fmt_int(n_drop_f_only), `CF only` = fmt_int(n_drop_cf_only),
+                 Both = fmt_int(n_drop_both), Kept = fmt_int(n_pairs_kept), `Share dropped` = fmt_pct(share_dropped, 1),
+                 `Sign test p` = fmt_num(sign_p, 3), `AN of dropped (cases)` = fmt_int(round(an_dropped)),
+                 `AF none − AF drop` = fmt_pct(af_none_minus_drop, 1)),
+     sprintf("Explosive pairs (cap %s, counterfactual set %s; headline window for the forecast) — what the drop mode removes, per arm, and its effect on the AF of cases (every window and set in the CSV)",
+             format(EXPL_CAP, big.mark = ",", scientific = FALSE), MAIN_SET),
+     pack_by = "Source", slug = "D24_explosive_pairs", raw = ex29)
+```
+
+## Attribution of past strong ENSO events (all readings)
+
+```{r}
+#| label: s-ev-load
+ea <- if (EV_ON) R_("results_report_event_attrib") else NULL
+eam <- if (EV_ON) R_("results_report_event_af_model") else NULL
+# AF / AN per (event, factual source, guard, scope, metric): the factual =
+# simulation reading takes event_af_posterior's interval when
+# results.af_posterior; otherwise (and for the smoothing reading, which has no
+# posterior) the paired bootstrap, i.e. the point alone when attrib_boot_b = 0.
+ev_all <- NULL
+if (EV_ON) {
+  ev_all <- af_rows(ea$af_scope, FALSE)
+  if (AF_POST) {
+    ep <- R_("results_event_af_posterior")$scope |> af_rows(TRUE) |>
+      transmute(event, explosive_guard, level, scope, metric, factual_source = "simulation",
+                p_af = af, p_af_lo = af_lo, p_af_hi = af_hi, p_an = an, p_an_lo = an_lo, p_an_hi = an_hi)
+    ev_all <- ev_all |>
+      left_join(ep, by = c("event", "explosive_guard", "level", "scope", "metric", "factual_source")) |>
+      mutate(post = !is.na(p_af),
+             af = ifelse(post, p_af, af), af_lo = ifelse(post, p_af_lo, af_lo), af_hi = ifelse(post, p_af_hi, af_hi),
+             an = ifelse(post, p_an, an), an_lo = ifelse(post, p_an_lo, an_lo), an_hi = ifelse(post, p_an_hi, an_hi)) |>
+      select(-starts_with("p_"))
+  }
+}
+```
+
+```{r}
+#| label: s-ev
+#| results: asis
+#| eval: !expr EV_ON
+EVS <- ea$events
+ev_lab <- setNames(sprintf("%s (launch %s)", EVS$label, format(EVS$launch, "%Y-%m")), EVS$event)
+ev_fct <- function(x) factor(ev_lab[x], levels = ev_lab)
+FS_LAB <- c(simulation = "factual = simulation", smoothing = "factual = smoothing")
+hl_e <- function(d) filter(d, explosive_guard == HL_GUARD)
+cat(sprintf(paste0(
+  "\n\nEach strong event is attributed by a pair of runs per simulation unit handed off from the ",
+  "historical smoothing at the event launch (the month before ONI crossed ±0.5 into the event): ",
+  "the factual arm with observed ENSO, the counterfactual with Lenssen piControl analogs matched to ",
+  "the launch ONI and classified **%s** at the event's peak DJF. Each fit group's window ends with the ",
+  "cholera season containing the peak, plus its largest positive deployed lag. Two factual readings, ",
+  "both headline candidates: the free simulation, and the smoothing (each replicate's factual series ",
+  "is the smoothing replicate it was handed off from; data-conditioned, so model misfit enters the ",
+  "contrast). AF / AN: factual = simulation with the %s; factual = smoothing %s. Explosive replicates ",
+  "dropped unless stated. AN_obs = AF × the observed window total.%s%s\n\n"),
+  ea$analog_set, INT_LAB,
+  if (isTRUE(ea$n_boot > 0)) sprintf("with the 95%% paired-bootstrap interval (%d resamples)", ea$n_boot)
+  else "as a point estimate (no posterior interval for this reading; bootstrap off)",
+  if (any(grepl("^lanina_202[012]$", EVS$event)))
+    " The 2020-23 La Niña as three annual launches: their windows overlap, per-launch numbers are not additive." else "",
+  if (!is.null(ea$sub_windows))
+    paste0(" A multi-winter event is one launch (its counterfactual analogs neutral in every winter it ",
+           "spans) read in consecutive per-winter sub-windows, reported after these tables.") else ""))
+
+if (AF_POST) {
+  ni_ev <- af_unidentified_txt(hl_e(R_("results_event_af_posterior")$scope), "Past events")
+  if (nzchar(ni_ev)) cat(ni_ev, "\n\n")
+}
+emit(EVS |> left_join(ea$group_windows |> group_by(event) |>
+                        summarise(windows = paste(sprintf("%s %s", grp_token(enso_group),
+                                                          format(window_end, "%Y-%m")), collapse = ", ")),
+                      by = "event") |>
+       transmute(Event = label, Launch = format(launch, "%Y-%m"), Peak = format(peak, "%Y-%m"),
+                 `Window end by group` = windows, `Analogs in set` = fmt_int(lenssen_n_set)),
+     "Past strong ENSO events: launch, peak and per-group window end", slug = "D13_event_attrib_events", raw = ea$events)
+
+emit(hl_e(ev_all) |> filter(level == "continent") |>
+       mutate(Event = ev_fct(event), val = sprintf("%s | AF %s", fmt_an(metric, an, an_lo, an_hi),
+                                                   fmt_af(af, af_lo, af_hi)),
+              col = paste(metric, FS_LAB[factual_source], sep = ", ")) |>
+       report_wide("Event", "col", "val"),
+     "ENSO-attributable cases and onsets per event, Africa: AN | AF, both factual readings (intervals as stated above; bold = interval excludes 0)",
+     slug = "D13_event_attrib_af_scope", raw = ev_all)
+
+emit(hl_e(ev_all) |> filter(level == "region") |>
+       mutate(Event = ev_fct(event), region = factor(region, levels = LV$region),
+              val = fmt_af(af, af_lo, af_hi),
+              col = paste(metric, FS_LAB[factual_source], sep = ", ")) |>
+       arrange(Event, region) |>
+       report_wide(c("Event", "region"), "col", "val", rename = c(Region = "region")),
+     "Attributable fraction by ENSO group and event, both factual readings (intervals as stated above)", pack_by = "Event")
+
+# AN_obs = AF x observed: with the posterior AF, its interval is the AF interval
+# times the (fixed) observed total.
+an_obs <- ea$an_observed |> filter(explosive_guard == HL_GUARD, level != "country", factual_source == "simulation")
+if (AF_POST)
+  an_obs <- an_obs |>
+    left_join(transmute(filter(ev_all, post), event, explosive_guard, level, scope, metric, factual_source,
+                        pa = af, pa_lo = af_lo, pa_hi = af_hi),
+              by = intersect(c("event", "explosive_guard", "level", "scope", "metric", "factual_source"), names(an_obs))) |>
+    mutate(an_obs    = ifelse(is.na(pa), an_obs, pa * observed),
+           an_obs_lo = ifelse(is.na(pa), an_obs_lo, pa_lo * observed),
+           an_obs_hi = ifelse(is.na(pa), an_obs_hi, pa_hi * observed)) |>
+    select(-pa, -pa_lo, -pa_hi)
+emit(an_obs |>
+       mutate(Event = ev_fct(event), Scope = ifelse(level == "continent", "Africa", region),
+              val = ifelse(metric == "onsets",
+                           sprintf("obs %s; AN_obs %s; obs/F %s; cover %s", fmt_num(observed, 0),
+                                   fmt_an("onsets", an_obs, an_obs_lo, an_obs_hi), fmt_num(obs_over_f, 2), fmt_pct(cover)),
+                           sprintf("obs %s; AN_obs %s; obs/F %s; cover %s", fmt_cases(observed),
+                                   fmt_an("cases", an_obs, an_obs_lo, an_obs_hi), fmt_num(obs_over_f, 2), fmt_pct(cover)))) |>
+       report_wide(c("Event", "Scope"), "metric", "val"),
+     paste("Observed window totals, observed-anchored attributable number (AF of the simulated factual",
+           "× observed), observed ÷ simulated factual mean (skill) and surveillance coverage (share of the",
+           "simulated gid-months with a survival-panel row)"),
+     pack_by = "Event", slug = "D16_event_attrib_observed", raw = an_obs)
+
+emit(ev_all |> filter(level == "continent") |>
+       mutate(Event = ev_fct(event),
+              col = paste(FS_LAB[factual_source], ifelse(explosive_guard, "explosive dropped", "explosive kept"), sep = ", "),
+              val = paste(metric, fmt_af(af, af_lo, af_hi))) |>
+       group_by(Event, col) |> summarise(val = paste(val, collapse = "; "), .groups = "drop") |>
+       report_wide("Event", "col", "val"),
+     "Attributable fraction, Africa — factual reading × explosive-guard sensitivity")
+
+emit(hl_e(ea$pr_scope) |> filter(level == "region", factual_source == "simulation", pr_event == HLM$pr_event) |>
+       mutate(Event = ev_fct(event), region = factor(region, levels = LV$region),
+              val = sprintf("PR %s; p1 %s / p0 %s", fmt_pr(pr, pr_lo, pr_hi), fmt_pct(p1), fmt_pct(p0))) |>
+       arrange(Event, region) |>
+       report_wide(c("Event", "region"), "event", "val", rename = c(Region = "region")),
+     paste0("Probability ratio of an outbreak event (", EV_LAB[[HLM$pr_event]], ") per ENSO group (factual = simulation)"),
+     pack_by = "Event", slug = "D14_event_attrib_pr_scope", raw = ea$pr_scope)
+
+emit(hl_e(ea$sn_scope) |> filter(level != "country") |>
+       mutate(Event = ev_fct(event), Scope = ifelse(level == "continent", "Africa", region),
+              val = sprintf("%s [P>0 %s]", fmt_num(sn, 2), fmt_pct(p_sign)),
+              col = paste(metric, FS_LAB[factual_source], sep = ", ")) |>
+       report_wide(c("Event", "Scope"), "col", "val"),
+     "Signal-to-noise of the paired difference per event (P>0: share of replicates with more under the factual)",
+     pack_by = "Event", slug = "D15_event_attrib_sn_scope", raw = ea$sn_scope)
+
+sim_af <- hl_e(ev_all) |> filter(level != "country", factual_source == "simulation") |>
+  transmute(event, level, scope, metric, sim = fmt_af(af, af_lo, af_hi))
+emit(eam$scope |> filter(level != "country") |>
+       transmute(event, level, scope, metric, analytic = fmt_pct_ci(af_mean, af_lo, af_hi, 1),
+                 observed = ifelse(metric == "onsets", fmt_num(observed, 0), fmt_cases(observed))) |>
+       left_join(sim_af, by = c("event", "level", "scope", "metric")) |>
+       mutate(Event = ev_fct(event), Scope = ifelse(level == "continent", "Africa", scope),
+              val = sprintf("analytic %s | simulated %s [obs %s]", analytic, sim, observed)) |>
+       report_wide(c("Event", "Scope"), "metric", "val"),
+     paste("Analytic attributable fraction (deployed crossbasis on the observed rows, no epidemic dynamics;",
+           eam$n_draws, "posterior draws × counterfactual analogs) vs the simulated AF (factual = simulation)"),
+     pack_by = "Event", slug = "D17_event_af_model_scope", raw = eam$scope)
+
+if (nzchar(TABLES_DIR)) {
+  note_caption("D17_event_af_model_adm1", "Analytic attribution of the past events per ADM1 (crossbasis on the observed panel): one row per event x track x ADM1; observed total, AN and AF posterior mean with 95% interval, P(AN > 0)")
+  report_write_csv(eam$adm1, file.path(TABLES_DIR, "D17_event_af_model_adm1.csv"))
+  note_caption("D13_event_attrib_af_adm1", "Past-event attribution per ADM1: one row per event x factual source x explosive guard x ADM1 x metric x analogue set; factual and counterfactual means over paired replicates, AN, AF (of means) and AN per 100,000")
+  report_write_csv(ea$af_adm1, file.path(TABLES_DIR, "D13_event_attrib_af_adm1.csv"))
+  note_caption("D13_event_attrib_exposure", "Past-event attribution, population in ADM1s with a larger expected burden: one row per event x factual source x explosive guard x metric x magnitude x rule x scope x analogue set; number of ADM1s, population and its share of the scope")
+  report_write_csv(ea$exposure, file.path(TABLES_DIR, "D13_event_attrib_exposure.csv"))
+  note_caption("D14_event_attrib_pr_adm1", "Past-event attribution, probability ratio per ADM1: one row per event x factual source x explosive guard x ADM1 x outbreak event (pr_event: onset_any / cases_ge) x analogue set; p1 / p0, PR, PN (far), PS and PNS")
+  report_write_csv(ea$pr_adm1, file.path(TABLES_DIR, "D14_event_attrib_pr_adm1.csv"))
+  note_caption("D15_event_attrib_sn_adm1", "Past-event attribution, signal-to-noise per ADM1: one row per event x factual source x explosive guard x ADM1 x metric x analogue set; mean and SD of the paired difference, sn and p_sign")
+  report_write_csv(ea$sn_adm1, file.path(TABLES_DIR, "D15_event_attrib_sn_adm1.csv"))
+  note_caption("D16_event_attrib_observed_adm1", "Observed onsets and suspected cases per ADM1 over each past event's window: one row per event x ADM1, with the number of cells (months) behind each total")
+  report_write_csv(ea$observed_adm1, file.path(TABLES_DIR, "D16_event_attrib_observed_adm1.csv"))
+}
+```
+
+```{r}
+#| label: s-ev-sub
+#| results: asis
+#| eval: !expr EV_ON
+# Per-winter sub-windows of a multi-winter event (report_event_attrib v3,
+# event_af_posterior v3, report_event_af_model v2). Only when
+# the event manifest has them (schema 3).
+if (!is.null(ea$sub_windows)) {
+  sw <- ea$sub_windows
+  sw_all <- af_rows(sw$af_scope, FALSE)
+  evp_sw <- if (AF_POST) R_("results_event_af_posterior")$sub_windows else NULL
+  if (!is.null(evp_sw)) {
+    keys <- c("event", "sub_window", "explosive_guard", "level", "scope", "metric", "factual_source")
+    sw_all <- sw_all |>
+      left_join(af_rows(evp_sw$scope, TRUE) |>
+                  transmute(event, sub_window, explosive_guard, level, scope, metric, factual_source = "simulation",
+                            p_af = af, p_af_lo = af_lo, p_af_hi = af_hi, p_an = an, p_an_lo = an_lo, p_an_hi = an_hi),
+                by = keys) |>
+      mutate(post = !is.na(p_af),
+             af = ifelse(post, p_af, af), af_lo = ifelse(post, p_af_lo, af_lo), af_hi = ifelse(post, p_af_hi, af_hi),
+             an = ifelse(post, p_an, an), an_lo = ifelse(post, p_an_lo, an_lo), an_hi = ifelse(post, p_an_hi, an_hi)) |>
+      select(-starts_with("p_"))
+  }
+  wl <- sw$windows |> distinct(event, sub_window, k, peak, peak_season_year) |>
+    mutate(Winter = sprintf("DJF %d/%02d (peak %s)", peak_season_year, (peak_season_year + 1L) %% 100L,
+                            format(peak, "%Y-%m")))
+  sw_lab <- setNames(wl$Winter, paste(wl$event, wl$sub_window))
+  win_fct <- function(ev, id) factor(sw_lab[paste(ev, id)], levels = unique(wl$Winter[order(wl$event, wl$k)]))
+  cat(paste0("\n\nPer-winter sub-windows: one launch, one pair of runs per unit; each fit group's window ",
+             "(each country's under per-country season ends) cut into consecutive sub-windows, the k-th ending ",
+             "with the cholera season containing the k-th winter's peak plus the group's largest positive deployed ",
+             "lag. The sub-windows partition the event window, so their AN add up to the event's; AF do not.\n\n"))
+  emit(sw$windows |>
+         mutate(Event = ev_fct(event), Winter = win_fct(event, sub_window),
+                val = sprintf("%s – %s", format(start, "%Y-%m"), format(end, "%Y-%m"))) |>
+         report_wide(c("Event", "Winter"), "key", "val"),
+       "Per-winter sub-windows of a multi-winter event: start – end by fit group (or country)",
+       pack_by = "Event", slug = "D13_event_attrib_sub_window_bounds", raw = sw$windows)
+  emit(hl_e(sw_all) |> filter(level != "country") |>
+         mutate(Event = ev_fct(event), Winter = win_fct(event, sub_window),
+                Scope = ifelse(level == "continent", "Africa", region),
+                val = sprintf("%s | AF %s", fmt_an(metric, an, an_lo, an_hi), fmt_af(af, af_lo, af_hi)),
+                col = paste(metric, FS_LAB[factual_source], sep = ", ")) |>
+         arrange(Event, Winter) |>
+         report_wide(c("Event", "Winter", "Scope"), "col", "val"),
+       "ENSO-attributable cases and onsets per winter of a multi-winter event, Africa + by ENSO group: AN | AF, both factual readings (intervals as for the events)",
+       pack_by = "Event", slug = "D13_event_attrib_sub_windows", raw = sw_all)
+  if (!is.null(eam$sub_windows))
+    emit(eam$sub_windows$scope |> filter(level != "country") |>
+           mutate(Event = ev_fct(event), Winter = win_fct(event, sub_window),
+                  Scope = ifelse(level == "continent", "Africa", scope),
+                  val = sprintf("%s [obs %s]", fmt_pct_ci(af_mean, af_lo, af_hi, 1),
+                                ifelse(metric == "onsets", fmt_num(observed, 0), fmt_cases(observed)))) |>
+           arrange(Event, Winter) |>
+           report_wide(c("Event", "Winter", "Scope"), "metric", "val"),
+         "Analytic attributable fraction per winter of a multi-winter event (deployed crossbasis on the observed rows)",
+         pack_by = "Event", slug = "D17_event_af_model_sub_windows", raw = eam$sub_windows$scope)
+  if (nzchar(TABLES_DIR)) {
+    note_caption("D13_event_attrib_sub_windows_af_adm1", "Past-event attribution per ADM1 and per-winter sub-window: as D13_event_attrib_af_adm1, one row per sub-window")
+    report_write_csv(sw$af_adm1, file.path(TABLES_DIR, "D13_event_attrib_sub_windows_af_adm1.csv"))
+    note_caption("D16_event_attrib_sub_windows_observed", "Past-event attribution per scope and per-winter sub-window, with the observed total: AN and AF as in D13 plus the observed total, its coverage and AN_obs = AF x observed")
+    report_write_csv(sw$an_observed, file.path(TABLES_DIR, "D16_event_attrib_sub_windows_observed.csv"))
+    if (!is.null(eam$sub_windows)) {
+      note_caption("D17_event_af_model_sub_windows_adm1", "Analytic attribution of the past events per ADM1 and per-winter sub-window: as D17_event_af_model_adm1, one row per sub-window")
+      report_write_csv(eam$sub_windows$adm1, file.path(TABLES_DIR, "D17_event_af_model_sub_windows_adm1.csv"))
+    }
+  }
+}
+```
+
+## ENSO-exposed population: all cells
+
+```{r}
+#| label: s-exposure
+#| results: asis
+# Exceedance over m: expected exposed share, any track, each direction.
+emit(e5 |> filter(track == "any", level != "country") |>
+       mutate(val = fmt_pct_ci(pct_mean, pct_lo, pct_hi)) |>
+       report_wide(c("dir", "scope", "mag"), "enso_label", "val", levels = list(scope = LV$scope),
+                   rename = c(Direction = "dir", Scope = "scope", `IRR beyond 1 +` = "mag")),
+     "Expected share of the population exposed to an ENSO effect of at least m, any track (union) — by direction, Africa + by region (mean, 95% CrI; exceedance over m)",
+     pack_by = "Direction", slug = "D10_enso_exposure_exceedance",
+     raw = filter(ex$exposure, track == "any", level != "country"))
+
+emit(e5 |> filter(track == "concordant2", direction == HL$direction, level != "country") |>
+       mutate(val = fmt_pct_ci(pct_mean, pct_lo, pct_hi)) |>
+       report_wide(c("scope", "mag"), "enso_label", "val", levels = list(scope = LV$scope),
+                   rename = c(Scope = "scope", `IRR beyond 1 +` = "mag")),
+     sprintf("Expected share of the population exposed to an ENSO effect of at least m (%s) on ≥2 tracks — Africa + by region (mean, 95%% CrI)",
+             DIR_LAB[[HL$direction]]),
+     pack_by = "Scope", slug = "D10_enso_exposure_concordant",
+     raw = filter(ex$exposure, track == "concordant2", direction == HL$direction, level != "country"))
+
+# Cross-track comparison of the certain population at the headline m and p.
+emit(at_cut(at_mag(filter(g5, direction == HL$direction, level != "country"), HL_M), HL_P) |>
+       mutate(val = sprintf("%s [%s]", fmt_pct(pct, 1), fmt_int(n_adm1))) |>
+       report_wide(c("scope", "trk"), "enso_label", "val", levels = list(scope = LV$scope),
+                   rename = c(Scope = "scope", Track = "trk")),
+     sprintf("Certain population by track and cross-track rule: share where P(%s effect beyond %s) ≥ %s — Africa + by region (share [N ADM1]; no interval)",
+             DIR_LAB[[HL$direction]], fmt_pct(HL_M), fmt_pct(HL_P)),
+     pack_by = "Scope", slug = "D11_enso_exposure_cross_track",
+     raw = unlab(at_cut(at_mag(filter(g5, direction == HL$direction, level != "country"), HL_M), HL_P)))
+
+bt_m <- unique(c(0, HL_M))
+emit(e5 |> filter(direction == HL$direction, level == "continent",
+                  vapply(magnitude, function(v) any(abs(v - bt_m) < 1e-9), logical(1))) |>
+       mutate(val = fmt_pct_ci(pct_mean, pct_lo, pct_hi)) |>
+       report_wide(c("mag", "trk"), "enso_label", "val",
+                   rename = c(`IRR beyond 1 +` = "mag", Track = "trk")),
+     sprintf("Expected share of the population exposed to an ENSO effect (%s) — Africa, by track (mean, 95%% CrI)",
+             DIR_LAB[[HL$direction]]),
+     pack_by = "IRR beyond 1 +", slug = "D11_enso_exposure_by_track")
+
+for (k in seq_along(LV$cond)) {
+  cl <- LV$cond[[k]]
+  emit(g5 |> filter(direction == HL$direction, track == HL$track, level != "country", enso_label == cl) |>
+         mutate(val = sprintf("%s [%s]", fmt_pct(pct), fmt_int(n_adm1))) |>
+         report_wide(c("scope", "mag"), "pcut", "val", levels = list(scope = LV$scope),
+                     rename = c(Scope = "scope", `IRR beyond 1 +` = "mag")),
+       sprintf("Certain population: share where P(%s effect ≥ m) ≥ p, %s — %s, Africa + by region (share of the scope's population [N ADM1]; no interval)",
+               DIR_LAB[[HL$direction]], TRACK_LAB[[HL$track]], cl),
+       pack_by = "Scope", slug = sprintf("D11_enso_exposure_grid_%d", k))
+}
+
+emit(hl_grid |> at_cut(HL_P) |> filter(level == "country") |>
+       mutate(region = factor(region, levels = LV$region),
+              val = sprintf("%s [%s; %s ADM1]", fmt_pct(pct), fmt_pop(pop, 1), fmt_int(n_adm1))) |>
+       report_wide(c("region", "scope"), "enso_label", "val",
+                   rename = c(Region = "region", Country = "scope")) |>
+       with_afro("Country") |> with_pmax("Country"),
+     sprintf("Certain population by country: share where %s (share of the country's population [population; N ADM1]; no interval)",
+             hl_rule(fmt_pct(HL_P))),
+     pack_by = "Region", slug = "D12_enso_exposure_by_country",
+     raw = with_afro(unlab(filter(at_cut(hl_grid, HL_P), level == "country")), "scope", raw = TRUE))
+```
+
+## Per-country cholera-season ends
+
+```{r}
+#| label: s-season-ends
+#| results: asis
+gl <- R_("results_group_labels")
+mon_abb <- function(m) ifelse(is.na(m), "—", month.abb[m])
+cat(sprintf(paste0(
+  "Each country's cholera-year end is its modal gid `min_seas` − 1 (the month before its cholera year ",
+  "starts; ties go to the later end month), from the gid calendar of `%s`. Hindcast windows: %s; ",
+  "past-event windows: %s (by_group = one season-end month per fit group, by_country_from_panel = each ",
+  "country's own). The calendar-default column (countries whose every gid fell back to the January ",
+  "default) is %s.\n\n"),
+  gl$season_end_source$panel %||% "—", gl$season_end_mode$hindcast, gl$season_end_mode$event,
+  if (is.na(gl$season_end_source$min_seas_source_csv)) "not available until 03_prepare_occ.R writes its .min_seas_source.csv"
+  else "from the survival panel's .min_seas_source.csv"))
+emit(gl$season_ends |>
+       arrange(match(enso_group, GROUP_DISP$order), iso3) |>
+       transmute(`ENSO group` = enso_group, Country = iso3, `Season end` = mon_abb(season_end_month),
+                 `Modal min_seas` = mon_abb(min_seas_mode), `Modal share` = fmt_pct(modal_share),
+                 Gids = fmt_int(n_gid), `Distinct min_seas` = fmt_int(n_distinct),
+                 `Group season end (former)` = mon_abb(group_season_end_month),
+                 `Calendar default` = ifelse(is.na(calendar_default), "—",
+                                             ifelse(calendar_default, "yes", "no"))) |>
+       with_afro("Country"),
+     "Per-country cholera-season ends from the pipeline's season calendar (Data S1, D3)",
+     pack_by = "ENSO group", slug = "D3_season_ends", raw = with_afro(gl$season_ends, "iso3", raw = TRUE))
+for (wt in intersect(c("hindcast", "event"), unique(gl$season_windows$window_type))) {
+  w <- filter(gl$season_windows, window_type == wt)
+  emit(w |> arrange(match(enso_group, GROUP_DISP$order), iso3) |>
+         mutate(val = format(firm_horizon_end, "%Y-%m"),
+                enso_group = factor(enso_group, levels = GROUP_DISP$order)) |>
+         report_wide(c("enso_group", "iso3"), "window", "val",
+                     rename = c(`ENSO group` = "enso_group", Country = "iso3")) |>
+         with_afro("Country"),
+       sprintf("Firm window end per country and %s (Data S1, D3; season ends and unit horizons in the CSV)",
+               if (wt == "hindcast") "hindcast launch year" else "past ENSO event"),
+       pack_by = "ENSO group", slug = sprintf("D3_season_windows_%s", wt), raw = with_afro(w, "iso3", raw = TRUE))
+}
+```
+
+## Sampler diagnostics of the deployed models
+
+```{r}
+#| label: s-r7
+#| results: asis
+cv <- R_("results_report_convergence")
+th <- cv$thresholds
+# report_convergence v2: the deploy-gate verdict of each fit
+# under the deploy's convergence block (cv$gate).
+gt <- cv$gate
+emit(cv$fits |>
+       transmute(Track = track, `ENSO group` = enso_group, Lag = lag,
+                 Chains = n_chains, Draws = fmt_int(n_draws), Parameters = fmt_int(n_params),
+                 `Max R-hat` = fmt_num(max_rhat, 3),
+                 `Min bulk ESS` = fmt_int(min_ess_bulk), `Min tail ESS` = fmt_int(min_ess_tail),
+                 !!sprintf("R-hat > %s", th[["rhat"]]) := n_rhat_gt,
+                 !!sprintf("bulk ESS < %s", th[["ess"]]) := n_ess_bulk_lt,
+                 !!sprintf("tail ESS < %s", th[["ess"]]) := n_ess_tail_lt,
+                 Divergences = divergences, `Max-treedepth hits` = treedepth_hits,
+                 `Min E-BFMI` = fmt_num(min_ebfmi, 2),
+                 `Deploy gate` = ifelse(nzchar(gate_reasons), sprintf("%s (%s)", gate_verdict, gate_reasons),
+                                        gate_verdict)),
+     sprintf(paste0("Convergence diagnostics of the deployed models (Data S1, D27). The last column gives the ",
+                    "deployment-gate verdict (pass / allowed / fail, with the failed criteria) under the %s scope ",
+                    "(every parameter but the group-level effects at R-hat <= %s and bulk / tail ESS >= %s; ",
+                    "every parameter at R-hat <= %s; divergences <= %s; per-chain E-BFMI >= %s); the deploy ",
+                    "gate was %s%s."),
+             gt$scope, gt$rhat_max, gt$ess_min, gt$rhat_any, gt$max_divergent, gt$ebfmi_min, gt$action,
+             if (length(gt$allow)) paste0(", allowed: ", paste(gt$allow, collapse = ", ")) else ""),
+     pack_by = "Track", slug = "D27_convergence", raw = cv$fits)
+```
+
+## Model specification of the deployed fits
+
+Read from the deployed fit objects themselves (09's report_model_spec, in the
+convergence step's fit load): the formula terms, random-effect grouping factors,
+offsets, family and priors, checked against the documented term set
+(`analysis/model_terms_deployed.yml`).
+
+```{r}
+#| label: s-model-spec
+#| results: asis
+MS <- setNames(lapply(FIG1_TRACKS, function(t) R_("results_report_model_spec", track = t)), FIG1_TRACKS)
+ms_fits <- bind_rows(lapply(MS, `[[`, "fits"))
+emit(ms_fits |>
+       transmute(Track = track, `ENSO group` = enso_group, Lag = lag, Response = response,
+                 Family = paste0(family, " (", link, ")"), `Fixed terms` = n_fixed, `RE terms` = n_re,
+                 `RE groups` = re_groups, Offsets = offsets, Coefficients = n_fixef, Priors = n_priors,
+                 `As documented` = ifelse(is.na(matches_deployed_terms), "n/a",
+                                          ifelse(matches_deployed_terms, "yes", "NO"))),
+     "Fit-level specification of the deployed models: one row per fit (Data S1, D25; terms, priors and the per-item check against model_terms_deployed.yml in the CSVs)",
+     pack_by = "Track", slug = "D25_model_spec", raw = ms_fits)
+ms_bad <- bind_rows(lapply(MS, `[[`, "check")) |> filter(!ok)
+if (nrow(ms_bad))
+  emit(ms_bad |> transmute(Track = track, `ENSO group` = enso_group, Item = item, Missing = missing, Unexpected = unexpected),
+       "Deployed fits that differ from model_terms_deployed.yml", pack_by = "Track")
+if (nzchar(TABLES_DIR)) {
+  note_caption("D25_model_spec_terms", "Model terms of every deployed fit: one row per track x ENSO group x term (component and kind of term)")
+  report_write_csv(bind_rows(lapply(MS, `[[`, "terms")), file.path(TABLES_DIR, "D25_model_spec_terms.csv"))
+  note_caption("D25_model_spec_priors", "Priors of every deployed fit as brms reports them: one row per track x ENSO group x prior class / coefficient / group (source user or default)")
+  report_write_csv(bind_rows(lapply(MS, `[[`, "priors")), file.path(TABLES_DIR, "D25_model_spec_priors.csv"))
+  note_caption("D25_model_spec_check", "Check of every deployed fit against the declared term set (analysis/model_terms_deployed.yml): one row per track x ENSO group x item, expected and found terms, ok flag")
+  report_write_csv(bind_rows(lapply(MS, `[[`, "check")), file.path(TABLES_DIR, "D25_model_spec_check.csv"))
+}
+```
+
+## ENSO lag selection
+
+```{r}
+#| label: s-r8
+#| results: asis
+lg <- R_("results_report_lags")
+cat(sprintf("Selection rule: `%s` (se_mult %s, occurrence floor offset %s).\n\n",
+            lg$rule$rule, lg$rule$se_mult, lg$rule$occ_floor_offset %||% "none"))
+dse <- function(d, se) ifelse(is.na(d), "—", sprintf("%s ± %s", fmt_num(d, 1), fmt_num(se, 1)))
+lag_d <- function(l, d, se) ifelse(is.na(l), "—", sprintf("%d (%s)", l, dse(d, se)))
+# The floor offset is meant to be the median whole-month episode span: cite
+# the span stamped on the duration panel (S1 cascade), not a claim.
+dur_span <- function(m) {
+  cs <- d$cascade
+  v <- if (is.null(cs)) numeric(0) else cs$value[cs$step == "03_prepare_dur" & cs$metric == m]
+  if (length(v)) v[[1]] else NA_real_
+}
+floor_span_txt <- if (is.null(lg$rule$occ_floor_offset)) "" else
+  if (is.na(dur_span("median_span_months")))
+    "; offset vs the episode span: not stamped on the duration panel (03_prepare_dur.R --restamp)" else
+  sprintf("; offset %s vs the median whole-month episode span %s months, IQR %s–%s (duration panel stamp, D1)",
+          lg$rule$occ_floor_offset, fmt_num(dur_span("median_span_months"), 0),
+          fmt_num(dur_span("span_months_q25"), 0), fmt_num(dur_span("span_months_q75"), 0))
+emit(lg$selected |>
+       transmute(Track = track, `ENSO group` = enso_group, `Deployed lag` = deployed_lag,
+                 `Rule pick` = selected_lag, `Rank-1 lag` = rank1_lag,
+                 `Δelpd (deployed)` = fmt_num(elpd_diff_deployed, 1),
+                 `SE` = fmt_num(se_diff_deployed, 1), Lags = n_lags,
+                 Floor = ifelse(is.na(floor_lag), "none", as.character(floor_lag)),
+                 `Floor binds: cost` = ifelse(bound_active %in% TRUE, dse(bound_cost, bound_cost_se), "no"),
+                 `Rank-2 lag (Δelpd)` = lag_d(rank2_lag, elpd_diff_rank2, se_diff_rank2),
+                 `Best lag ≥ 0 (Δelpd)` = lag_d(best_nonneg_lag, elpd_diff_nonneg, se_diff_nonneg),
+                 `k > 0.7 (deployed)` = ifelse(is.na(n_k_gt07_deployed), "—", fmt_int(n_k_gt07_deployed))) |>
+       with_pmax("ENSO group", "group"),
+     paste("Selected ENSO lags (negative = lead) and their elpd difference to the best lag; the deploy floor",
+           paste0("(min_lag, and occ lag − offset downstream", floor_span_txt, "),"),
+           "whether the best lag lies below it and the paired elpd cost,",
+           "the rank-2 lag and the best non-negative lag (Δelpd ± SE to rank 1; Data S1, D6)"),
+     pack_by = "Track", slug = "D6_selected_lags",
+     # group_label: the group's display short name (style.group_labels; "GW"
+     # under centroid) beside the stored id, which relab() maps to its label.
+     raw = lg$selected |> mutate(group_label = unname(GROUP_DISP$short[enso_group]), .after = enso_group))
+# Firm-horizon rule: the legacy table when the firm ONI end is
+# the last CFSv2 month (or the artefact predates the field), else a firm ONI
+# end column and the seam rule in the caption.
+firm_seam_rule <- !is.null(lg$horizons$firm_oni_end) &&
+  !identical(lg$horizons$firm_oni_end, lg$horizons$last_cfsv2_month)
+h_tbl <- lg$horizons |>
+  transmute(`ENSO group` = enso_group, `Lag occ` = best_lag_occ, `Lag dur` = best_lag_dur,
+            `Lag mon` = best_lag_mon, `Min lag` = min_lag, `Last CFSv2 month` = last_cfsv2_month,
+            `Firm horizon` = horizon_end, Countries = n_countries)
+if (firm_seam_rule)
+  h_tbl <- h_tbl |> mutate(`Firm ONI end` = lg$horizons$firm_oni_end, .before = `Firm horizon`)
+emit(h_tbl,
+     if (firm_seam_rule)
+       "Firm forecast horizons: last full-ONI month (last CFSv2 target month − 1) + the shortest selected lag (Data S1, D6)"
+     else "Firm forecast horizons: last CFSv2 target month + the shortest selected lag (Data S1, D6)",
+     slug = "D6_firm_horizons", raw = lg$horizons)
+emit(lg$ranking |>
+       arrange(track, enso_group, single_lag) |>
+       transmute(Track = track, `ENSO group` = enso_group, Lag = single_lag, Rank = rank,
+                 `elpd_loo` = fmt_num(elpd_loo, 1), `Δelpd` = fmt_num(elpd_diff, 1),
+                 SE = fmt_num(se_diff, 1), Selected = ifelse(selected, "\u2713", "")),
+     "LOO lag rankings, lags -11..11 (Data S1, D7)",
+     pack_by = "Track", slug = "D7_lag_loo_ranking", raw = lg$ranking)
+```
+
+### Pareto-k and averaging over lags
+
+```{r}
+#| label: s-r8-avg
+#| results: asis
+LA_CFG <- RES$derivation$lag_averaging %||% list()
+la_path <- function(t) makeResultsRunFile(opt, "results_lag_averaging", track = t,
+                                          schema = RESULTS_SCHEMA[["lag_averaging"]], config_path = CONFIG_PATH)
+LA <- if (isTRUE(LA_CFG$enable)) Filter(Negate(is.null), lapply(setNames(FIG1_TRACKS, FIG1_TRACKS), function(t)
+  if (file.exists(la_path(t))) R_("results_lag_averaging", track = t) else NULL)) else list()
+if (!length(LA)) {
+  cat(if (isTRUE(LA_CFG$enable))
+    "*No lag_averaging artefact yet: it needs the 05 lag sidecars (05_fit_postprocess_loo_lags.R --lag_sidecar).*\n\n"
+    else "*results.derivation.lag_averaging.enable is false: no lag averaging.*\n\n")
+} else {
+  lal <- bind_rows(lapply(LA, `[[`, "lags")); lai <- bind_rows(lapply(LA, `[[`, "irr"))
+  lam <- bind_rows(lapply(LA, `[[`, "meta"))
+  thr <- LA_CFG$k_threshold %||% 0.7; wmin <- LA_CFG$report_min_weight %||% 0.01
+  cat(sprintf(paste0(
+    "Every single-lag fit's PSIS-LOO from the 05 lag sidecars. The k-robust difference drops the rows with ",
+    "Pareto k > %s at any lag (%s rows per group, median) and re-finds rank 1 on the rest. Weights: stacking ",
+    "(main) and pseudo-BMA+ over every lag (`all`, the headline sensitivity: free of the selection rule and of ",
+    "the deploy floor) and over the lags the deploy rule can pick (`eligible`); only the population ERF and ",
+    "its IRR at the ENSO conditions are averaged.\n\n"), thr, fmt_int(stats::median(lam$n_dropped_k))))
+  emit(lal |> arrange(track, enso_group, single_lag) |>
+         transmute(Track = track, `ENSO group` = enso_group, Lag = single_lag,
+                   `Δelpd ± SE` = dse(elpd_diff, se_diff),
+                   `Δelpd k-robust ± SE` = dse(elpd_diff_krobust, se_diff_krobust),
+                   !!sprintf("k > %s", thr) := fmt_int(k_flag), `k > 1` = fmt_int(n_k_gt1),
+                   `Max k` = fmt_num(k_max, 2),
+                   Role = paste0(ifelse(deployed, "deployed ", ""), ifelse(rank1, "rank 1 ", ""),
+                                 ifelse(rank2, "rank 2", ""))),
+       "Pareto-k diagnostics and elpd differences to the best lag, all and k-robust, per lag (Data S1, D8)",
+       pack_by = "Track", slug = "D8_lag_pareto", raw = lal)
+  wcols <- grep("^w_", names(lal), value = TRUE)
+  wl <- lal |> select(track, enso_group, single_lag, deployed, all_of(wcols)) |>
+    tidyr::pivot_longer(all_of(wcols), names_to = "w", values_to = "weight") |>
+    filter(weight >= wmin) |>
+    mutate(w = sub("^w_", "", w))
+  emit(wl |> mutate(val = sprintf("%d%s: %s", single_lag, ifelse(deployed, "*", ""), fmt_num(weight, 2))) |>
+         group_by(track, enso_group, w) |> summarise(val = paste(val, collapse = ", "), .groups = "drop") |>
+         report_wide(c("track", "enso_group"), "w", "val", rename = c(Track = "track", `ENSO group` = "enso_group")),
+       sprintf("Lag weights ≥ %s per method × lag set (* = deployed lag; Data S1, D9)", wmin),
+       pack_by = "Track", slug = "D9_lag_weights", raw = lal |> select(track, enso_group, single_lag, deployed,
+                                                                       all_of(wcols)))
+  roles <- bind_rows(lapply(LA, `[[`, "roles"))
+  cmp <- lai |>
+    left_join(tidyr::pivot_wider(roles, names_from = role, values_from = single_lag), by = c("track", "enso_group")) |>
+    filter((variant == "lag" & (single_lag == deployed | single_lag == rank2)) |
+             (variant == "mixture" & method == "stacking")) |>
+    mutate(what = case_when(variant == "mixture" ~ paste0("stacked (", lag_set, ")"),
+                            single_lag == deployed ~ paste0("deployed (", single_lag, ")"),
+                            TRUE ~ paste0("rank 2 (", single_lag, ")")),
+           val = sprintf("%s P>1 %s", fmt_irr(irr, irr_lo, irr_hi), fmt_pct(p_gt1)),
+           enso_label = cond_fct(enso_label))
+  emit(cmp |> arrange(track, enso_group, what) |>
+         report_wide(c("track", "enso_group", "what"), "enso_label", "val",
+                     rename = c(Track = "track", `ENSO group` = "enso_group", ERF = "what")),
+       "Population IRR at the ENSO conditions: deployed lag vs stacked over lags vs rank-2 lag (median, 95% CrI, P(IRR > 1); Data S1, D9)",
+       pack_by = "Track", slug = "D9_lag_weights_irr", raw = cmp)
+}
+```
+
+## Baseline-rate anchoring
+
+```{r}
+#| label: s-r9
+#| results: asis
+an <- R_("results_report_anchor")
+lvl <- function(x) paste(sprintf("%s %+.3f", names(x), x), collapse = ", ")
+emit(an$meta |>
+       transmute(Track = track, Cells = n_cells, `Own estimate` = n_own, `Zero events` = n_zero,
+                 Borrowed = n_borrowed, `τ²` = signif(tau2, 3), Estimator = estimator,
+                 `Level contrasts` = vapply(level_factor, lvl, character(1))),
+     "Empirical baseline-rate tables per track (Data S1, D26)",
+     slug = "D26_anchor_summary",
+     raw = an$meta |> mutate(level_factor = vapply(level_factor, lvl, character(1)),
+                             level_factor_ci = NULL))
+emit(an$global, "Continental baseline rates by admin level (Data S1, D26)",
+     slug = "D26_anchor_global")
+emit(an$cell, "Baseline-rate cells: country x admin level, per track (Data S1, D26, full)",
+     slug = "D26_anchor_cells")
+```
+
+## Software
+
+```{r}
+#| label: s-r10
+#| results: asis
+sw <- R_("results_report_software")
+emit(sw$fit_versions |> rename(Track = track, Backend = backend),
+     "Package versions recorded in the deployed fits (computing cluster; Data S1, D28)",
+     slug = "D28_software_fit_versions")
+emit(sw$session |> rename(Software = software, Version = version),
+     "Versions of the session that derived the results (Data S1, D28)",
+     slug = "D28_software_session")
+# Simulation environment of the forward runs: absent from an artefact that
+# lacks it; NA rows for runs whose 07b output did not record it.
+if (!is.null(sw$sim_versions) && nrow(sw$sim_versions))
+  emit(sw$sim_versions |> rename(Arm = arm, Unit = unit, Software = software, Version = version),
+       paste("Versions recorded by the forward simulation runs (07b spatPomp partition_meta.yml;",
+             "— = not recorded, runs before 2026-10-27; Data S1, D28)"),
+       slug = "D28_software_sim_versions")
+```
+
+## Grouping-model comparison (brms_kl class sweep)
+
+```{r}
+#| label: s-r11
+#| results: asis
+if (nzchar(RES$kl_sweep_dir %||% "")) {
+  kl <- R_("results_report_kl_sweep")
+  cat(sprintf("Deployed grouping: `%s` (digest %s). Agreeing chains = %s (mode tolerance %s lags).\n\n",
+              kl$selected$source, kl$selected$digest,
+              if (isTRUE(kl$settings$n_agree > 0)) sprintf("the %d best-agreeing", kl$settings$n_agree)
+              else "the dominant mode", kl$settings$mode_tol))
+  tab <- kl$loo |> filter(chains == "agree") |>
+    left_join(kl$fits |> select(id, n_modes, mode_sizes, agreeing, max_rhat_agree,
+                                min_ess_bulk_agree, divergences, share_agree), by = "id") |>
+    arrange(basis, K, mix)
+  emit(tab |> transmute(Basis = basis, K, Prior = ifelse(mix, "registry + contiguity", "registry"),
+                        `Δelpd ± SE` = sprintf("%s ± %s", fmt_num(elpd_diff_loo, 1), fmt_num(se_diff_loo, 1)),
+                        `Stacking weight` = fmt_num(stacking_weight, 2),
+                        `Pareto k > 0.7` = n_k07, Modes = mode_sizes,
+                        `Max R-hat (agreeing)` = fmt_num(max_rhat_agree, 3),
+                        Divergences = divergences,
+                        `Agreement with deployed grouping` = fmt_pct(share_agree)),
+       "Grouping-model comparison: country-block PSIS-LOO of the latent-class sweep (descriptive)",
+       pack_by = "Basis", slug = "D4_kl_sweep_loo", raw = tab)
+  emit(kl$partition |> select(id, iso3, group, p) |>
+         mutate(cell = sprintf("%s %s", group, fmt_num(p, 2))) |>
+         select(id, iso3, cell) |> tidyr::pivot_wider(names_from = id, values_from = cell) |>
+         with_afro("iso3"),
+       "Most probable class per country and sweep fit (agreeing chains)",
+       slug = "D4_kl_sweep_partition", raw = with_afro(kl$partition, "iso3", raw = TRUE))
+} else cat("*results.kl_sweep_dir is empty: no class-sweep comparison.*\n\n")
+```
+
+## Membership uncertainty of the deployed classes
+
+```{r}
+#| label: s-membership
+#| results: asis
+if (!is.null(MB)) {
+  ct <- MB$country
+  cat(sprintf(paste0(
+    "Deployed sweep cell **%s**, agreeing chains %s. p_max = a country's largest posterior class probability; ",
+    "%d of %d fitted countries have p_max < %s (†). The membership-weighted effects: M1 inside the latent-class ",
+    "model (sum over classes of r × the class's El Niño contrast / lag centre, vs the hard MAP class), M2 over the ",
+    "deployed group ERFs (sum over groups of r × the group's population ERF at its deployed lag)%s. The sweep ",
+    "comparison is descriptive (country-block PSIS-LOO; high Pareto k expected).\n\n"),
+    MB$cell, MB$agreeing, sum(ct$p_max < MB_LOW, na.rm = TRUE), sum(!ct$carried_over), fmt_num(MB_LOW, 2),
+    if (length(MB$m2_skipped_tracks)) sprintf(" -- M2 not yet derived for %s (needs the 05 lag sidecars)",
+                                              paste(MB$m2_skipped_tracks, collapse = ", ")) else ""))
+  rc <- grep("^r_", names(ct), value = TRUE)
+  mat <- ct |> arrange(match(group, GROUP_DISP$order), desc(p_max)) |>
+    mutate(across(all_of(rc), ~ fmt_num(.x, 2)), p_max = pmax_lab(iso3),
+           group = factor(group, levels = GROUP_DISP$order))
+  names(mat)[match(rc, names(mat))] <- relab(sub("^r_", "", rc))
+  emit(mat |> select(`ENSO group` = group, Country = iso3, `p_max` = p_max, all_of(relab(sub("^r_", "", rc))),
+                     `Prior group` = prior_group) |> with_afro("Country"),
+       "Responsibility matrix of the deployed classes: posterior class probabilities per country (agreeing chains; Data S1, D5)",
+       pack_by = "ENSO group", slug = "D5_membership_matrix", raw = with_afro(ct, "iso3", raw = TRUE))
+  emit(MB$group |> mutate(group = factor(group, levels = GROUP_DISP$order)) |> arrange(group) |>
+         transmute(`ENSO group` = group, `Hard members` = n_hard, `Carried over` = n_carried_over,
+                   `Soft size Σ r` = fmt_num(soft_size, 1), `Median p_max` = fmt_num(p_max_median, 2),
+                   `Min p_max` = fmt_num(p_max_min, 2),
+                   !!sprintf("p_max < %s", fmt_num(MB_LOW, 2)) :=
+                     vapply(as.character(group), function(g) sum(ct$group == g & ct$p_max < MB_LOW, na.rm = TRUE), 0L)),
+       "Membership summary per deployed class (Data S1, D5)", slug = "D5_membership_group", raw = MB$group)
+  emit(MB$stability |> filter(id == MB$cell) |>
+         transmute(Chains = chains, Draws = fmt_int(n_draws), `ARI mean` = fmt_num(ari_mean, 2),
+                   `ARI 95%` = sprintf("%s–%s", fmt_num(ari_q2.5, 2), fmt_num(ari_q97.5, 2)),
+                   `P(ARI = 1)` = fmt_pct(p_ari1), `Countries moved (mean, 97.5%)` =
+                     sprintf("%s, %s", fmt_num(moved_mean, 1), fmt_num(moved_q97.5, 0))),
+       "Partition stability: partitions sampled from the responsibilities vs the MAP (Data S1, D5)",
+       slug = "D5_membership_stability", raw = MB$stability)
+  emit(MB$sensitivity |> arrange(chains, desc(elpd_diff)) |>
+         transmute(Chains = chains, Cell = id, ARI = fmt_num(ari, 2),
+                   `Agree (label / matched)` = sprintf("%d / %d of %d", n_agree_label, n_agree_matched, n_countries),
+                   `Δelpd vs deployed ± SE` = sprintf("%s ± %s", fmt_num(elpd_diff, 1), fmt_num(se_diff, 1)),
+                   `k > 0.7 (cell / deployed)` = sprintf("%d / %d", n_k07, n_k07_deployed),
+                   `Stacking weight` = fmt_num(stacking_weight, 2), Moved = moved),
+       "Sensitivity of the deployed partition to the sweep cell and chain set (descriptive country-block elpd; Data S1, D5)",
+       pack_by = "Chains", slug = "D5_membership_sensitivity", raw = MB$sensitivity)
+  m1 <- MB$mixture_m1 |> filter(quantity == "kcon") |> left_join(select(ct, iso3, group), by = "iso3") |>
+    mutate(group = factor(group, levels = GROUP_DISP$order)) |> arrange(group, iso3)
+  emit(m1 |> transmute(`ENSO group` = group, Country = iso3, p_max = pmax_lab(iso3),
+                       `Mixture contrast (95%)` = sprintf("%s (%s, %s)", fmt_num(mix_mean, 2), fmt_num(mix_q2.5, 2),
+                                                          fmt_num(mix_q97.5, 2)),
+                       `MAP class contrast` = fmt_num(map_mean, 2), `Mixture − MAP` = fmt_num(diff_mean, 2)) |>
+         with_afro("Country"),
+       "M1: membership-weighted El Niño contrast (log RR) inside the latent-class model vs the hard MAP class (Data S1, D5)",
+       pack_by = "ENSO group", slug = "D5_membership_mixture_m1", raw = with_afro(MB$mixture_m1, "iso3", raw = TRUE))
+  if (!is.null(MB$mixture_m2)) {
+    m2 <- MB$mixture_m2 |> left_join(select(ct, iso3, group), by = "iso3") |>
+      mutate(enso_label = cond_fct(enso_label), val = sprintf("%s P>1 %s", fmt_irr(irr, irr_lo, irr_hi), fmt_pct(p_gt1)),
+             group = factor(group, levels = GROUP_DISP$order))
+    emit(m2 |> arrange(track, group, iso3, erf) |>
+           report_wide(c("track", "group", "iso3", "erf"), "enso_label", "val",
+                       rename = c(Track = "track", `ENSO group` = "group", Country = "iso3", ERF = "erf")) |>
+           with_afro("Country"),
+         "M2: membership-weighted deployed ERFs (sum over groups of r × the group's population ERF at its deployed lag) vs the hard deployed group, IRR at the ENSO conditions (Data S1, D5)",
+         pack_by = "Track", slug = "D5_membership_mixture_m2", raw = with_afro(MB$mixture_m2, "iso3", raw = TRUE))
+  } else cat("*M2 needs the 05 lag sidecars (05_fit_postprocess_loo_lags.R --lag_sidecar).*\n\n")
+} else cat("*results.kl_sweep_dir / results.kl_sweep_cell unset: no membership tables.*\n\n")
+```
+
+## WHO dashboard term: per-country scale
+
+The smoothing scores the WHO dashboard national monthly count against the
+simulated count of the covered gids times a per-country multiplier
+(scale / who_f, who_f = covered population share). Under
+`simulator.filter.who_obs.scale_mode: estimated` the scale is calibrated per
+country on the months both the WHO table and the database observe (shrunk to
+the pooled ratio, clamped), so the multiplier is the WHO/DB ratio W / D; a
+legacy (fixed-scale) smoothing shows the implied ratios as a preview, while
+the filter scored 1 / who_f (Data S1, D30; `D30_who_scale.csv`).
+
+```{r}
+#| label: s-who-scale
+#| results: asis
+WS <- tryCatch(R_("results_report_who_scale"), error = function(e) NULL)
+if (!is.null(WS)) {
+  t36 <- WS$table
+  emit(t36 |> arrange(country) |>
+         transmute(Country = country, `who_f` = fmt_num(who_f, 2), Months = est_months,
+                   `WHO cases` = fmt_int(who_cases), `DB cases` = fmt_int(db_cases),
+                   `WHO/DB` = fmt_num(ratio_raw, 2), Scale = fmt_num(scale, 2),
+                   `Multiplier (scored)` = fmt_num(multiplier_scored, 2), Source = source,
+                   `WHO>0, DB=0` = months_who_pos_db_zero, `DB>0, WHO=0` = months_db_pos_who_zero) |>
+         with_afro("Country"),
+       sprintf("WHO dashboard term per country (%s; Data S1, D30)",
+               if (identical(WS$mode, "estimated")) "estimated scale, as scored"
+               else "legacy run: implied ratios, the filter scored 1 / who_f"))
+  note_caption("D30_who_scale", "WHO dashboard term per country: who_f, WHO and database cases, scale and scored multiplier")
+  if (nzchar(TABLES_DIR)) report_write_csv(with_afro(t36, "country", raw = TRUE), file.path(TABLES_DIR, "D30_who_scale.csv"))
+  if (nzchar(TABLES_DIR) && !is.null(WS$national_monthly)) {
+    note_caption("D36_who_national_monthly", "WHO national monthly series of suspected cases (dashboard weekly counts and situation-report differences): one row per country x month; cases, days covered (n_days), partial month flag and source")
+    report_write_csv(WS$national_monthly, file.path(TABLES_DIR, "D36_who_national_monthly.csv"))
+  }
+  if (!is.null(WS$posterior))
+    emit(WS$posterior, "WHO months inside / above / below the smoothing's 95% band (08c posterior check; Data S1, D30)")
+} else cat("*report_who_scale artefact absent (results.inputs.smoothing_parts_dir unset or not derived).*\n\n")
+```
+
+## Counterfactual ENSO analog sets
+
+```{r}
+#| label: s-analog-sets
+#| results: asis
+# report_analog_sets v2 (v2 adds run_design, D34): the Lenssen analog pools the
+# counterfactual runs sampled from. An artefact not derived yet is said, not
+# an error.
+AS <- tryCatch(R_("results_report_analog_sets"), error = function(e) NULL)
+if (!is.null(AS)) {
+  cat(paste0(
+    "Analog pools of the ENSO counterfactual (piControl, Lenssen et al. 2024): per arm (the forecast; each past ",
+    "event) and analog set, the number of trajectories, the share of the largest model, the seam error (mean ",
+    "launch-month ONI of the set minus the observed ONI there, °C) and the mean of every classified DJF ",
+    "(the mean of the monthly ONI over December–February). `mixed` = a trajectory whose other classified ",
+    "winters are not all neutral (kept in `all`). Sets under the minimum size are flagged.\n\n"))
+  # Only when a cache relaxes its later winters (an event registry's
+  # other_winters: any), so the text is unchanged otherwise.
+  if (any(AS$winters$role %in% "read_unconstrained"))
+    cat(paste0(
+      "Winters with role `read_unconstrained` are read by the reported months and listed with their mean, ",
+      "but constrain no set: the event's registry entry constrains only its own winters.\n\n"))
+  emit(AS$sets |>
+         transmute(Arm = arm, Matcher = match, Launch = launch, `Primary DJF` = primary_winter,
+                   `Classified DJFs` = constrained_winters, Set = set, n = fmt_int(n),
+                   `Share of pool` = fmt_pct(share_of_pool), Models = n_models,
+                   `Largest model share` = sprintf("%s (%s)", fmt_pct(max_model_share), top_model),
+                   `Seam error (°C)` = fmt_num(seam_error, 2),
+                   `< min size` = ifelse(below_min_set_size, sprintf("yes (< %d)", min_set_size), "")),
+       "Counterfactual analog sets per arm and set (Data S1, D29)",
+       pack_by = "Arm", slug = "D29_analog_sets", raw = AS$sets)
+  emit(AS$winters |>
+         transmute(Arm = arm, Set = set, DJF = winter, Role = role, `Mean DJF ONI (°C)` = fmt_num(mean_djf_oni, 2)),
+       "Mean DJF ONI of each classified winter per counterfactual analog set (Data S1, D29)",
+       pack_by = "Arm", slug = "D29_analog_sets_winters", raw = AS$winters)
+  emit(AS$model_shares |> transmute(Arm = arm, Set = set, Model = model, Share = fmt_pct(share)),
+       "Model shares of each counterfactual analog set (Data S1, D29)",
+       pack_by = "Arm", slug = "D29_analog_sets_models", raw = AS$model_shares)
+} else cat("*report_analog_sets not derived yet (run 09 step report_analog_sets).*\n\n")
+```
+
+## Simulation run design (D34)
+
+```{r}
+#| label: s-run-design
+#| results: asis
+# report_analog_sets v2 run_design: one run config per simulation arm (the
+# first partition unit; every unit of an arm shares the template) and its
+# Lenssen cache. Replicates per draw only for the fixed (cycle / joint) draw designs.
+if (!is.null(AS) && !is.null(AS$run_design)) {
+  emit(report_run_design_table(AS$run_design),
+       paste("Simulation run design per arm: replicates per transmission unit, posterior draws, replicates per",
+             "draw (cycle or joint design), draw mode, handoff weighting of the smoothing states, counterfactual analogs",
+             "per pre-industrial model and number of models, and the ENSO clamp margin beyond the fitted range (D34)"),
+       slug = "D34_run_design", raw = AS$run_design)
+} else cat("*report_analog_sets v2 not derived yet (run 09 step report_analog_sets): no run-design table.*\n\n")
+```
+
+## National-zero audit (Data S1, D32)
+
+```{r}
+#| label: s-national-zero-audit
+#| results: asis
+# report_national_zero_audit: on only when the panel's months
+# file has its 01 audit beside it. The full country-year table is written under
+# a STABLE name, D32_national_zero_audit.csv (the supplement reads it).
+.art_exists <- function(kind) file.exists(makeResultsRunFile(opt, kind, schema = RESULTS_SCHEMA[[sub("^results_", "", kind)]],
+                                                             config_path = CONFIG_PATH))
+if (.art_exists("results_report_national_zero_audit")) {
+  NZA <- R_("results_report_national_zero_audit")
+  pr <- NZA$params
+  cat(sprintf(paste0("National-zero rule **%s** at WHO threshold %s: zero-day share %s, tail window %s, head ",
+                     "window %s, database tolerance %s x WHO (consistency scope %s), %s to %s, static exclusions %s.\n\n"),
+              pr$rule, pr$zero_threshold, fmt_num(pr$zero_day_frac, 2), pr$window, pr$head_window,
+              fmt_num(pr$db_tolerance, 2), pr$consistency_scope, pr$start, pr$end,
+              if (nzchar(pr$exclude %||% "")) pr$exclude else "none"))
+  emit(NZA$totals |> transmute(`Country-years` = country_years, `Months claimed` = months_claimed,
+                               `Below-threshold months` = months_who_below_threshold,
+                               `Head unclaimed` = head_unclaimed, `Tail unclaimed` = tail_unclaimed,
+                               `WHO-zero months dropped (database > WHO)` = auto_excluded_exact,
+                               `Threshold months dropped (database > WHO)` = auto_excluded_threshold,
+                               `Country-years database > WHO` = country_years_db_exceeds_who,
+                               `Country-years statically excluded` = country_years_static_excluded),
+       "National-zero months: totals of the country-year audit (Data S1, D32)",
+       slug = "D32_national_zero_audit_totals", raw = NZA$totals)
+  note_caption("D32_national_zero_audit", "National-zero months: the country-year audit of the zero-fill rule")
+  if (nzchar(TABLES_DIR)) report_write_csv(with_afro(NZA$audit, raw = TRUE), file.path(TABLES_DIR, "D32_national_zero_audit.csv"))
+} else cat("*No national-zero audit beside this panel's months file (built before 01 wrote one, or no zero-fill): Data S1, D32 not derived.*\n\n")
+```
+
+## Occurrence-panel exclusions (Data S1, D31)
+
+```{r}
+#| label: s-occ-panel-exclusions
+#| results: asis
+# report_occ_panel_exclusions: on only when 03 wrote the panel-exclusion
+# sidecars beside the survival panel. Stable CSV: D31_occ_panel_exclusions.csv.
+if (.art_exists("results_report_occ_panel_exclusions")) {
+  OPE <- R_("results_report_occ_panel_exclusions")
+  cat(sprintf(paste0("Panel `%s`: at-risk start **%s**, ADM1-ADM2 overlap **%s**. Counts are canonical ",
+                     "episodes (onsets), panel rows (unit-months) or database rows; cases are suspected cases.\n\n"),
+              OPE$spec$panel, OPE$spec$at_risk_start, OPE$spec$adm1_overlap))
+  emit(OPE$totals |> transmute(`ADM1 parent episodes (orphan / covered)` =
+                                 sprintf("%d (%d / %d)", adm1_overlap_parent_episodes, adm1_overlap_orphan,
+                                         adm1_overlap_covered),
+                               `Child rows censored` = child_rows_censored,
+                               `Running-episode rows masked (onsets)` =
+                                 sprintf("%d (%d)", rows_masked_running_episode, onsets_masked_running_episode),
+                               `Zero-fill rows masked` = nz_rows_masked,
+                               `LP second onsets (after episode end; LP calendar only)` =
+                                 sprintf("%d (%d; %d)", onsets_discarded_lp_second_onset,
+                                         onsets_discarded_after_episode_end, onsets_discarded_lp_calendar_only),
+                               `Cases of LP second onsets` = fmt_int(cases_discarded_lp_second_onset),
+                               `Re-dating duplicates` = onsets_redate_duplicate,
+                               `Absorbed members (after a gap)` = sprintf("%d (%d)", members_absorbed,
+                                                                          members_absorbed_after_gap),
+                               `ADM0 rows dropped (cases)` = sprintf("%d (%s)", adm0_rows_dropped,
+                                                                     fmt_int(cases_adm0_dropped))),
+       "Occurrence panel: what it leaves out, totals over countries (Data S1, D31)",
+       slug = "D31_occ_panel_exclusions_totals", raw = OPE$totals)
+  note_caption("D31_occ_panel_exclusions", "Occurrence panel: what it leaves out, by country")
+  if (nzchar(TABLES_DIR)) report_write_csv(with_afro(OPE$by_country, raw = TRUE), file.path(TABLES_DIR, "D31_occ_panel_exclusions.csv"))
+} else cat("*No item 11 sidecars beside the survival panel (built before them): Data S1, D31 not derived.*\n\n")
+```
+
+## Episodes with a confirmed case vs all episodes (GitHub, D40 / D40b)
+
+```{r}
+#| label: s-confirmed-agreement
+#| results: asis
+# Supplementary table (report_confirmed_agreement), on the analysis
+# set: ENSO contrasts vs neutral of the three tracks, all episodes and those
+# with a confirmed case, over the confirmed onsets' window (stable CSV
+# D40_confirmed_agreement.csv: one row per block x set x track x contrast, with
+# the block's onsets by phase and the window), and the within-country ratios of
+# episode characteristics, confirmed / other (D40b_confirmed_characteristics.csv,
+# with the coverage counts). The supplement formats both.
+if (.art_exists("results_report_confirmed_agreement")) {
+  CA <- R_("results_report_confirmed_agreement")
+  ca <- CA$long |>
+    # n_neutral is already on the long rows (the set's neutral onsets)
+    left_join(CA$counts |> select(row, set, n_nina, n_elnino), by = c("row", "set")) |>
+    mutate(window_start = CA$window[["start"]], window_end = CA$window[["end"]])
+  ch <- CA$characteristics
+  cat(sprintf(paste0("Confirmed cases reported for %d of %d episodes in %d of %d countries. Onsets %s to %s; ",
+                     "a confirmed contrast needs %d neutral and %d phase onsets; sign differs in %d of %d ",
+                     "computed confirmed contrasts, %d with an interval excluding 1.\n\n"),
+              ch$coverage$n_confirmed, ch$coverage$n_episodes, ch$coverage$n_countries_confirmed,
+              ch$coverage$n_countries, CA$window[["start"]], CA$window[["end"]], CA$cfg$min_neutral,
+              CA$cfg$min_phase, sum(ca$sign_differs & ca$set == "conf"), sum(!is.na(ca$est) & ca$set == "conf"),
+              sum(ca$sign_differs_ci & ca$set == "conf")))
+  chr <- ch$ratios |> mutate(n_episodes_all = ch$coverage$n_episodes, n_confirmed_all = ch$coverage$n_confirmed,
+                             n_countries_all = ch$coverage$n_countries,
+                             countries_confirmed = paste(sprintf("%s %d", ch$countries$country, ch$countries$n_confirmed),
+                                                         collapse = ", "))
+  emit(chr |> transmute(Variable = variable, `Ratio, confirmed / other [95% CI]` =
+                          sprintf("%s [%s, %s]", fmt_num(est, digits = 2), fmt_num(lo, digits = 2), fmt_num(hi, digits = 2)),
+                        Episodes = n_episodes, Confirmed = n_confirmed, Countries = n_countries),
+       "Episodes with a confirmed case vs other episodes of the reporting countries: within-country ratios (D40b)",
+       slug = "D40b_confirmed_characteristics", raw = chr)
+  note_caption("D40_confirmed_agreement",
+               "ENSO contrasts vs neutral of occurrence, duration and monthly cases, all episodes and those with a confirmed case")
+  if (nzchar(TABLES_DIR)) report_write_csv(ca, file.path(TABLES_DIR, "D40_confirmed_agreement.csv"))
+  note_caption("D40c_confirmed_characteristics_by_block",
+               "Within-country ratio, confirmed / other, of suspected cases and duration, by Africa, group and country")
+  if (nzchar(TABLES_DIR)) report_write_csv(CA$characteristics_by_block,
+                                           file.path(TABLES_DIR, "D40c_confirmed_characteristics_by_block.csv"))
+} else cat("*report_confirmed_agreement not derived: D40 not written.*\n\n")
+```
+
+## Contagion coverage (Data S1, D33)
+
+```{r}
+#| label: s-contagion-coverage
+#| results: asis
+# report_contagion_coverage (stamp only, the covariate is
+# unchanged): on only when 03 ran with --contagion_coverage_report. Stable CSV:
+# D33_contagion_coverage.csv.
+if (.art_exists("results_report_contagion_coverage")) {
+  CCV <- R_("results_report_contagion_coverage")
+  st <- CCV$stamp
+  cat(sprintf(paste0("Coverage definition: %s. Fit universe %s ADM1s (digest %s). Neighbour activity at t-1 lost ",
+                     "by the covariate's per-country grid: %s ADM1-month cell(s) (not corrected). The simulator ",
+                     "simulates every unit of the universe, so its implicit neighbour coverage is 1; the fit's is ",
+                     "the share below.\n\n"),
+              st$contagion_coverage_def %||% "reporting", st$contagion_universe_n %||% "?",
+              st$contagion_universe_digest %||% "?", st$contagion_activity_cells_lost %||% "?"))
+  emit(CCV$by_group |> transmute(`Share column` = share_column, `ENSO group` = group, `Panel rows` = panel_rows,
+                                 `Mean neighbour coverage` = fmt_num(nbr_cov_share_mean, 2),
+                                 `Rows with no covered neighbour` = rows_zero_cover,
+                                 `Rows, own ADM1 uncovered at t-1` = own_uncovered_rows),
+       "Surveillance coverage of the neighbour-contagion term at t-1, by group (Data S1, D33)",
+       pack_by = "Share column", slug = "D33_contagion_coverage_groups", raw = CCV$by_group)
+  note_caption("D33_contagion_coverage", "Surveillance coverage of the neighbour-contagion term at t-1, by country and year")
+  if (nzchar(TABLES_DIR)) report_write_csv(with_afro(CCV$by_country_year, raw = TRUE), file.path(TABLES_DIR, "D33_contagion_coverage.csv"))
+} else cat("*The survival panel was built without --contagion_coverage_report: Data S1, D33 not derived.*\n\n")
+```
+
+## Supplementary tables T1–T5
+
+The supplementary tables: T1 the ENSO-rainfall
+link per ENSO group (T1a literature, T1b this pipeline's rainfall and the deployed
+cholera lags), T2 the LOO comparison across ENSO lags, T3 the country effects
+with the fitted-range flag, T4 / T5 the attributable fractions of past events and
+of the 2026 forecast as wide views. Every number is read from a phase-09
+artefact; T1a is curated text (`results.inputs.enso_rain_mechanisms`, copied into the
+rain_enso artefact by 09).
+
+```{r}
+#| label: s-wishlist-t1
+#| results: asis
+RAIN <- tryCatch(R_("results_rain_enso"), error = function(e) NULL)
+# A signed lag ("−6", "+7", "0"; results_core.R::group_lag_signed()), "—" when missing.
+lag_txt <- function(x) ifelse(is.na(x), "—", group_lag_signed(x))
+.reg <- load_grouping(GROUP_META$source)
+T_MEMBERS <- split(as.character(.reg$iso3), as.character(.reg$group))
+if (!is.null(RAIN$mechanisms)) {
+  t1a <- report_t1a_mechanisms(RAIN$mechanisms, T_MEMBERS, GROUP_DISP$order)
+  emit(t1a |> transmute(`ENSO group` = enso_group,
+                        Members = ifelse(nzchar(members_note), sprintf("%s (%s)", members, members_note), members),
+                        `Main rainy season(s)` = season, `Stage of the ENSO cycle` = stage,
+                        `Main ENSO-rainfall lag` = main_lag, `El Niño signal` = el_nino_signal,
+                        Mechanism = mechanism, References = references) |>
+         mutate(`ENSO group` = factor(`ENSO group`, levels = GROUP_DISP$order)),
+       paste("T1a. Main ENSO-rainfall link in the rainy season by ENSO group, from the literature (lag L:",
+             "rainfall in month t vs ONI at t − L, L > 0 = ENSO leads; curated, no estimate)"),
+       slug = "T1a_enso_rain_mechanisms", raw = t1a)
+} else cat("*rain_enso not derived or results.inputs.enso_rain_mechanisms unset: no T1a.*\n\n")
+LG_T <- tryCatch(R_("results_report_lags"), error = function(e) NULL)
+if (!is.null(RAIN) && !is.null(LG_T)) {
+  t1b <- report_t1b_rain_lags(RAIN, LG_T$selected, GROUP_DISP$order, "pop")
+  emit(t1b |> transmute(`ENSO group` = factor(enso_group, levels = GROUP_DISP$order),
+                        `Rainy season (pop.-weighted)` = rainy_season,
+                        `Strongest in-season r (month, lag, r)` =
+                          ifelse(is.na(best_r), "—", sprintf("%s, L %s, r %s%s", best_centre_month, lag_txt(best_lag),
+                                                              sprintf("%+.2f", best_r),
+                                                              ifelse(!is.na(best_p) & best_p < 0.001, " (p < 0.001)",
+                                                                     sprintf(" (p %s)", fmt_num(best_p, 3))))),
+                        `Season-mean r peak (lag, r)` =
+                          ifelse(is.na(season_mean_peak_r), "—", sprintf("L %s, r %+.2f", lag_txt(season_mean_peak_lag),
+                                                                         season_mean_peak_r)),
+                        `Deployed cholera lag occ / dur / mon` =
+                          sprintf("%s / %s / %s", lag_txt(lag_occ), lag_txt(lag_dur), lag_txt(lag_mon))),
+       sprintf(paste("T1b. Rainfall-ONI correlation in the rainy season by ENSO group (CHIRPS ADM1 3-month rainfall",
+                     "deviation vs lagged ONI, lags %d..%d, baseline %s; Pearson r, no interval) and the deployed cholera",
+                     "lags (report_lags)"), min(RAIN$lags), max(RAIN$lags), paste(RAIN$baseline, collapse = "–")),
+       slug = "T1b_enso_rain_lags", raw = t1b)
+} else cat("*rain_enso or report_lags not derived: no T1b.*\n\n")
+```
+
+## Seasonality against the rainy season
+
+Supplementary fig. SE: per ENSO group, the
+calendar month at which each track peaks, observed and fitted, against the
+group's main rainy season (the Fig. 1d months, population-weighted). Observed
+peaks skip months with fewer than `min_n` events; the duration model's fitted
+peak is shown only when its deployed fits carry the calendar harmonics
+(duration.seasonal_term harmonic2). The monthly table behind the figure is Data S1, D37.
+
+```{r}
+#| label: s-seasonality
+#| results: asis
+SE_ART <- tryCatch(R_("results_seasonality"), error = function(e) NULL)
+if (!is.null(SE_ART)) {
+  pk <- SE_ART$peaks
+  cell <- function(g, t, s) {
+    r <- pk[pk$enso_group == g & pk$track == t & pk$source == s, , drop = FALSE]
+    if (!nrow(r) || is.na(r$peak_month[1])) return("—")
+    sprintf("%s (%s, %+.1f)", month.abb[r$peak_month[1]], if (isTRUE(r$in_rainy[1])) "in" else "out",
+            r$lag_from_rain[1])
+  }
+  dur_fit <- any(pk$track == "cessation" & pk$source == "fitted")
+  grp <- intersect(GROUP_DISP$order, unique(SE_ART$rain$enso_group))
+  rainy <- vapply(grp, function(g) pk$rainy_months[pk$enso_group == g][1] %||% "none", "")
+  t_se <- tibble::tibble(enso_group = grp, rainy_season = unname(rainy),
+                         onset_obs = vapply(grp, cell, "", "occurrence", "observed"),
+                         onset_fit = vapply(grp, cell, "", "occurrence", "fitted"),
+                         cessation_obs = vapply(grp, cell, "", "cessation", "observed"),
+                         cessation_fit = vapply(grp, cell, "", "cessation", "fitted"),
+                         cases_obs = vapply(grp, cell, "", "cases", "observed"),
+                         cases_fit = vapply(grp, cell, "", "cases", "fitted"))
+  emit(t_se |> transmute(`ENSO group` = factor(enso_group, levels = GROUP_DISP$order),
+                         `Rainy season` = rainy_season, `Onsets, observed` = onset_obs,
+                         `Onsets, fitted` = onset_fit, `Cessation, observed` = cessation_obs,
+                         `Cessation, fitted` = cessation_fit,
+                         `Cases, observed` = cases_obs, `Cases, fitted` = cases_fit) |>
+         (\(t) if (dur_fit) t else dplyr::select(t, -`Cessation, fitted`))(),
+       sprintf(paste("Peak calendar month of each track by ENSO group (in / out: inside or outside the group's",
+                     "rainy season; signed lag in months from the centre of the nearest rainy season, positive =",
+                     "after it). Observed peaks skip months with fewer than %d events; fitted = the occurrence",
+                     "model's seasonal spline and the %s"), SE_ART$meta$min_n,
+               if (dur_fit) "duration and monthly models' calendar harmonics"
+               else "monthly model's harmonics (no seasonal term in the duration model)"),
+       slug = "seasonality_peaks", raw = dplyr::mutate(SE_ART$peaks, min_n = SE_ART$meta$min_n))
+  if (nzchar(TABLES_DIR)) {
+    obs <- SE_ART$rates |>
+      tidyr::pivot_wider(id_cols = c(enso_group, month), names_from = track,
+                         values_from = c(rate, lo, hi, n, sparse), names_glue = "{track}_{.value}")
+    fit <- SE_ART$fitted |>
+      tidyr::pivot_wider(id_cols = c(enso_group, month), names_from = track,
+                         values_from = c(rel, lo, hi), names_glue = "{track}_fitted_{.value}")
+    d37 <- SE_ART$rain |>
+      dplyr::transmute(enso_group, month, rain_mm = mm, rainy_season = in_season) |>
+      dplyr::left_join(obs, by = c("enso_group", "month")) |>
+      dplyr::left_join(fit, by = c("enso_group", "month")) |>
+      dplyr::arrange(factor(enso_group, levels = GROUP_DISP$order), month)
+    note_caption("D37_seasonality", paste(
+      "Monthly seasonality by ENSO group (the supplementary seasonality figure): population-weighted rainfall climatology (mm) and rainy-season",
+      "flag; observed onsets per 1,000 at-risk unit-months, episode ends per 100 active episode-months and median",
+      "cases per active episode-month, with interval (Poisson 95% / IQR), event count and sparse flag; fitted",
+      if (dur_fit) "relative seasonality of the occurrence, duration and monthly models"
+      else "relative seasonality of the occurrence and monthly models"))
+    report_write_csv(d37, file.path(TABLES_DIR, "D37_seasonality.csv"))
+  }
+} else cat("*seasonality artefact not derived: no seasonality table.*\n\n")
+```
+
+```{r}
+#| label: s-wishlist-t2
+#| results: asis
+if (!is.null(LG_T) && is.null(LG_T$loo_summary))
+  stop("[11] report_lags has no loo_summary (schema v3): re-run 09 step report_lags.", call. = FALSE)
+if (!is.null(LG_T)) {
+  # Derived in 09 (report_lags v3 loo_summary, report_lags_loo_summary()).
+  SE_MULT_T2 <- as.numeric(LG_T$loo_summary$se_mult[1])
+  t2 <- LG_T$loo_summary |>
+    mutate(track = TRACK_FCT(track), enso_group = factor(enso_group, levels = GROUP_DISP$order)) |>
+    arrange(track, enso_group)
+  dse1 <- function(d, se) ifelse(is.na(d), "—", sprintf("%s (%s)", fmt_num(d, 1), fmt_num(se, 1)))
+  emit(t2 |> transmute(Track = track, `ENSO group` = enso_group, `Rank-1 lag` = lag_txt(rank1_lag),
+                       `Deployed lag` = lag_txt(deployed_lag),
+                       `Deployed vs rank 1` = ifelse(deployed_lag == rank1_lag, "0", dse1(deployed_elpd_diff, deployed_se_diff)),
+                       `Rank 2: lag, Δelpd` = ifelse(is.na(rank2_lag), "—", sprintf("%s: %s", lag_txt(rank2_lag), dse1(rank2_elpd_diff, rank2_se_diff))),
+                       `Lag 0` = ifelse(rank1_lag == 0L, "0 (rank 1)", dse1(lag0_elpd_diff, lag0_se_diff)),
+                       `Worst: lag, Δelpd` = sprintf("%s: %s", lag_txt(worst_lag), dse1(worst_elpd_diff, worst_se_diff)),
+                       !!sprintf("Lags within %s SE", fmt_num(SE_MULT_T2, 0)) := sprintf("%d / %d", n_within_se, n_lags),
+                       `elpd_loo (SE), rank 1` = dse1(elpd_loo_rank1, se_elpd_rank1),
+                       `p_loo, rank 1` = fmt_num(p_loo_rank1, 1)),
+       paste("T2. PSIS-LOO comparison of the single-lag fits by track and ENSO group: Δelpd (SE of the paired",
+             "difference) to the rank-1 lag of the same cell; elpd values compare within a cell only",
+             "(no no-ENSO reference fit)"),
+       pack_by = "Track", slug = "T2_lag_loo_summary", raw = t2)
+}
+```
+
+```{r}
+#| label: s-wishlist-t3
+#| results: asis
+# T3: country effects per track (report_effects v6), "§" on a condition outside
+# the group's fitted ONI range; WHO-AFRO subregion and p_max columns.
+T3_LETTER <- c(occurrence = "a", duration = "b", monthly = "c")
+for (trk in FIG1_TRACKS) {
+  ec <- EFF[[trk]]$effects_country
+  if (is.null(ec) || !nrow(ec)) next
+  if (!all(c("range_lo", "range_hi") %in% names(ec))) { ec$range_lo <- NA_real_; ec$range_hi <- NA_real_ }
+  bl <- EFF[[trk]]$best_lag
+  ec <- ec |> mutate(outside_range = report_outside_range(enso_val, range_lo, range_hi),
+                     deployed_lag = bl$best_lag[match(enso_group, bl$enso_group)])
+  n_out <- sum(ec$outside_range)
+  emit(report_wide(mutate(ec, enso_label = cond_fct(enso_label),
+                          lag = lag_txt(deployed_lag),
+                          val = paste0(fmt_ratio_bold(IRR, IRR_lo, IRR_hi, 2), ifelse(outside_range, RANGE_MARK, ""))),
+                   c("region", "lag", "country"), "enso_label", "val", levels = list(region = LV$region),
+                   rename = c(`ENSO group` = "region", `Deployed lag` = "lag", Country = "country")) |>
+         with_afro("Country") |> with_pmax("Country"),
+       sprintf(paste("T3%s. %s — ENSO effect by country at each ENSO condition vs neutral (posterior median, 95%% CrI;",
+                     "bold = CrI excludes 1; %s = condition outside the group's fitted ONI range, %d cell(s)%s)"),
+               T3_LETTER[[trk]] %||% "", trk, RANGE_MARK, n_out,
+               if (all(is.na(ec$range_lo))) "; range not in this report_effects artefact" else ""),
+       pack_by = "ENSO group", slug = sprintf("T3%s_effects_country_%s", T3_LETTER[[trk]] %||% "", trk),
+       raw = ec |> with_afro("country", raw = TRUE) |>
+         mutate(p_max = if (is.null(MB)) NA_real_ else MB$country$p_max[match(country, MB$country$iso3)]))
+}
+```
+
+```{r}
+#| label: s-wishlist-t4-t5
+#| results: asis
+# T4: past-event AF, ENSO group rows x event columns, one table per metric (the
+# r4-events slice: factual source, analog set and explosive mode as there).
+if (exists("ev_af") && !is.null(ev_af) && nrow(ev_af)) {
+  for (m in c("cases", "onsets")) {
+    x <- filter(ev_af, metric == m)
+    emit(x |> mutate(val = fmt_af(af, af_lo, af_hi)) |>
+           report_wide("Scope", "Event", "val"),
+         sprintf("T4%s. Attributable fraction of %s per past ENSO event — Africa + by ENSO group (%s; bold = interval excludes 0; %s)",
+                 c(cases = "a", onsets = "b")[[m]], c(cases = "cases", onsets = "outbreak onsets")[[m]], INT_LAB, EXPL_LAB),
+         slug = sprintf("T4%s_event_af_%s", c(cases = "a", onsets = "b")[[m]], m),
+         raw = x |> mutate(Event = as.character(Event), Scope = as.character(Scope)))
+  }
+} else cat("*No past-event attribution in this config: no T4.*\n\n")
+# T5: forecast AF wide views of the attribution metrics (am_af, s-am): T5a the
+# windows side by side (main analog set), T5b the analog sets side by side
+# (headline window); explosive mode as the headline.
+if (exists("am_af") && !is.null(am_af) && nrow(am_af)) {
+  t5 <- am_af |> filter(explosive_guard == HL_GUARD) |>
+    mutate(Scope = scope_fct(scope_lab(level, as.character(scope))), val = fmt_af(af, af_lo, af_hi),
+           metric = factor(metric, levels = c("cases", "onsets")))
+  t5a <- filter(t5, analog_set == MAIN_SET) |> mutate(col = paste0(metric, ": ", window))
+  emit(t5a |> mutate(col = factor(col, levels = unique(col[order(metric, match(window, names(WIN_LAB)))]))) |>
+         report_wide("Scope", "col", "val"),
+       sprintf("T5a. Attributable fraction of the 2026 forecast by attribution window — Africa + by ENSO group (counterfactual set %s; %s; windows: %s)",
+               MAIN_SET, INT_LAB, paste(sprintf("%s = %s", names(WIN_LAB), WIN_LAB)[names(WIN_LAB) %in% t5a$window], collapse = "; ")),
+       slug = "T5a_forecast_af_windows", raw = filter(am_af, analog_set == MAIN_SET, explosive_guard == HL_GUARD))
+  t5b <- filter(t5, window == HL_WIN) |>
+    mutate(analog_set = factor(analog_set, levels = unique(c(SETS, sort(unique(analog_set))))))
+  emit(t5b |> arrange(metric, Scope) |> report_wide(c("metric", "Scope"), "analog_set", "val",
+                                                    rename = c(Metric = "metric")),
+       sprintf("T5b. Attributable fraction of the 2026 forecast by counterfactual analog set — Africa + by ENSO group (window %s; main set %s; %s)",
+               WIN_LAB[[HL_WIN]] %||% HL_WIN, MAIN_SET, INT_LAB),
+       pack_by = "Metric", slug = "T5b_forecast_af_sets", raw = filter(am_af, window == HL_WIN, explosive_guard == HL_GUARD))
+} else cat("*No forecast attribution metrics: no T5.*\n\n")
+```
+
+## Data release (Supplementary Data and GitHub data folder)
+
+```{r}
+#| label: data-release
+#| results: asis
+# Each D / T CSV goes to the Supplementary Data (supp) or to the
+# repository's data folder (github) by results.style.data_release; the manifest
+# lists every file with its release and caption.
+if (nzchar(TABLES_DIR) && length(DATA_RELEASE)) {
+  REL_MAN <- report_release_split(TABLES_DIR, DATA_RELEASE,
+                                  unlist(mget(ls(.CAPTIONS), envir = .CAPTIONS)))
+  cat(sprintf(paste0("%d D / T tables released: %d to `%s/supp_data/` (Supplementary Data), %d to `%s/github/` ",
+                     "(GitHub data folder); manifest `%s/data_release_manifest.csv`%s.\n\n"),
+              sum(nzchar(REL_MAN$release)), sum(REL_MAN$release == "supp"), TABLES_DIR,
+              sum(REL_MAN$release == "github"), TABLES_DIR, TABLES_DIR,
+              if (any(!nzchar(REL_MAN$release)))
+                sprintf("; not in the release map: %s", paste(unique(REL_MAN$data_id[!nzchar(REL_MAN$release)]),
+                                                             collapse = ", ")) else ""))
+} else cat("*results.style.tables_dir or results.style.data_release unset: no data release split.*\n\n")
+```
+
+---
+
+```{r}
+#| label: provenance
+#| results: asis
+cat(sprintf(
+  paste0("*All tables above are read directly from the `report_*` artefacts ",
+         "under `generated_data/results/%s/`, derived by ",
+         "`analysis/09b_postprocess_results.R`. Re-run that script (same `-C` ",
+         "config) to refresh them; this notebook derives nothing.*\n"),
+  derive_config_run_tag(CONFIG_PATH)))
+```
