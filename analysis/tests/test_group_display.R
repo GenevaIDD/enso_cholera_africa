@@ -38,7 +38,7 @@ throws <- function(expr, pattern = NULL) {
   !is.null(r) && (is.null(pattern) || grepl(pattern, r))
 }
 
-REG  <- "enso_grouping_kl_nz60_ns5k5"
+REG  <- "enso_grouping_prod_run_prior"
 meta <- load_grouping_meta(REG)
 LAGS_FX <- c(enso_east = 0L, enso_horn = 10L, enso_west = -6L, enso_nga = 7L, enso_south = 4L)
 

@@ -215,7 +215,7 @@ pb <- deploy_plan_batches(dk, env)
 expect(identical(pb$status[pb$track == "kl"], "generate") && identical(pb$status[pb$track == "occ"], "deferred"),
        "sweep row planned; a fit batch whose registry is absent is deferred")
 expect(isTRUE(deploy_check_batch_groupings(dk, pb)), "batch grouping == deploy.grouping passes")
-dk$grouping <- "enso_grouping_kl"
+dk$grouping <- "enso_grouping"
 expect(grepl("another registry", err(deploy_check_batch_groupings(dk, pb))),
        "batch grouped by another registry is refused")
 tmp_dep <- tempfile("klsweep_deploy_", fileext = ".yml")

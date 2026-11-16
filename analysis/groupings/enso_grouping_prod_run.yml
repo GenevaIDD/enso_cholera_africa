@@ -9,7 +9,7 @@
 #   fit sha256    : 06bb2db51955ffe84dc826cc58d49f124ba0fbe213d9b5d7b4f5c036802c95ac
 #   compare       : mode_tol 1.5, n_agree 3
 #   countries     : 30 fitted
-#   labels from   : enso_grouping_kl
+#   labels from   : enso_grouping_prod_run (the previous sidecar)
 #   written       : 2026-11-04 00:33:42
 label_prefix: enso_
 order:

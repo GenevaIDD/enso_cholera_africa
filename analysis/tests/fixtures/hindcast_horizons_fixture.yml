@@ -2,7 +2,7 @@
 # for analysis/tests.
 schema: 2
 generated_at: 2026-10-26 22:07:25
-grouping: enso_grouping_kl_nz60_ns5k5
+grouping: enso_grouping_prod_run_prior
 launch_month: 05-01
 launch_years:
 - 2012
@@ -33,9 +33,9 @@ groups:
     - KEN
     - TZA
     - UGA
-    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
-    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
-    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_prod_run_prior-enso_east_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl0_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_east_bhd-factor_adm-ADM1_slm1_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_east_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl2_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
     season_end_month: 7
     units:
     - hmmCE
@@ -87,9 +87,9 @@ groups:
     - SDN
     - SLE
     - SSD
-    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
-    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
-    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_prod_run_prior-enso_horn_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl10_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_horn_bhd-factor_adm-ADM1_sl7_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_horn_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl10_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
     season_end_month: 9
     units:
     - hmmCE
@@ -137,9 +137,9 @@ groups:
     iso3:
     - GHA
     - NGA
-    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
-    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
-    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_prod_run_prior-enso_nga_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl7_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_nga_bhd-factor_adm-ADM1_sl8_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_nga_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
     season_end_month: 11
     units:
     - hmmW
@@ -192,9 +192,9 @@ groups:
     - NAM
     - ZMB
     - ZWE
-    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
-    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
-    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_prod_run_prior-enso_south_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_sl4_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_south_bhd-factor_adm-ADM1_sl11_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_south_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_sl5_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
     season_end_month: 4
     units:
     - hmmCE
@@ -249,9 +249,9 @@ groups:
     - SOM
     - TCD
     - TGO
-    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_kl_nz60_ns5k5-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
-    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
-    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_kl_nz60_ns5k5-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
+    occ_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreaks_survival_brms_cb_fit_base-1990_2019_bh-seasonal_grp-enso_grouping_prod_run_prior-enso_west_adm-adm1-adm2_uncorr_init-0.2_nbr500n_part-hmmclusters_adm2i_cb-enso_slm6_ns5_ep-gs_nz60.rds
+    dur_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_duration_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_west_bhd-factor_adm-ADM1_slm4_ns5_ep-gs.rds
+    mon_fit_file: generated_data/enso_best_lag_fits_ep-gs_nz60_fixture/outbreak_monthly_brms_cb_fit_base-1990_2019_grp-enso_grouping_prod_run_prior-enso_west_fam-negbinomial_seas-harmonic2_adm-ADM1-ADM2_adm2i_slm8_ns5_phire-region-country-adm1_leaf-adm2_estnd-gid-free-canon_ep-gs.rds
     season_end_month: 11
     units:
     - hmmCE

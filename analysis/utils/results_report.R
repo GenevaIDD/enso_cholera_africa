@@ -267,13 +267,16 @@ report_data_id <- function(file) {
 #' prefix, and write the manifest `data_release_manifest.csv` (file, source,
 #' data_id, release, caption). Columns empty in every row are left out of the
 #' released copy (.release_copy()); the numbered table keeps them. A D / T CSV whose id the map does not name is
-#' listed with an empty release and not copied. The release folders are
-#' cleared first.
+#' listed with an empty release and not copied. A CSV whose slug is in
+#' `exclude` (results.style.data_release_exclude) is listed with release
+#' "withheld" and not copied. The release folders are cleared first.
 #' @param release named list / character (data id -> "supp" | "github")
 #' @param captions named character (slug -> caption), from emit()
+#' @param exclude character, slugs withheld from the release
 #' @return the manifest data frame (invisibly)
 report_release_split <- function(tables_dir, release, captions = character(0),
-                                 dirs = c(supp = "supp_data", github = "github")) {
+                                 dirs = c(supp = "supp_data", github = "github"),
+                                 exclude = character(0)) {
   release <- unlist(release %||% list())
   bad <- setdiff(unique(release), names(dirs))
   if (length(bad))
@@ -291,12 +294,14 @@ report_release_split <- function(tables_dir, release, captions = character(0),
   out_name <- paste0(make.unique(slug, sep = "_"), ".csv")
   rel <- if (length(f)) unname(release[id]) else character(0)
   rel[is.na(rel)] <- ""
-  for (i in which(nzchar(rel)))
+  rel[nzchar(rel) & slug %in% exclude] <- "withheld"
+  ok <- rel %in% names(dirs)
+  for (i in which(ok))
     .release_copy(file.path(tables_dir, f[i]), file.path(tables_dir, dirs[[rel[i]]], out_name[i]))
   cap <- if (length(f)) unname(captions[slug]) else character(0)
   cap[is.na(cap)] <- ""
-  man <- data.frame(file = ifelse(nzchar(rel), file.path(unname(dirs[ifelse(nzchar(rel), rel, names(dirs)[1])]),
-                                                         out_name), ""),
+  man <- data.frame(file = ifelse(ok, file.path(unname(dirs[ifelse(ok, rel, names(dirs)[1])]),
+                                                out_name), ""),
                     source = f, data_id = id, release = rel, caption = cap, stringsAsFactors = FALSE)
   man <- man[order(!nzchar(man$release), man$release, substr(man$data_id, 1, 1),
                    suppressWarnings(as.integer(substring(man$data_id, 2))), man$file), , drop = FALSE]

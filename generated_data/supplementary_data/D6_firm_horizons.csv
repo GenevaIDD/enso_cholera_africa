@@ -1,0 +1,6 @@
+"enso_group","best_lag_occ","best_lag_dur","best_lag_mon","min_lag","horizon_end","n_countries","last_cfsv2_month","firm_oni_end","firm_horizon_rule"
+"East [GE]",0,1,-4,-4,"2027-02-01",4,"2027-07-01","2027-06-01","last_full_oni + min lag"
+"Horn [GH]",10,-4,-2,-4,"2027-02-01",3,"2027-07-01","2027-06-01","last_full_oni + min lag"
+"Guinean Gulf [GG]",11,2,10,2,"2027-08-01",1,"2027-07-01","2027-06-01","last_full_oni + min lag"
+"South [GS]",4,7,4,4,"2027-10-01",7,"2027-07-01","2027-06-01","last_full_oni + min lag"
+"West [GW]",-4,0,8,-4,"2027-02-01",15,"2027-07-01","2027-06-01","last_full_oni + min lag"

@@ -1,0 +1,7 @@
+"arm","n_replicates","max_draws","reps_per_draw","draw_mode","handoff","n_analogs_per_model","n_models","n_analogs_total","analog_match","clamp_margin","clamp_to_knots","config","cache_path"
+"forecast",10000,100,100,"joint","uniform",,,,,0.25,TRUE,"analysis/configs/forecast_country_by_group_prod_run/forecast_hmmCE.yml",
+"counterfactual",10000,100,100,"joint","uniform",100,10,1000,"library",0.25,TRUE,"analysis/configs/forecast_country_by_group_prod_run/counterfactual_hmmCE_set-neutral.yml","generated_data/lenssen_prod_run/lenssen_nino34_analogs.rds"
+"attribution_factual",10000,100,100,"joint","uniform",,,,,0.25,TRUE,"analysis/configs/forecast_country_by_group_prod_run/forecast_hmmCE_attrib.yml",
+"events",10000,100,100,"joint","uniform",100,10,1000,"library",0.25,TRUE,"analysis/configs/event_attribution_prod_run/event_elnino_2015_hmmCE.yml","generated_data/lenssen_events_prod_run/elnino_2015/lenssen_nino34_analogs.rds"
+"hindcast",5000,100,50,"joint","uniform",,,,,0.25,TRUE,"analysis/configs/hindcast_by_group_prod_run/hindcast_hmmCE_2012-05.yml",
+"smoothing",100,100,,"random",,,,,,,FALSE,"analysis/configs/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run/sim_africa_brms_elag_enso_grouped_spatpomp_historical_region_prod_run.yml",

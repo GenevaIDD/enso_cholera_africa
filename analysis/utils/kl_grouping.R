@@ -64,8 +64,7 @@ kl_grouping_from_fit <- function(fit, chains = NULL, fill_from = "",
 #' derived partition. Groups shared with registry `meta_from` copy its label /
 #' short / short_fig / colour and keep its order; a new group is labelled by
 #' its name without the prefix and takes the first fallback colour (config.R
-#' .GROUP_FALLBACK_COLOURS) that `meta_from` does not use -- the rule
-#' enso_grouping_kl.yml was written with by hand (enso_nga, #e6ab02).
+#' .GROUP_FALLBACK_COLOURS) that `meta_from` does not use (enso_nga: #e6ab02).
 #'
 #' The display-only centroid names of results.style.group_labels "centroid"
 #' (results_core.R::group_display_meta()) are carried too, per group, from the
@@ -184,8 +183,7 @@ kl_grouping_status <- function(name, partition, groupings_dir = "analysis/groupi
 
 #' kl_grouping_header
 #'
-#' Provenance comment lines for the derived registry's sidecar: what the
-#' hand-written enso_grouping_kl.yml records by hand.
+#' Provenance comment lines for the derived registry's sidecar.
 kl_grouping_header <- function(name, deploy_config, batch, cell, chains, fit_path,
                                settings = list(), n_fit = NA, n_filled = 0L, fill_from = "",
                                meta_from = "") {

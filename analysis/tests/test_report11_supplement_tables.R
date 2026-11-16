@@ -7,8 +7,8 @@
 #       column after the country column and the raw CSV columns
 #   [2] report_data_id() / report_release_split(): D / T ids from CSV names,
 #       copies into supp_data/ and github/, the manifest, an unmapped id listed
-#       but not copied, a bad release value refused; all-empty columns left
-#       out of the released copy, every other cell copied as text
+#       but not copied, an excluded slug withheld, a bad release value refused;
+#       all-empty columns left out of the released copy, every other cell copied as text
 #   [6] D35b / D35c: the WHO-AFRO subregion display order, the
 #       per-block Kruskal-Wallis p joined onto every state row, printed cells
 #
@@ -42,7 +42,7 @@ expect(identical(a$afro_subregion, unname(MOD30)),
 expect(identical(names(MOD30)[a$who_region == "EMRO"], c("SDN", "SOM")) && all(a$who_region %in% c("AFRO", "EMRO")),
        "SDN and SOM flagged EMRO, the others AFRO")
 expect(all(is.na(afro_subregion_of(c("Africa", "enso_west", NA))$afro_subregion)), "non-country strings -> NA")
-reg <- try(load_grouping("enso_grouping_kl_nz60_ns5k5"), silent = TRUE)
+reg <- try(load_grouping("enso_grouping_prod_run_prior"), silent = TRUE)
 if (!inherits(reg, "try-error"))
   expect(!anyNA(afro_subregion_of(reg$iso3 %||% reg[[1]])$afro_subregion), "every registry country has a subregion")
 df <- tibble(g = c("enso_west", "enso_west", NA), Country = c("SOM", "BEN", "Africa"), x = 1:3)
@@ -93,11 +93,18 @@ expect(identical(names(back), c("scope", "lag", "pr", "ok", "note")) &&
          "pr_lo" %in% names(read.csv(file.path(td2, "60_D14_event_attrib_pr_scope.csv"))),
        "release copy: all-empty column dropped, cells kept as text, numbered table untouched")
 expect(throws(report_release_split(td, list(D2 = "zenodo")), "must be one of"), "a bad release value stops")
+manx <- report_release_split(td, rel, exclude = "D6_selected_lags")
+expect(!file.exists(file.path(td, "github", "D6_selected_lags.csv")) &&
+         identical(manx$release[manx$data_id == "D6"], "withheld") && identical(manx$file[manx$data_id == "D6"], "") &&
+         file.exists(file.path(td, "supp_data", "D30_who_scale.csv")),
+       "an excluded slug is withheld: listed, not copied; the rest released")
 dm <- get_default_options()$results$style$data_release
 expect(all(unlist(dm) %in% c("supp", "github")) &&
          identical(sort(names(dm)[unlist(dm) == "supp"]),
                    sort(c("D2", paste0("D", 10:21), "D30", "T3", "T4", "T5"))),
        "default map: supp = D2, D10-D21, D30, T3-T5 (plan U9); the rest github")
+expect(identical(get_default_options()$results$style$data_release_exclude, "D16_event_attrib_observed_adm1"),
+       "default exclude: the D16 ADM1 observed counts")
 
 cat("# [3] D34 run design, D35 analysis set by level\n")
 rd <- tibble(arm = c("forecast", "counterfactual", "events", "smoothing"),

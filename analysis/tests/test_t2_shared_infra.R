@@ -88,8 +88,6 @@ REGISTRY_PINS <- c(
   enso_grouping_k2            = "7b03dee1b15652e5",
   enso_grouping_k3            = "6712b170492f7a29",
   enso_grouping_k4            = "5a1a8f14a0d32540",
-  enso_grouping_kl_nz60_ns5k5 = "ef26b8004c889fc9",
-  enso_grouping_kl            = "979d816e706e95b8",
   enso_grouping_nga           = "52157a1207ea7f3b",
   enso_grouping               = "e305c000e3c495ac",
   hmm_clusters                = "8162e70ff102490e",

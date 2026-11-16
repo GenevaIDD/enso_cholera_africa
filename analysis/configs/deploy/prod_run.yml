@@ -95,7 +95,7 @@ deploy:
     n_agree:   3         # agreeing chains: 0 = dominant mode, N = the N best-agreeing chains (here chains 2, 3, 6)
     mode_tol:  1.5       # lags: max centre difference within one mode
     fill_from: ""        # registry carrying over countries the fit lacks
-    meta_from: "enso_grouping_kl"   # sidecar labels / colours reused for shared groups
+    meta_from: "enso_grouping_prod_run"   # sidecar labels / colours reused for shared groups
 
   analog_sets:        "all,nina,neutral,elnino"
   primary_analog_set: "neutral"

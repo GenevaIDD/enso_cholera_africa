@@ -1,7 +1,7 @@
 # test_single_country_re.R -- grouped fits of ONE country keep their
 # country-level random effects under a tight sd prior (HARD gate).
 #
-# A group with a single country (e.g. enso_nga in enso_grouping_kl) used to
+# A group with a single country (e.g. enso_nga in enso_grouping_prod_run) used to
 # have its country terms trimmed by filter_re_terms_for_data(): the nested
 # intercept became (1 | ADM1[/gid]) and the country slopes were dropped. The
 # renamed groups `ADM1` / `ADM1:gid` are not mapped by the simulator /

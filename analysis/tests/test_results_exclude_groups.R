@@ -32,7 +32,7 @@ for (f in sort(list.files("analysis/configs/results", pattern = "\\.yml$"))) {
 
 # Fixtures: a kl-like registry (no enso_central) and two manifests.
 root <- tempfile("excl_"); dir.create(root)
-reg <- file.path(root, "enso_grouping_kl.csv")
+reg <- file.path(root, "kl_like_grouping.csv")
 writeLines(c("iso3,group", "KEN,enso_east", "NGA,enso_west", "ZAF,enso_south"), reg)
 man_kl <- file.path(root, "man_kl.yml")
 yaml::write_yaml(list(groups = list(enso_east = list(), enso_west = list()),

@@ -1,0 +1,16 @@
+"track","enso_group","lag","response","family","link","n_fixed","n_re","re_groups","offsets","n_fixef","n_priors","matches_deployed_terms"
+"occurrence","East [GE]",0,"y","poisson","log",8,13,"country; country:ADM1; country:ADM1:gid","offset(log_offset); offset(log(base_rate_occ))",13,42,TRUE
+"occurrence","Horn [GH]",10,"y","poisson","log",8,13,"country; country:ADM1; country:ADM1:gid","offset(log_offset); offset(log(base_rate_occ))",13,42,TRUE
+"occurrence","Guinean Gulf [GG]",11,"y","poisson","log",8,13,"country; country:ADM1; country:ADM1:gid","offset(log_offset); offset(log(base_rate_occ))",13,42,TRUE
+"occurrence","South [GS]",4,"y","poisson","log",8,13,"country; country:ADM1; country:ADM1:gid","offset(log_offset); offset(log(base_rate_occ))",13,42,TRUE
+"occurrence","West [GW]",-4,"y","poisson","log",8,13,"country; country:ADM1; country:ADM1:gid","offset(log_offset); offset(log(base_rate_occ))",13,42,TRUE
+"duration","East [GE]",1,"y","poisson","log",9,10,"country; country:ADM1; country:ADM1:gid_leaf","offset(log_offset); offset(log(base_rate_dur))",14,30,FALSE
+"duration","Horn [GH]",-4,"y","poisson","log",9,10,"country; country:ADM1; country:ADM1:gid_leaf","offset(log_offset); offset(log(base_rate_dur))",14,30,FALSE
+"duration","Guinean Gulf [GG]",2,"y","poisson","log",9,10,"country; country:ADM1; country:ADM1:gid_leaf","offset(log_offset); offset(log(base_rate_dur))",14,30,FALSE
+"duration","South [GS]",7,"y","poisson","log",9,10,"country; country:ADM1; country:ADM1:gid_leaf","offset(log_offset); offset(log(base_rate_dur))",14,30,FALSE
+"duration","West [GW]",0,"y","poisson","log",9,10,"country; country:ADM1; country:ADM1:gid_leaf","offset(log_offset); offset(log(base_rate_dur))",14,30,FALSE
+"monthly","East [GE]",-4,"cases_month","negbinomial","log",13,14,"country; country:ADM1; country:ADM1:gid_leaf","offset(log(pop)); offset(log_offset); offset(log(base_rate_mon))",15,40,TRUE
+"monthly","Horn [GH]",-2,"cases_month","negbinomial","log",13,14,"country; country:ADM1; country:ADM1:gid_leaf","offset(log(pop)); offset(log_offset); offset(log(base_rate_mon))",15,40,TRUE
+"monthly","Guinean Gulf [GG]",10,"cases_month","negbinomial","log",13,14,"country; country:ADM1; country:ADM1:gid_leaf","offset(log(pop)); offset(log_offset); offset(log(base_rate_mon))",15,40,TRUE
+"monthly","South [GS]",4,"cases_month","negbinomial","log",13,14,"country; country:ADM1; country:ADM1:gid_leaf","offset(log(pop)); offset(log_offset); offset(log(base_rate_mon))",15,40,TRUE
+"monthly","West [GW]",8,"cases_month","negbinomial","log",13,14,"country; country:ADM1; country:ADM1:gid_leaf","offset(log(pop)); offset(log_offset); offset(log(base_rate_mon))",15,40,TRUE

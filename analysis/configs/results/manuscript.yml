@@ -511,5 +511,6 @@ results:
       D13: github, D14: github, D15: github, D16: github, D17: github, D18: supp,
       D19: github, D20: github, D21: github, D22: github, D23: github, D24: github,
       D25: github, D26: github, D27: github, D28: github, D29: github, D30: github,
-      D31: github, D32: github, D33: github, D34: github, D35: github, D36: github, D37: github, D38: github, D39: github, T1: github,
+      D31: github, D32: github, D33: github, D34: github, D35: github, D36: github, D37: github, D38: github, D39: github, D40: github, T1: github,
       T2: github, T3: supp, T4: supp, T5: supp}
+    data_release_exclude: ["D16_event_attrib_observed_adm1"]   # 11: table slugs withheld from the release (manifest: withheld)

@@ -1,0 +1,100 @@
+# Supplementary data
+
+The tables cited as "GitHub data folder, file ..." in the Supplementary
+Materials, one CSV per table, as written by phase 11
+(`analysis/11_manuscript_numbers.qmd`) for the deployed model
+(`analysis/configs/deploy/prod_run.yml`). The policy-relevant tables of
+data S1 accompany the article and are not repeated here.
+
+Outbreak observations enter these tables only as aggregates (country,
+ENSO group or Africa); the outbreak episode records and the model inputs
+derived from them are not distributed. `manifest.csv` lists every file
+with its data id and caption.
+
+| File | Id | Content |
+|---|---|---|
+| `D1_processing_cascade.csv` | D1 | Processing cascade: counts recorded by each processing step |
+| `D2_episodes_by_group_country_level.csv` | D2 | Canonical episodes by ENSO group, country and admin level |
+| `D3_season_ends.csv` | D3 | Per-country cholera-season ends from the pipeline's season calendar |
+| `D3_season_windows_event.csv` | D3 | Firm window end per country and past ENSO event (season ends and unit horizons in the CSV) |
+| `D3_season_windows_hindcast.csv` | D3 | Firm window end per country and hindcast launch year (season ends and unit horizons in the CSV) |
+| `D4_kl_sweep_loo.csv` | D4 | Grouping-model comparison: country-block PSIS-LOO of the latent-class sweep (descriptive) |
+| `D4_kl_sweep_partition.csv` | D4 | Most probable class per country and sweep fit (agreeing chains) |
+| `D5_membership_group.csv` | D5 | Membership summary per deployed class |
+| `D5_membership_matrix.csv` | D5 | Responsibility matrix of the deployed classes: posterior class probabilities per country (agreeing chains) |
+| `D5_membership_mixture_m1.csv` | D5 | M1: membership-weighted El Niño contrast (log RR) inside the latent-class model vs the hard MAP class |
+| `D5_membership_sensitivity.csv` | D5 | Sensitivity of the deployed partition to the sweep cell and chain set (descriptive country-block elpd) |
+| `D5_membership_stability.csv` | D5 | Partition stability: partitions sampled from the responsibilities vs the MAP |
+| `D6_firm_horizons.csv` | D6 | Firm forecast horizons: last full-ONI month (last CFSv2 target month − 1) + the shortest selected lag |
+| `D6_selected_lags.csv` | D6 | Selected ENSO lags (negative = lead) and their elpd difference to the best lag; the deploy floor (min_lag, and occ lag − offset downstream), whether the best lag lies below it and the paired elpd cost, the rank-2 lag and the best non-negative lag (Δelpd ± SE to rank 1) |
+| `D7_lag_loo_ranking.csv` | D7 | LOO lag rankings, lags -11..11 |
+| `D11_enso_exposure_by_track.csv` | D11 | Expected share of the population exposed to an ENSO effect (adverse) — Africa, by track (mean, 95% CrI) |
+| `D11_enso_exposure_cross_track.csv` | D11 | Certain population by track and cross-track rule: share where P(adverse effect beyond 25%) ≥ 95% — Africa + by region (share [N ADM1]; no interval) |
+| `D11_enso_exposure_grid_1.csv` | D11 | Certain population: share where P(adverse effect ≥ m) ≥ p, some single track — La Niña (−1.5), Africa + by region (share of the scope's population [N ADM1]; no interval) |
+| `D11_enso_exposure_grid_2.csv` | D11 | Certain population: share where P(adverse effect ≥ m) ≥ p, some single track — La Niña (−1), Africa + by region (share of the scope's population [N ADM1]; no interval) |
+| `D11_enso_exposure_grid_3.csv` | D11 | Certain population: share where P(adverse effect ≥ m) ≥ p, some single track — El Niño (+1), Africa + by region (share of the scope's population [N ADM1]; no interval) |
+| `D11_enso_exposure_grid_4.csv` | D11 | Certain population: share where P(adverse effect ≥ m) ≥ p, some single track — El Niño (+1.5), Africa + by region (share of the scope's population [N ADM1]; no interval) |
+| `D11_enso_exposure_grid_5.csv` | D11 | Certain population: share where P(adverse effect ≥ m) ≥ p, some single track — El Niño (+2), Africa + by region (share of the scope's population [N ADM1]; no interval) |
+| `D13_event_attrib_af_adm1.csv` | D13 | Past-event attribution per ADM1: one row per event x factual source x explosive guard x ADM1 x metric x analogue set; factual and counterfactual means over paired replicates, AN, AF (of means) and AN per 100,000 |
+| `D13_event_attrib_af_scope.csv` | D13 | ENSO-attributable cases and onsets per event, Africa: AN / AF, both factual readings (intervals as stated above; bold = interval excludes 0) |
+| `D13_event_attrib_events.csv` | D13 | Past strong ENSO events: launch, peak and per-group window end |
+| `D13_event_attrib_exposure.csv` | D13 | Past-event attribution, population in ADM1s with a larger expected burden: one row per event x factual source x explosive guard x metric x magnitude x rule x scope x analogue set; number of ADM1s, population and its share of the scope |
+| `D13_event_attrib_sub_window_bounds.csv` | D13 | Per-winter sub-windows of a multi-winter event: start – end by fit group (or country) |
+| `D13_event_attrib_sub_windows.csv` | D13 | ENSO-attributable cases and onsets per winter of a multi-winter event, Africa + by ENSO group: AN / AF, both factual readings (intervals as for the events) |
+| `D13_event_attrib_sub_windows_af_adm1.csv` | D13 | Past-event attribution per ADM1 and per-winter sub-window: as D13_event_attrib_af_adm1, one row per sub-window |
+| `D14_event_attrib_pr_adm1.csv` | D14 | Past-event attribution, probability ratio per ADM1: one row per event x factual source x explosive guard x ADM1 x outbreak event (pr_event: onset_any / cases_ge) x analogue set; p1 / p0, PR, PN (far), PS and PNS |
+| `D14_event_attrib_pr_scope.csv` | D14 | Probability ratio of an outbreak event (any onset in the window) per ENSO group (factual = simulation) |
+| `D15_event_attrib_sn_adm1.csv` | D15 | Past-event attribution, signal-to-noise per ADM1: one row per event x factual source x explosive guard x ADM1 x metric x analogue set; mean and SD of the paired difference, sn and p_sign |
+| `D15_event_attrib_sn_scope.csv` | D15 | Signal-to-noise of the paired difference per event (P>0: share of replicates with more under the factual) |
+| `D16_event_attrib_observed.csv` | D16 | Observed window totals, observed-anchored attributable number (AF of the simulated factual × observed), observed ÷ simulated factual mean (skill) and surveillance coverage (share of the simulated gid-months with a survival-panel row) |
+| `D16_event_attrib_sub_windows_observed.csv` | D16 | Past-event attribution per scope and per-winter sub-window, with the observed total: AN and AF as in D13 plus the observed total, its coverage and AN_obs = AF x observed |
+| `D17_event_af_model_adm1.csv` | D17 | Analytic attribution of the past events per ADM1 (crossbasis on the observed panel): one row per event x track x ADM1; observed total, AN and AF posterior mean with 95% interval, P(AN > 0) |
+| `D17_event_af_model_scope.csv` | D17 | Analytic attributable fraction (deployed crossbasis on the observed rows, no epidemic dynamics; 400 posterior draws × counterfactual analogs) vs the simulated AF (factual = simulation) |
+| `D17_event_af_model_sub_windows.csv` | D17 | Analytic attributable fraction per winter of a multi-winter event (deployed crossbasis on the observed rows) |
+| `D17_event_af_model_sub_windows_adm1.csv` | D17 | Analytic attribution of the past events per ADM1 and per-winter sub-window: as D17_event_af_model_adm1, one row per sub-window |
+| `D19_attrib_af_adm1.csv` | D19 | Attributable number and fraction, Africa — window × explosive-guard sensitivity (95% posterior interval (uncertainty of the ENSO effect); per-ADM1 AF in the CSV) |
+| `D19_attrib_af_scope.csv` | D19 | Attributable number and fraction of cases and onsets, forecast vs counterfactual (neutral) — Africa and regions (95% posterior interval (uncertainty of the ENSO effect)) |
+| `D20_attrib_pr_adm1.csv` | D20 | Forecast attribution, probability ratio per ADM1: one row per window x explosive guard x ADM1 x outbreak event (event: onset_any / cases_ge) x analogue set; p1 / p0 the factual / counterfactual probabilities of the event, PR, PN (far), PS and PNS |
+| `D20_attrib_pr_pop.csv` | D20 | Population in ADM1s where the outbreak event is more likely under the forecast (neutral) |
+| `D20_attrib_pr_scope.csv` | D20 | Probability ratio of an outbreak event and probabilities of causation — regions and countries (neutral; bold: 95% interval excludes 1; interval only where p0 = 0 (exact bound), the bootstrap is off) |
+| `D21_attrib_sn_adm1.csv` | D21 | Forecast attribution, signal-to-noise per ADM1: one row per window x explosive guard x ADM1 x metric x analogue set; mean and SD of the paired factual - counterfactual difference, their ratio sn, and the share of pairs with the sign of the mean (p_sign) |
+| `D21_attrib_sn_pop.csv` | D21 | Population in ADM1s where the forecast-vs-counterfactual signal has emerged (/S/N/ ≥ L; neutral) |
+| `D21_attrib_sn_scope.csv` | D21 | Signal-to-noise of the paired difference — Africa and regions (neutral; per-ADM1 values in the CSVs) |
+| `D22_attrib_information_by_country.csv` | D22 | Decomposition of the forecast attribution per country: one row per component (ENSO / information / total) x cell x analogue set x explosive guard x metric x country; posterior AF and AN quantiles, raw and noise-adjusted |
+| `D22_attrib_information_decomposition.csv` | D22 | Attributable number of the pooled means, total = information + ENSO + gap (counterfactual neutral, headline window, every replicate kept (no explosive guard)) |
+| `D22_attrib_information_scope.csv` | D22 | Decomposition of the forecast attribution over the headline window (counterfactual neutral, every replicate kept (no explosive guard)) — Africa + by ENSO group (AF and AN, 95% posterior interval (uncertainty of the ENSO effect); bold = interval excludes 0) |
+| `D23_africa_scope.csv` | D23 | Definition of Africa for the forecast attribution: each ENSO group's window, its longest continuation lead per track (analog CRPSS vs climatology at that lead) and the counterfactual DJF winters its window reads (constrained: 2026/27, 2027/28) |
+| `D24_explosive_pairs.csv` | D24 | Explosive pairs (cap 1,000,000, counterfactual set neutral; headline window for the forecast) — what the drop mode removes, per arm, and its effect on the AF of cases (every window and set in the CSV) |
+| `D25_model_spec.csv` | D25 | Fit-level specification of the deployed models: one row per fit (terms, priors and the per-item check against model_terms_deployed.yml in the CSVs) |
+| `D25_model_spec_check.csv` | D25 | Check of every deployed fit against the declared term set (analysis/model_terms_deployed.yml): one row per track x ENSO group x item, expected and found terms, ok flag |
+| `D25_model_spec_priors.csv` | D25 | Priors of every deployed fit as brms reports them: one row per track x ENSO group x prior class / coefficient / group (source user or default) |
+| `D25_model_spec_terms.csv` | D25 | Model terms of every deployed fit: one row per track x ENSO group x term (component and kind of term) |
+| `D26_anchor_cells.csv` | D26 | Baseline-rate cells: country x admin level, per track (full) |
+| `D26_anchor_global.csv` | D26 | Continental baseline rates by admin level |
+| `D26_anchor_summary.csv` | D26 | Empirical baseline-rate tables per track |
+| `D27_convergence.csv` | D27 | Convergence diagnostics of the deployed models. The last column gives the deployment-gate verdict (pass / allowed / fail, with the failed criteria) under the population scope (every parameter but the group-level effects at R-hat <= 1.05 and bulk / tail ESS >= 400; every parameter at R-hat <= 1.05; divergences <= 0; per-chain E-BFMI >= 0.3); the deploy gate was warn. |
+| `D28_software_fit_versions.csv` | D28 | Package versions recorded in the deployed fits (computing cluster) |
+| `D28_software_session.csv` | D28 | Versions of the session that derived the results |
+| `D28_software_sim_versions.csv` | D28 | Versions recorded by the forward simulation runs (07b spatPomp partition_meta.yml; — = not recorded, runs before 2026-10-27) |
+| `D29_analog_sets.csv` | D29 | Counterfactual analog sets per arm and set |
+| `D29_analog_sets_models.csv` | D29 | Model shares of each counterfactual analog set |
+| `D29_analog_sets_winters.csv` | D29 | Mean DJF ONI of each classified winter per counterfactual analog set |
+| `D30_who_scale.csv` | D30 | WHO dashboard term per country: who_f, WHO and database cases, scale and scored multiplier |
+| `D31_occ_panel_exclusions.csv` | D31 | Occurrence panel: what it leaves out, by country |
+| `D31_occ_panel_exclusions_totals.csv` | D31 | Occurrence panel: what it leaves out, totals over countries |
+| `D32_national_zero_audit.csv` | D32 | National-zero months: the country-year audit of the zero-fill rule |
+| `D32_national_zero_audit_totals.csv` | D32 | National-zero months: totals of the country-year audit |
+| `D33_contagion_coverage.csv` | D33 | Surveillance coverage of the neighbour-contagion term at t-1, by country and year |
+| `D33_contagion_coverage_groups.csv` | D33 | Surveillance coverage of the neighbour-contagion term at t-1, by group |
+| `D34_run_design.csv` | D34 | Simulation run design per arm: replicates per transmission unit, posterior draws, replicates per draw (cycle or joint design), draw mode, handoff weighting of the smoothing states, counterfactual analogs per pre-industrial model and number of models, and the ENSO clamp margin beyond the fitted range (D34) |
+| `D35_analysis_set_by_level.csv` | D35 | Analysis set: outbreak descriptors by admin level (Zheng et al. 2022 layout; ADM0 excluded; D35) |
+| `D35b_analysis_set_by_level_region.csv` | D35 | Analysis set: outbreak descriptors by admin level, Africa and WHO-AFRO subregion (SOM and SDN under Eastern Africa; D35b) |
+| `D35c_outbreaks_by_enso_region.csv` | D35 | Analysis set: outbreaks by season-year ENSO state, Africa and WHO-AFRO subregion (share of the block's outbreaks; Kruskal-Wallis p across the three states, unadjusted; D35c) |
+| `D36_who_national_monthly.csv` | D36 | WHO national monthly series of suspected cases (dashboard weekly counts and situation-report differences): one row per country x month; cases, days covered (n_days), partial month flag and source |
+| `D37_seasonality.csv` | D37 | Monthly seasonality by ENSO group (the supplementary seasonality figure): population-weighted rainfall climatology (mm) and rainy-season flag; observed onsets per 1,000 at-risk unit-months, episode ends per 100 active episode-months and median cases per active episode-month, with interval (Poisson 95% / IQR), event count and sparse flag; fitted relative seasonality of the occurrence, duration and monthly models |
+| `D40_confirmed_agreement.csv` | D40 | ENSO contrasts vs neutral of occurrence, duration and monthly cases, all episodes and those with a confirmed case |
+| `D40b_confirmed_characteristics.csv` | D40 | Episodes with a confirmed case vs other episodes of the reporting countries: within-country ratios (D40b) |
+| `D40c_confirmed_characteristics_by_block.csv` | D40 | Within-country ratio, confirmed / other, of suspected cases and duration, by Africa, group and country |
+| `T1a_enso_rain_mechanisms.csv` | T1 | T1a. Main ENSO-rainfall link in the rainy season by ENSO group, from the literature (lag L: rainfall in month t vs ONI at t − L, L > 0 = ENSO leads; curated, no estimate) |
+| `T1b_enso_rain_lags.csv` | T1 | T1b. Rainfall-ONI correlation in the rainy season by ENSO group (CHIRPS ADM1 3-month rainfall deviation vs lagged ONI, lags -11..11, baseline 1990–2019; Pearson r, no interval) and the deployed cholera lags (report_lags) |
+| `T2_lag_loo_summary.csv` | T2 | T2. PSIS-LOO comparison of the single-lag fits by track and ENSO group: Δelpd (SE of the paired difference) to the rank-1 lag of the same cell; elpd values compare within a cell only (no no-ENSO reference fit) |

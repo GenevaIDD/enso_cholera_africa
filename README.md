@@ -16,6 +16,14 @@ The deployed model terms and priors are listed in [`analysis/model_terms_deploye
 The fits feed a spatially coupled stochastic outbreak simulator used for the forecasts, the attribution and the hindcasts. Historical states are reconstructed by block particle filtering as implemented in
 [spatPomp](https://cran.r-project.org/package=spatPomp).
 
+## Supplementary data
+
+[`generated_data/supplementary_data/`](generated_data/supplementary_data/) holds the
+tables cited as "GitHub data folder" in the Supplementary Materials, one CSV per
+table, with a [`manifest.csv`](generated_data/supplementary_data/manifest.csv) of
+their contents. The outbreak episode records and the model inputs derived from
+them are not distributed.
+
 ## Run it on synthetic data
 
 The outbreak surveillance database is not public, so the repository ships a
@@ -54,10 +62,11 @@ analysis/                  all code
   PIPELINE.md              run order, generated from pipeline_steps.yml
 notebooks/pipeline_run_graph.dot   file-level run graph (generated)
 renv.lock, renv/, .Rprofile        package lockfile and opt-in renv activation
+generated_data/supplementary_data/ the supplementary data tables
 ```
 
 Not versioned, created by the pipeline: `data/` (raw inputs), `generated_data/`
-(derived datasets, fits, simulations, results), `figures/`.
+(derived datasets, fits, simulations, results; all but `supplementary_data/`), `figures/`.
 
 ## Pipeline
 

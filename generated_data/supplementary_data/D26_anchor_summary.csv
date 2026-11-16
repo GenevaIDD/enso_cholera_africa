@@ -1,0 +1,4 @@
+"track","file","tau2","estimator","n_cells","n_countries","level_factor","n_own","n_zero","n_borrowed"
+"occurrence","base_rate_table_occ_base-1990_2019_est-pooled_ep-gs_nz60-r3_ae_a1c.rds",0.16755697973477,"pooled",51,30,"ADM1 +0.000, ADM2 -0.329, ADM3 +0.000",51,0,39
+"duration","base_rate_table_dur_base-1990_2019_est-pooled_ep-gs.rds",1e-06,"pooled",51,30,"ADM1 +0.000, ADM2 +0.211, ADM3 +0.000",46,5,39
+"monthly","base_rate_table_mon_base-1990_2019_est-pooled_pop-02dd6e12cc114a25_estnd-gid-free-canon_ep-gs.rds",1.26701816568143,"pooled",51,30,"ADM1 +0.000, ADM2 +1.060, ADM3 +0.000",51,0,39

@@ -168,7 +168,7 @@ expect(isTRUE(all.equal(eee$mixture, eee$hard)), "a country with r = (1, 0) has 
 
 cat("# [7] (soft) the deployed cell on disk\n")
 kd_real <- "generated_data/kl_sweep_compare/kl_sweep_classes_prodtu_nz60"
-mc <- "generated_data/kl_groupings/enso_grouping_kl_nz60_ns5k5_membership.csv"
+mc <- "generated_data/kl_groupings/enso_grouping_prod_run_prior_membership.csv"
 if (file.exists(file.path(kd_real, "responsibilities.csv")) && file.exists(mc)) {
   r <- read.csv(file.path(kd_real, "responsibilities.csv"))
   mp <- membership_map_partition(r[r$id == "ns5_K5" & r$chains == "agree", ])

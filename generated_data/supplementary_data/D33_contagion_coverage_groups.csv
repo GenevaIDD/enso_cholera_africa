@@ -1,0 +1,41 @@
+"share_column","group","panel_rows","nbr_cov_share_mean","rows_zero_cover","own_uncovered_rows"
+"nbr_cov_lag1_r200","East [GE]",12342,15.9388671840098,430,827
+"nbr_cov_lag1_r200","Horn [GH]",5625,12.8129846413548,0,447
+"nbr_cov_lag1_r200","Guinean Gulf [GG]",17941,9.72689221504708,1309,1363
+"nbr_cov_lag1_r200","South [GS]",12742,24.0951393506816,502,718
+"nbr_cov_lag1_r200","West [GW]",22413,73.9495304927111,822,1384
+"nbr_cov_lag1_r200_partensogrouping","East [GE]",12342,15.9708950825497,430,827
+"nbr_cov_lag1_r200_partensogrouping","Horn [GH]",5625,15.3288607119764,0,447
+"nbr_cov_lag1_r200_partensogrouping","Guinean Gulf [GG]",17941,9.91421667796415,1309,1363
+"nbr_cov_lag1_r200_partensogrouping","South [GS]",12742,25.0475285680524,524,718
+"nbr_cov_lag1_r200_partensogrouping","West [GW]",22413,75.8453519242681,829,1384
+"nbr_cov_lag1_r200_parthmmclusters","East [GE]",12342,15.9720257370228,430,827
+"nbr_cov_lag1_r200_parthmmclusters","Horn [GH]",5625,12.8871366832599,0,447
+"nbr_cov_lag1_r200_parthmmclusters","Guinean Gulf [GG]",17941,9.73352927703104,1309,1363
+"nbr_cov_lag1_r200_parthmmclusters","South [GS]",12742,27.1577008919622,502,718
+"nbr_cov_lag1_r200_parthmmclusters","West [GW]",22413,73.1276535842929,822,1384
+"nbr_cov_lag1_r200_pg","East [GE]",12342,15.9708950825497,430,827
+"nbr_cov_lag1_r200_pg","Horn [GH]",5625,15.3288607119764,0,447
+"nbr_cov_lag1_r200_pg","Guinean Gulf [GG]",17941,9.91421667796415,1309,1363
+"nbr_cov_lag1_r200_pg","South [GS]",12742,25.0475285680524,524,718
+"nbr_cov_lag1_r200_pg","West [GW]",22413,75.8453519242681,829,1384
+"nbr_cov_lag1_r500","East [GE]",12342,15.9471394775814,430,827
+"nbr_cov_lag1_r500","Horn [GH]",5625,11.0574542102203,0,447
+"nbr_cov_lag1_r500","Guinean Gulf [GG]",17941,7.22854813920325,1309,1363
+"nbr_cov_lag1_r500","South [GS]",12742,22.5623684957539,502,718
+"nbr_cov_lag1_r500","West [GW]",22413,65.9900005396757,822,1384
+"nbr_cov_lag1_r500_partensogrouping","East [GE]",12342,15.7956396480052,430,827
+"nbr_cov_lag1_r500_partensogrouping","Horn [GH]",5625,13.2375926808601,0,447
+"nbr_cov_lag1_r500_partensogrouping","Guinean Gulf [GG]",17941,7.80100601274926,1309,1363
+"nbr_cov_lag1_r500_partensogrouping","South [GS]",12742,21.2147131927796,524,718
+"nbr_cov_lag1_r500_partensogrouping","West [GW]",22413,71.192349097282,829,1384
+"nbr_cov_lag1_r500_parthmmclusters","East [GE]",12342,16.1524817975582,430,827
+"nbr_cov_lag1_r500_parthmmclusters","Horn [GH]",5625,11.0328068963918,0,447
+"nbr_cov_lag1_r500_parthmmclusters","Guinean Gulf [GG]",17941,7.34800862262381,1309,1363
+"nbr_cov_lag1_r500_parthmmclusters","South [GS]",12742,26.3007225091666,502,718
+"nbr_cov_lag1_r500_parthmmclusters","West [GW]",22413,66.5190787767667,822,1384
+"nbr_cov_lag1_r500_pg","East [GE]",12342,15.7956396480052,430,827
+"nbr_cov_lag1_r500_pg","Horn [GH]",5625,13.2375926808601,0,447
+"nbr_cov_lag1_r500_pg","Guinean Gulf [GG]",17941,7.80100601274926,1309,1363
+"nbr_cov_lag1_r500_pg","South [GS]",12742,21.2147131927796,524,718
+"nbr_cov_lag1_r500_pg","West [GW]",22413,71.192349097282,829,1384

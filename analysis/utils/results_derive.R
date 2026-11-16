@@ -172,7 +172,7 @@ results_context <- function(opt) {
   # manifest, which has no enso_counterfactual).
   for (.aset in SETS)
     assert_counterfactual_cache_identity(MAN[["enso_counterfactual"]], manifest_runs(MAN, "counterfactual", .aset))
-  # Group short names of the manifest's fit registry (enso_grouping_kl has
+  # Group short names of the manifest's fit registry (enso_grouping_prod_run has
   # enso_nga); equals results_core's GROUP_SHORT under enso_grouping.
   GROUP_SHORT_RUN <- results_group_meta(list(MAN = MAN))$short
   # The smoothing arm (Figure 3) and the stitched factual prefix are read from

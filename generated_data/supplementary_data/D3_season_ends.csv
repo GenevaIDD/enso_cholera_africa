@@ -1,0 +1,31 @@
+"iso3","afro_subregion","who_region","enso_group","season_end_month","min_seas_mode","modal_share","n_gid","n_distinct","group_season_end_month","n_gid_default","calendar_default"
+"AGO","Central Africa","AFRO","South [GS]",6,7,1,5,1,4,0,FALSE
+"BDI","Eastern Africa","AFRO","East [GE]",12,1,1,6,1,7,6,TRUE
+"BEN","Western Africa","AFRO","West [GW]",4,5,1,12,1,11,0,FALSE
+"CAF","Central Africa","AFRO","West [GW]",12,1,1,2,1,11,2,TRUE
+"CIV","Western Africa","AFRO","West [GW]",3,4,1,2,1,11,0,FALSE
+"CMR","Central Africa","AFRO","West [GW]",12,1,0.548387096774194,31,3,11,0,FALSE
+"COD","Central Africa","AFRO","South [GS]",6,7,0.675925925925926,108,4,4,0,FALSE
+"COG","Central Africa","AFRO","West [GW]",12,1,1,3,1,11,3,TRUE
+"ETH","Eastern Africa","AFRO","Horn [GH]",12,1,0.711864406779661,59,3,9,0,FALSE
+"GHA","Western Africa","AFRO","West [GW]",12,1,1,4,1,11,4,TRUE
+"GIN","Western Africa","AFRO","West [GW]",12,1,1,17,1,11,0,FALSE
+"GNB","Western Africa","AFRO","West [GW]",3,4,1,4,1,11,0,FALSE
+"KEN","Eastern Africa","AFRO","East [GE]",7,8,1,24,1,7,0,FALSE
+"LBR","Western Africa","AFRO","West [GW]",12,1,1,1,1,11,1,TRUE
+"MLI","Western Africa","AFRO","West [GW]",9,10,1,7,1,11,0,FALSE
+"MOZ","Southern Africa","AFRO","South [GS]",7,8,1,11,1,4,0,FALSE
+"MWI","Southern Africa","AFRO","South [GS]",9,10,1,21,1,4,0,FALSE
+"NAM","Southern Africa","AFRO","South [GS]",12,1,1,1,1,4,1,TRUE
+"NER","Western Africa","AFRO","West [GW]",12,1,0.476190476190476,21,4,11,0,FALSE
+"NGA","Western Africa","AFRO","Guinean Gulf [GG]",12,1,0.573170731707317,164,5,11,0,FALSE
+"SDN","Eastern Africa","EMRO","Horn [GH]",1,2,1,3,1,9,0,FALSE
+"SLE","Western Africa","AFRO","West [GW]",4,5,1,14,1,11,0,FALSE
+"SOM","Eastern Africa","EMRO","West [GW]",9,10,1,52,1,11,0,FALSE
+"SSD","Eastern Africa","AFRO","Horn [GH]",11,12,0.823529411764706,17,3,9,0,FALSE
+"TCD","Central Africa","AFRO","West [GW]",1,2,0.91304347826087,23,2,11,0,FALSE
+"TGO","Western Africa","AFRO","West [GW]",12,1,1,1,1,11,1,TRUE
+"TZA","Eastern Africa","AFRO","East [GE]",5,6,0.631578947368421,76,4,7,0,FALSE
+"UGA","Eastern Africa","AFRO","East [GE]",8,9,0.454545454545455,22,4,7,0,FALSE
+"ZMB","Southern Africa","AFRO","South [GS]",6,7,1,2,1,4,0,FALSE
+"ZWE","Southern Africa","AFRO","South [GS]",12,1,1,3,1,4,3,TRUE

@@ -123,6 +123,9 @@ if (nzchar(TABLES_DIR)) {
 # collected here by slug as the tables are emitted.
 # Unset in the config -> the default map of get_default_options() (config.R).
 DATA_RELEASE <- RES$style[["data_release"]] %||% get_default_options()$results$style$data_release
+# Table slugs withheld from the release (results.style.data_release_exclude).
+DATA_RELEASE_EXCLUDE <- unlist(RES$style[["data_release_exclude"]] %||%
+                                 get_default_options()$results$style$data_release_exclude)
 .CAPTIONS <- new.env(parent = emptyenv())
 note_caption <- function(slug, cap) if (!is.null(slug) && nzchar(slug)) assign(slug, cap, envir = .CAPTIONS)
 # Group display labels (results.style.group_labels): the
@@ -2627,11 +2630,12 @@ if (exists("am_af") && !is.null(am_af) && nrow(am_af)) {
 # lists every file with its release and caption.
 if (nzchar(TABLES_DIR) && length(DATA_RELEASE)) {
   REL_MAN <- report_release_split(TABLES_DIR, DATA_RELEASE,
-                                  unlist(mget(ls(.CAPTIONS), envir = .CAPTIONS)))
+                                  unlist(mget(ls(.CAPTIONS), envir = .CAPTIONS)),
+                                  exclude = DATA_RELEASE_EXCLUDE)
   cat(sprintf(paste0("%d D / T tables released: %d to `%s/supp_data/` (Supplementary Data), %d to `%s/github/` ",
-                     "(GitHub data folder); manifest `%s/data_release_manifest.csv`%s.\n\n"),
-              sum(nzchar(REL_MAN$release)), sum(REL_MAN$release == "supp"), TABLES_DIR,
-              sum(REL_MAN$release == "github"), TABLES_DIR, TABLES_DIR,
+                     "(GitHub data folder), %d withheld; manifest `%s/data_release_manifest.csv`%s.\n\n"),
+              sum(REL_MAN$release %in% c("supp", "github")), sum(REL_MAN$release == "supp"), TABLES_DIR,
+              sum(REL_MAN$release == "github"), TABLES_DIR, sum(REL_MAN$release == "withheld"), TABLES_DIR,
               if (any(!nzchar(REL_MAN$release)))
                 sprintf("; not in the release map: %s", paste(unique(REL_MAN$data_id[!nzchar(REL_MAN$release)]),
                                                              collapse = ", ")) else ""))

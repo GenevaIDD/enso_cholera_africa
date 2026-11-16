@@ -1,0 +1,6 @@
+"enso_group","rainy_season","best_centre_month","best_lag","best_r","best_p","best_n","best_agree","season_mean_peak_lag","season_mean_peak_r","lag_occ","lag_dur","lag_mon"
+"West [GW]","May-Jun-Jul-Aug-Sep-Oct","Aug",2,-0.525370847823699,0.000250400343791341,44,0.533333333333333,-8,-0.268437315771451,-4,0,8
+"Guinean Gulf [GG]","May-Jun-Jul-Aug-Sep-Oct","Aug",2,-0.335909592559173,0.0257976938041052,44,1,2,-0.204389383517885,11,2,10
+"Horn [GH]","Apr-May-Jun-Jul-Aug-Sep","Aug",1,-0.626541065914971,5.37378424363003e-06,44,1,1,-0.237036384271099,10,-4,-2
+"East [GE]","Mar-Apr-May; Nov-Dec","Nov",-2,0.539316753729677,0.000158390456518308,44,1,0,0.282273145226108,0,1,-4
+"South [GS]","Nov-Dec-Jan-Feb-Mar-Apr","Feb",0,-0.525509315620887,0.000249288476209301,44,0.714285714285714,7,-0.382165263009383,4,7,4

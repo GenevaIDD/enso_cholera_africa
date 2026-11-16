@@ -53,7 +53,8 @@ graphify-out/
 
 # Large data, outputs, and logs (not versioned)
 data/
-generated_data/
+generated_data/*
+!generated_data/supplementary_data/
 figures/
 documents/
 logs/

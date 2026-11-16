@@ -1642,8 +1642,12 @@ get_default_options <- function() {
           D13 = "supp", D14 = "supp", D15 = "supp", D16 = "supp", D17 = "supp", D18 = "supp",
           D19 = "supp", D20 = "supp", D21 = "supp", D22 = "github", D23 = "github", D24 = "github",
           D25 = "github", D26 = "github", D27 = "github", D28 = "github", D29 = "github", D30 = "supp",
-          D31 = "github", D32 = "github", D33 = "github", D34 = "github", D35 = "github", D36 = "github", D37 = "github", D38 = "github", D39 = "github", T1 = "github",
-          T2 = "github", T3 = "supp", T4 = "supp", T5 = "supp")
+          D31 = "github", D32 = "github", D33 = "github", D34 = "github", D35 = "github", D36 = "github", D37 = "github", D38 = "github", D39 = "github", D40 = "github", T1 = "github",
+          T2 = "github", T3 = "supp", T4 = "supp", T5 = "supp"),
+        # 11 only: table slugs withheld from the release (listed in the
+        # manifest as "withheld", not copied): the ADM1 observed counts of
+        # the past-event attribution. Not stamped (presentation).
+        data_release_exclude = c("D16_event_attrib_observed_adm1")
       )
     ),
 
