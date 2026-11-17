@@ -1,34 +1,28 @@
-# obs_sim_compare.R -- honest obs-vs-sim total-case comparison building blocks.
+# obs_sim_compare.R — obs-vs-sim total-case comparison on a fair denominator,
+#   plus the scalar scoring rules shared by the skill and validation metrics
 #
-# Sourced-only library (no numeric prefix; domain-named; see analysis/utils/README.md
-# section 5). Does NOT source its dependencies -- callers source the closure:
-#   gid.R        (flattenGid)              <- the only intra-utils dependency here
-#   population.R (loadGidPopulation)       <- caller passes the loaded frame
-#   sim_io.R     (sim_io_read)             <- caller passes the loaded frame
+# Provides:
+#   obs_sim_bases()          observed totals on the naive / B / C bases
+#   cover_shares(), sim_replicate_totals()   footprint shares, sim totals
+#   build_mon_obs_frame()    observed frame (finest level per region-month)
+#   crps_ens(), crps_fair(), pinball_loss()  scalar scoring rules
+#   region_key_of()          ADM1 region key of a gid
 #
-# Holds, once, the math that notebooks/hindcast_skill.qmd (quantiles, CRPS,
-# per-country, monthly) needs. Its crps_ens() and region_key_of() are also the one
-# copy used by utils/sim_metrics.R (07c/07d validation metrics), so this module is in
-# 07c's and 07d's sourced closure.
-# Why: the sim footprint only partially covers (by population) each ADM1 it touches, so a
-# naive full-ADM1 obs total is the wrong denominator. Two honest fixes side by side:
+# Details:
+#   The math notebooks/hindcast_skill.qmd needs (quantiles, CRPS, per-country,
+#   monthly). crps_ens() and region_key_of() are also the one copy used by
+#   sim_metrics.R and hindcast_skill.R, so this module is in 07c's and 07d's
+#   sourced closure. Callers source gid.R and pass the frames loaded with
+#   population.R::load_gid_population() and sim_io.R::sim_io_read().
 #
-#   B  region_key (ADM1) scale, POPULATION-DOWN-WEIGHTED. Full-ADM1 obs scaled by the
-#      simulated population share s(r)=min(sim_pop/adm1_pop, 1) at window-start year.
-#   C  strict exact-gid INTERSECTION. Keep only obs recorded at exactly a sim gid.
-#   naive  full-ADM1 reference (the unfair denominator B/C correct).
-#
-# Common support on each side = obs-positive units within the sim footprint.
-#
-# Also hosts the scalar scoring rules shared with utils/hindcast_skill.R
-# (crps_ens, crps_fair, pinball_loss) and the observed-frame builder
-# (LVL_RANK, build_mon_obs_frame).
+# See: obs_sim_bases() for the B / C denominators
 
 #' region_key_of
 #'
 #' ADM1 region key (`ISO3_<n>`) from a gid, after dot->underscore flattening.
-region_key_of <- function(g)
-  gidAdm1(g, "region_key_of")
+region_key_of <- function(g) {
+  gid_to_adm1(g, "region_key_of")
+}
 
 #' map_distinct
 #'
@@ -46,7 +40,8 @@ map_distinct <- function(x, f) {
 #' Empirical ensemble CRPS of a replicate sample `x` against a scalar `y`
 #' (energy form). Moved verbatim from the hindcast notebook's lp-cov inline def.
 crps_ens <- function(x, y) {
-  xs <- sort(x); n <- length(xs)
+  xs <- sort(x)
+  n <- length(xs)
   mean(abs(xs - y)) - sum((2 * seq_len(n) - n - 1) * xs) / (n^2)
 }
 
@@ -58,9 +53,14 @@ crps_ens <- function(x, y) {
 #' are scored on an equal footing. NA members are dropped; a 1-member ensemble
 #' reduces to |x - y|.
 crps_fair <- function(x, y) {
-  xs <- sort(x[!is.na(x)]); n <- length(xs)
-  if (!n) return(NA_real_)
-  if (n == 1L) return(abs(xs - y))
+  xs <- sort(x[!is.na(x)])
+  n <- length(xs)
+  if (!n) {
+    return(NA_real_)
+  }
+  if (n == 1L) {
+    return(abs(xs - y))
+  }
   mean(abs(xs - y)) - sum((2 * seq_len(n) - n - 1) * xs) / (n * (n - 1))
 }
 
@@ -92,18 +92,28 @@ LVL_RANK <- c(ADM1 = 1L, ADM2 = 2L, ADM3 = 3L)
 #' is returned as attr(, "n_na_lvl") and reported with message() so the drop is
 #' never silent.
 build_mon_obs_frame <- function(mon, lvl_rank = LVL_RANK) {
-  if (is.character(mon)) mon <- readRDS(mon)
+  if (is.character(mon)) {
+    mon <- readRDS(mon)
+  }
   out <- mon |>
-    dplyr::transmute(gid         = as.character(gid),
-                     admin_level = as.character(admin_level),
-                     month       = lubridate::floor_date(as.Date(month), "month"),
-                     cases_month = as.numeric(cases_month)) |>
+    dplyr::transmute(
+      gid = as.character(gid),
+      admin_level = as.character(admin_level),
+      month = lubridate::floor_date(as.Date(month), "month"),
+      cases_month = as.numeric(cases_month)
+    ) |>
     dplyr::mutate(region_key = region_key_of(gid), lvl = lvl_rank[admin_level])
   n_na <- sum(is.na(out$lvl))
-  if (n_na > 0)
-    message(sprintf("[build_mon_obs_frame] %d row(s) with admin_level outside {%s} ",
-                    n_na, paste(names(lvl_rank), collapse = ", ")),
-            "get lvl = NA (dropped from basis B/naive, kept in C).")
+  if (n_na > 0) {
+    message(
+      sprintf(
+        "[build_mon_obs_frame] %d row(s) with admin_level outside {%s} ",
+        n_na,
+        paste(names(lvl_rank), collapse = ", ")
+      ),
+      "get lvl = NA (dropped from basis B/naive, kept in C)."
+    )
+  }
   attr(out, "n_na_lvl") <- n_na
   out
 }
@@ -111,15 +121,18 @@ build_mon_obs_frame <- function(mon, lvl_rank = LVL_RANK) {
 #' cover_shares
 #'
 #' Per-region simulated/ADM1 population share for a sim footprint. `pop_y` is a
-#' loadGidPopulation() frame ALREADY FILTERED to the window-start year (columns
+#' load_gid_population() frame ALREADY FILTERED to the window-start year (columns
 #' gid, Q, gadm_level). Returns tibble(region_key, sim_pop, adm1_pop, s) with
 #' s = min(sim_pop / adm1_pop, 1). sim_pop sums own-level Q over the sim gids;
 #' adm1_pop is the authoritative ADM1-level population for the region_key.
 cover_shares <- function(sim_gids, pop_y) {
   ratio <- function(a, b) ifelse(b > 0, a / b, NA_real_)
-  pop_y   <- dplyr::mutate(pop_y, gid = as.character(gid),
-                           region_key = region_key_of(gid))
-  gidpop  <- dplyr::distinct(pop_y, gid, Q)
+  pop_y <- dplyr::mutate(
+    pop_y,
+    gid = as.character(gid),
+    region_key = region_key_of(gid)
+  )
+  gidpop <- dplyr::distinct(pop_y, gid, Q)
   adm1pop <- pop_y |>
     dplyr::filter(gadm_level == "ADM1") |>
     dplyr::group_by(region_key) |>
@@ -147,6 +160,17 @@ sim_replicate_totals <- function(sim_in, keep_gids) {
     dplyr::pull(v)
 }
 
+# Why: the sim footprint only partially covers (by population) each ADM1 it
+# touches, so a naive full-ADM1 obs total is the wrong denominator. Two honest
+# fixes side by side:
+#
+#   B  region_key (ADM1) scale, POPULATION-DOWN-WEIGHTED. Full-ADM1 obs scaled
+#      by the simulated population share s(r)=min(sim_pop/adm1_pop, 1) at
+#      window-start year.
+#   C  strict exact-gid INTERSECTION. Keep only obs recorded at exactly a sim gid.
+#   naive  full-ADM1 reference (the unfair denominator B/C correct).
+#
+# Common support on each side = obs-positive units within the sim footprint.
 #' obs_sim_bases
 #'
 #' Orchestrate the naive / B / C building blocks for one run. Returns the raw frames +
@@ -156,7 +180,7 @@ sim_replicate_totals <- function(sim_in, keep_gids) {
 #' @param ms      sim frame from sim_io_read() (gid, month, replicate_id, cases_month)
 #' @param mon_all obs monthly frame (gid, admin_level, month, cases_month,
 #'                region_key, lvl) -- caller builds it with region_key_of + LVL_RANK
-#' @param gid_pop full loadGidPopulation() frame (filtered to window-start year inside)
+#' @param gid_pop full load_gid_population() frame (filtered to window-start year inside)
 #' @param na_lvl  rows of mon_all with lvl = NA: "drop" (default, historical
 #'                behaviour) excludes them from B/naive; "finest" treats them as
 #'                the finest level present (they are always kept in C)
@@ -177,13 +201,24 @@ sim_replicate_totals <- function(sim_in, keep_gids) {
 #'   sim_in                     ms windowed, with region_key + country columns
 obs_sim_bases <- function(ms, mon_all, gid_pop, na_lvl = c("drop", "finest")) {
   na_lvl <- match.arg(na_lvl)
-  if (na_lvl == "finest")
-    mon_all <- dplyr::mutate(mon_all, lvl = dplyr::coalesce(lvl, .Machine$integer.max))
-  ms <- dplyr::mutate(ms, gid = as.character(gid),
-                      month = map_distinct(month, function(m) lubridate::floor_date(as.Date(m), "month")))
-  HS <- min(ms$month); HE <- max(ms$month); yr <- lubridate::year(HS)
+  if (na_lvl == "finest") {
+    mon_all <- dplyr::mutate(
+      mon_all,
+      lvl = dplyr::coalesce(lvl, .Machine$integer.max)
+    )
+  }
+  ms <- dplyr::mutate(
+    ms,
+    gid = as.character(gid),
+    month = map_distinct(month, function(m) {
+      lubridate::floor_date(as.Date(m), "month")
+    })
+  )
+  HS <- min(ms$month)
+  HE <- max(ms$month)
+  yr <- lubridate::year(HS)
   sim_gids <- sort(unique(ms$gid))
-  R_sim    <- unique(stats::na.omit(region_key_of(sim_gids)))
+  R_sim <- unique(stats::na.omit(region_key_of(sim_gids)))
 
   # Nearest available population year: gid_pop covers only 2015-2030, so a pre-2015
   # (or post-2030) launch would otherwise find no rows -> empty cover -> NA coverage
@@ -191,11 +226,12 @@ obs_sim_bases <- function(ms, mon_all, gid_pop, na_lvl = c("drop", "finest")) {
   # within-year ratio over the same gids and is nearly year-invariant, so the nearest
   # year is a safe proxy. In-range years match exactly (no-op).
   avail_yr <- sort(unique(gid_pop$year))
-  yr_pop   <- avail_yr[which.min(abs(avail_yr - yr))]
-  pop_y    <- dplyr::filter(gid_pop, year == yr_pop)
+  yr_pop <- avail_yr[which.min(abs(avail_yr - yr))]
+  pop_y <- dplyr::filter(gid_pop, year == yr_pop)
   cover <- cover_shares(sim_gids, pop_y)
   cover_popwt <- {
-    sp <- sum(cover$sim_pop, na.rm = TRUE); ap <- sum(cover$adm1_pop, na.rm = TRUE)
+    sp <- sum(cover$sim_pop, na.rm = TRUE)
+    ap <- sum(cover$adm1_pop, na.rm = TRUE)
     ifelse(ap > 0, sp / ap, NA_real_)
   }
 
@@ -205,28 +241,43 @@ obs_sim_bases <- function(ms, mon_all, gid_pop, na_lvl = c("drop", "finest")) {
   keep <- ms$month >= HS & ms$month <= HE
   keep[is.na(keep)] <- FALSE
   sim_in <- (if (all(keep)) ms else dplyr::filter(ms, !!keep)) |>
-    dplyr::mutate(region_key = map_distinct(gid, region_key_of),
-                  country = map_distinct(region_key, function(r) stringr::str_sub(r, 1, 3)))
+    dplyr::mutate(
+      region_key = map_distinct(gid, region_key_of),
+      country = map_distinct(region_key, function(r) stringr::str_sub(r, 1, 3))
+    )
 
   # ── B: region_key, finest-admin dedup per (region_key, month), pop share s ──
   obs_month <- mon_all |>
-    dplyr::filter(month >= HS, month <= HE,
-                  !is.na(region_key), region_key %in% R_sim, !is.na(lvl)) |>
+    dplyr::filter(
+      month >= HS,
+      month <= HE,
+      !is.na(region_key),
+      region_key %in% R_sim,
+      !is.na(lvl)
+    ) |>
     dplyr::group_by(region_key, month) |>
     dplyr::filter(lvl == max(lvl)) |>
-    dplyr::summarise(cases_month = sum(cases_month, na.rm = TRUE), .groups = "drop") |>
+    dplyr::summarise(
+      cases_month = sum(cases_month, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
     dplyr::left_join(dplyr::select(cover, region_key, s), by = "region_key") |>
-    dplyr::mutate(s = dplyr::coalesce(s, 1),
-                  country = stringr::str_sub(region_key, 1, 3))
+    dplyr::mutate(
+      s = dplyr::coalesce(s, 1),
+      country = stringr::str_sub(region_key, 1, 3)
+    )
 
   obs_rk <- obs_month |>
     dplyr::group_by(region_key) |>
-    dplyr::summarise(obs_adm1 = sum(cases_month, na.rm = TRUE),
-                     obs_fp = sum(cases_month * s, na.rm = TRUE), .groups = "drop")
-  S_B       <- obs_rk$region_key[obs_rk$obs_adm1 > 0]
+    dplyr::summarise(
+      obs_adm1 = sum(cases_month, na.rm = TRUE),
+      obs_fp = sum(cases_month * s, na.rm = TRUE),
+      .groups = "drop"
+    )
+  S_B <- obs_rk$region_key[obs_rk$obs_adm1 > 0]
   simB_gids <- sim_gids[region_key_of(sim_gids) %in% S_B]
   obs_naive <- sum(obs_rk$obs_adm1[obs_rk$region_key %in% S_B])
-  obs_B     <- sum(obs_rk$obs_fp  [obs_rk$region_key %in% S_B])
+  obs_B <- sum(obs_rk$obs_fp[obs_rk$region_key %in% S_B])
 
   # ── C: strict exact-gid intersection ────────────────────────────────────────
   obs_gid <- mon_all |>
@@ -237,12 +288,22 @@ obs_sim_bases <- function(ms, mon_all, gid_pop, na_lvl = c("drop", "finest")) {
   obs_C <- sum(obs_gid$obs[obs_gid$gid %in% G_obs])
 
   list(
-    HS = HS, HE = HE, yr = yr,
-    sim_gids = sim_gids, R_sim = R_sim,
-    cover = cover, cover_popwt = cover_popwt,
-    obs_month = obs_month, obs_gid = obs_gid,
-    S_B = S_B, simB_gids = simB_gids, G_obs = G_obs,
-    obs_naive = obs_naive, obs_B = obs_B, obs_C = obs_C,
+    HS = HS,
+    HE = HE,
+    yr = yr,
+    sim_gids = sim_gids,
+    R_sim = R_sim,
+    cover = cover,
+    cover_popwt = cover_popwt,
+    obs_month = obs_month,
+    obs_gid = obs_gid,
+    S_B = S_B,
+    simB_gids = simB_gids,
+    G_obs = G_obs,
+    obs_naive = obs_naive,
+    obs_B = obs_B,
+    obs_C = obs_C,
     obs_rk = obs_rk,
-    sim_in = sim_in)
+    sim_in = sim_in
+  )
 }

@@ -33,7 +33,7 @@ simulator:
     outbreak_metadata_path: generated_data/outbreak_metadata.rds
     size_data_path:         generated_data/outbreak_size_analysis_data.rds
     # Monthly case-count base-rate anchor sidecar deliberately NOT pinned: with no
-    # base_rate_table_paths key, resolveBaseRatePaths() derives it from the
+    # base_rate_table_paths key, resolve_base_rate_paths() derives it from the
     # deployed mon fit's own attached opt, coherent with the fit by construction.
 
   grouping:

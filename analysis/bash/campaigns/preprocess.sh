@@ -32,7 +32,7 @@
 #
 # --from / --until  run a contiguous slice of 00 01 02pop 02xw 02clim; steps
 #                   outside it are assumed done (no dependency on them)
-# --indir           outbreak vintage folder [default: paths.R::defaultOutbreakDataDir()]
+# --indir           outbreak vintage folder [default: paths.R::default_outbreak_data_dir()]
 # --plan            every stage prints its sbatch lines; nothing is submitted
 # --check-packages  check the R packages of the 00-02 steps (and stages/03_prepare.sh) on this node; exit
 

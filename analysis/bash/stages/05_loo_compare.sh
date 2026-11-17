@@ -17,7 +17,7 @@
 # is retired downstream and is not ranked here.)
 #
 # Each task writes its ranking to generated_data/loo_compare/<batch>/ (NOT into
-# the batch config dir; see makeLooCompareRunFile() in utils/paths.R). That
+# the batch config dir; see make_loo_compare_run_file() in utils/paths.R). That
 # directory is gitignored: after the array finishes, copy it back to the
 # local checkout if the fits ran on a cluster.
 #

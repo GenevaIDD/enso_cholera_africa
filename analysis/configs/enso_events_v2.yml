@@ -40,7 +40,7 @@
 #   launch            handoff month of both arms (factual and counterfactual)
 #   launch_rule       crossing: the month before ONI enters the event (crosses
 #                     +0.5 for El Nino, -0.5 for La Nina) and stays there to the
-#                     peak (utils/enso.R::ensoEventLaunch(); checked by
+#                     peak (utils/enso.R::enso_event_launch(); checked by
 #                     tests/test_event_attribution_configs.R against the ONI cache)
 #                     annual: `relaunch_of`'s launch + 12 months (a multi-year
 #                     event that never left the phase, so the crossing rule

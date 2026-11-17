@@ -5,7 +5,7 @@
 #     -> afterok: 01_preprocess_national_zero_months.R (the deploy's rule)
 #
 # 01b and 01_nz both read 01's outbreak metadata, so they wait for it. All
-# three write under the outbreak-data root (paths.R::defaultOutbreakDataDir()).
+# three write under the outbreak-data root (paths.R::default_outbreak_data_dir()).
 #
 # The national-zero months follow the deploy YAML's deploy.episodes block
 # (--deploy, read by analysis/utils/preprocess_paths.R), or --nz-rule /

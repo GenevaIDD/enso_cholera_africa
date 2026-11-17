@@ -1,0 +1,20 @@
+# air (R formatter, https://posit-dev.github.io/air/) settings for the repo.
+# Run through analysis/bash/tools/style.sh (--check reports, --fix rewrites).
+# Values below are air's defaults, written out so each one is a visible choice.
+
+[format]
+# Maximum line length before air breaks a call across lines
+line-width = 80
+# Spaces per indent level (2 spaces, no tabs)
+indent-width = 2
+indent-style = "space"
+# "auto" keeps each file's existing endings; "lf" forces Unix endings
+line-ending = "auto"
+# Keep a call expanded when its first argument starts on a new line
+persistent-line-breaks = true
+# Paths air leaves alone, on top of its built-in list (renv/, revdep/, ...);
+# scratchpads keep their own style (exploration only, nothing calls them)
+exclude = ["analysis/scratchpads/"]
+default-exclude = true
+# Calls whose arguments air never reflows (e.g. hand-aligned tibble::tribble)
+skip = []

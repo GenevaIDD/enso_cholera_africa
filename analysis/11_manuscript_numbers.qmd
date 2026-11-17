@@ -87,7 +87,7 @@ suppressPackageStartupMessages({
   library(knitr); library(kableExtra); library(qs2); library(yaml)
 })
 
-# results_core.R: makeResultsRunFile(), results_require(), RESULTS_SCHEMA, the
+# results_core.R: make_results_run_file(), results_require(), RESULTS_SCHEMA, the
 # registries, enso_conds_named() (via figures_cb). deploy_core.R: so a set
 # results.deploy_config resolves exactly as in 09/10. results_report.R: the
 # formatters, report_wide(), report_emit_html(), report_loader().
@@ -1966,7 +1966,7 @@ emit(lg$ranking |>
 #| label: s-r8-avg
 #| results: asis
 LA_CFG <- RES$derivation$lag_averaging %||% list()
-la_path <- function(t) makeResultsRunFile(opt, "results_lag_averaging", track = t,
+la_path <- function(t) make_results_run_file(opt, "results_lag_averaging", track = t,
                                           schema = RESULTS_SCHEMA[["lag_averaging"]], config_path = CONFIG_PATH)
 LA <- if (isTRUE(LA_CFG$enable)) Filter(Negate(is.null), lapply(setNames(FIG1_TRACKS, FIG1_TRACKS), function(t)
   if (file.exists(la_path(t))) R_("results_lag_averaging", track = t) else NULL)) else list()
@@ -2272,7 +2272,7 @@ if (!is.null(AS) && !is.null(AS$run_design)) {
 # report_national_zero_audit: on only when the panel's months
 # file has its 01 audit beside it. The full country-year table is written under
 # a STABLE name, D32_national_zero_audit.csv (the supplement reads it).
-.art_exists <- function(kind) file.exists(makeResultsRunFile(opt, kind, schema = RESULTS_SCHEMA[[sub("^results_", "", kind)]],
+.art_exists <- function(kind) file.exists(make_results_run_file(opt, kind, schema = RESULTS_SCHEMA[[sub("^results_", "", kind)]],
                                                              config_path = CONFIG_PATH))
 if (.art_exists("results_report_national_zero_audit")) {
   NZA <- R_("results_report_national_zero_audit")

@@ -1,8 +1,31 @@
-# population_core.R — kernel for the LP x gid population crosswalk.
+# population_core.R — kernel of the LP x gid population crosswalk: WorldPop
+#   mass inside every location-period x GADM-unit intersection, per year
 #
-# SOURCED ONLY. The runnable entry points are 02b_preprocess_population_run.R (one
-# (country, year) task) and 02c_preprocess_population_compile.R (bind + derive + QC).
+# Provides:
+#   run_population_task(), run_population_country_task()   one extraction
+#   load_gadm_units(), load_lp_geometries()   disk loaders of the geometries
+#   derive_crosswalk_shares(), compute_gid_cover(), derive_lp_tiling_level()
+#   reconcile_crosswalk(), detect_geom_dup_lps()   QC of the crosswalk
+#   drop_sliver_pieces()          drop negligible LP x gid pieces
+#   write_wpp_national_totals(), load_wpp_national_totals(),
+#   wpp_national_total()          WPP2024 national totals (CSV cache)
+#   pop_gid_cache_key(), read_gid_pop_cache(), write_gid_pop_cache()
+#   assert_boundary_cached()      the UN-adjustment precondition
 #
+# Details:
+#   Runnable entry points: 02b_preprocess_population_run.R (one (country,
+#   year) task) and 02c_preprocess_population_compile.R (bind + derive + QC).
+#   `extract_fn` is injectable so tests run the algebra on a stub.
+#
+# See: the "What this builds" comment above POP_ROLES for the algebra
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(sf)
+})
+
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
 # WHAT THIS BUILDS
 # ----------------
 # H[l, g, t] = UN-adjusted WorldPop mass inside the intersection of location
@@ -44,34 +67,6 @@
 # (country, year) inside that call, so it is consistent across roles and
 # CANCELS EXACTLY in w[l->g] — the shares are adjustment-invariant.
 #
-# TESTABILITY
-# -----------
-# `extract_fn` is a defaulted argument, so tests substitute a deterministic
-# area-proportional stub and exercise the whole crosswalk algebra with no
-# raster, no network and no data/ access. run_population_task() likewise takes
-# `gadm_sf` / `lp_sf` as sf objects; the disk loaders are separate functions.
-#
-# WHY THE MANIFEST HAS NO `adj_factor`
-# ------------------------------------
-# `adj_factor` cannot be recovered:
-# estimate_pop_for_geometries() computes it internally and returns only the
-# adjusted numbers, and band_adj_factor() (OutbreakExtractR
-# R/get_country_boundary.R:105-120) is identity on [0.5, 2.0] and 1.0 outside,
-# so the adjusted national total alone does not identify it. Two substitutes,
-# both strictly better for the failure mode that matters:
-#   1. a HARD precondition that the boundary cache file exists — this is the
-#      exact detector for get_country_boundary() returning NULL, which SILENTLY
-#      SKIPS the UN adjustment (R/get_country_boundary.R:73) rather than failing;
-#   2. `natl_ratio` = sum(Q_g over ADM1) / WPP2024 national total, which is free
-#      because the ADM1 polygons tile the country and are extracted anyway.
-
-suppressPackageStartupMessages({
-  library(dplyr)
-  library(sf)
-})
-
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
 # Geometry roles concatenated into the single extraction call.
 POP_ROLES <- c("gadm1", "gadm2", "lp_whole", "lp_piece")
 
@@ -94,19 +89,25 @@ POP_RASTER_YEAR_MAX <- 2030L
 
 #' Write generated_data/wpp2024_national_totals.csv from the bundled table.
 #' Requires OutbreakExtractR; run once on a login node, never on a worker.
-writeWppNationalTotals <- function(path, overwrite = FALSE) {
-  if (file.exists(path) && !isTRUE(overwrite)) return(invisible(path))
+write_wpp_national_totals <- function(path, overwrite = FALSE) {
+  if (file.exists(path) && !isTRUE(overwrite)) {
+    return(invisible(path))
+  }
   if (!requireNamespace("OutbreakExtractR", quietly = TRUE)) {
-    stop("writeWppNationalTotals(): OutbreakExtractR is not installed. ",
-         "Copy an existing ", basename(path), " into place instead.")
+    stop(
+      "write_wpp_national_totals(): OutbreakExtractR is not installed. ",
+      "Copy an existing ",
+      basename(path),
+      " into place instead."
+    )
   }
   e <- new.env(parent = emptyenv())
   utils::data("WPP2024", package = "OutbreakExtractR", envir = e)
   w <- e$WPP2024
   out <- data.frame(
-    iso3      = as.character(w$ISO3_code),
-    year      = as.integer(w$Time),
-    pop_total = as.numeric(w$PopTotal) * 1e3,   # the bundled table is thousands
+    iso3 = as.character(w$ISO3_code),
+    year = as.integer(w$Time),
+    pop_total = as.numeric(w$PopTotal) * 1e3, # the bundled table is thousands
     stringsAsFactors = FALSE
   )
   out <- out[!is.na(out$iso3) & nzchar(out$iso3) & !is.na(out$year), ]
@@ -115,16 +116,22 @@ writeWppNationalTotals <- function(path, overwrite = FALSE) {
   invisible(path)
 }
 
-loadWppNationalTotals <- function(path) {
-  if (is.null(path) || !file.exists(path)) return(NULL)
+load_wpp_national_totals <- function(path) {
+  if (is.null(path) || !file.exists(path)) {
+    return(NULL)
+  }
   utils::read.csv(path, stringsAsFactors = FALSE)
 }
 
 #' National total for (iso3, year); NA when the table or the row is absent.
-wppTotal <- function(wpp, iso3, year) {
-  if (is.null(wpp) || !nrow(wpp)) return(NA_real_)
+wpp_national_total <- function(wpp, iso3, year) {
+  if (is.null(wpp) || !nrow(wpp)) {
+    return(NA_real_)
+  }
   hit <- wpp$iso3 == toupper(iso3) & wpp$year == as.integer(year)
-  if (!any(hit)) return(NA_real_)
+  if (!any(hit)) {
+    return(NA_real_)
+  }
   as.numeric(wpp$pop_total[which(hit)[1]])
 }
 
@@ -144,8 +151,8 @@ wppTotal <- function(wpp, iso3, year) {
 #'
 #' @param g sfc
 #' @return list(geom = sfc, repair = character vector, empty = logical vector)
-sanitizePolygons <- function(g) {
-  n      <- length(g)
+sanitize_polygons <- function(g) {
+  n <- length(g)
   repair <- rep("none", n)
 
   types <- as.character(sf::st_geometry_type(g))
@@ -153,8 +160,10 @@ sanitizePolygons <- function(g) {
   # A GEOMETRYCOLLECTION may still hold polygonal mass alongside the debris.
   gc <- which(types == "GEOMETRYCOLLECTION")
   for (i in gc) {
-    ex <- try(sf::st_collection_extract(g[i], "POLYGON", warn = FALSE),
-              silent = TRUE)
+    ex <- try(
+      sf::st_collection_extract(g[i], "POLYGON", warn = FALSE),
+      silent = TRUE
+    )
     g[i] <- if (inherits(ex, "try-error") || !length(ex)) {
       sf::st_polygon()
     } else {
@@ -168,7 +177,9 @@ sanitizePolygons <- function(g) {
   # here is what stops estimate_pop_for_geometries() dropping it silently and
   # leaving an NA that would break sum_g H == P_direct.
   drop <- which(!types %in% c("POLYGON", "MULTIPOLYGON", "GEOMETRYCOLLECTION"))
-  for (i in drop) g[i] <- sf::st_polygon()
+  for (i in drop) {
+    g[i] <- sf::st_polygon()
+  }
   repair[drop] <- "non_polygonal"
 
   empty <- sf::st_is_empty(g)
@@ -185,15 +196,19 @@ sanitizePolygons <- function(g) {
 }
 
 #' Number of polygon parts in each geometry (a composite LP has many).
-countGeomParts <- function(g) {
-  vapply(sf::st_geometry(g), function(x) {
-    if (inherits(x, "MULTIPOLYGON")) length(x) else 1L
-  }, integer(1))
+count_geom_parts <- function(g) {
+  vapply(
+    sf::st_geometry(g),
+    function(x) {
+      if (inherits(x, "MULTIPOLYGON")) length(x) else 1L
+    },
+    integer(1)
+  )
 }
 
 #' Planimetric-free area in km^2, matching the convention already used for
 #' `area_per_1km2` at analysis/00_ingest_outbreakextractr.R:238.
-geomAreaKm2 <- function(g) {
+geom_area_km2 <- function(g) {
   suppressWarnings(as.numeric(sf::st_area(sf::st_geometry(g))) / 1e6)
 }
 
@@ -208,23 +223,31 @@ geomAreaKm2 <- function(g) {
 #' full-layer read.
 #'
 #' @return sf with columns gid, gadm_level ("ADM1"|"ADM2"), gid_iso3
-loadGadmUnits <- function(gadm_path, iso3, levels = c("ADM1", "ADM2")) {
+load_gadm_units <- function(gadm_path, iso3, levels = c("ADM1", "ADM2")) {
   stopifnot(file.exists(gadm_path))
   iso3 <- toupper(iso3)
   stopifnot(grepl("^[A-Z]{3}$", iso3))
   out <- list()
-  read_layer <- function(layer) sf::st_read(
-    gadm_path, quiet = TRUE,
-    query = sprintf("SELECT * FROM \"%s\" WHERE GID_0 = '%s' ORDER BY rowid", layer, iso3))
+  read_layer <- function(layer) {
+    sf::st_read(
+      gadm_path,
+      quiet = TRUE,
+      query = sprintf(
+        "SELECT * FROM \"%s\" WHERE GID_0 = '%s' ORDER BY rowid",
+        layer,
+        iso3
+      )
+    )
+  }
 
   if ("ADM1" %in% levels) {
     a1 <- read_layer("ADM_1")
     if (nrow(a1)) {
       out$ADM1 <- sf::st_sf(
-        gid        = as.character(a1$GID_1),
+        gid = as.character(a1$GID_1),
         gadm_level = "ADM1",
-        gid_iso3   = iso3,
-        geometry   = sf::st_geometry(a1)
+        gid_iso3 = iso3,
+        geometry = sf::st_geometry(a1)
       )
     }
   }
@@ -233,23 +256,23 @@ loadGadmUnits <- function(gadm_path, iso3, levels = c("ADM1", "ADM2")) {
     # Not every country has an ADM2 division in GADM 4.1 — absence is normal.
     if (nrow(a2)) {
       out$ADM2 <- sf::st_sf(
-        gid        = as.character(a2$GID_2),
+        gid = as.character(a2$GID_2),
         gadm_level = "ADM2",
-        gid_iso3   = iso3,
-        geometry   = sf::st_geometry(a2)
+        gid_iso3 = iso3,
+        geometry = sf::st_geometry(a2)
       )
     }
   }
 
   if (!length(out)) {
-    stop("loadGadmUnits(): no GADM units found for ", iso3, " in ", gadm_path)
+    stop("load_gadm_units(): no GADM units found for ", iso3, " in ", gadm_path)
   }
   do.call(rbind, unname(out))
 }
 
 #' Load LP geometries as written by analysis/00_ingest_outbreakextractr.R:267.
 #' @return sf with column lctn_pr
-loadLpGeometries <- function(lp_path) {
+load_lp_geometries <- function(lp_path) {
   stopifnot(file.exists(lp_path))
   shp <- if (grepl("\\.rds$", lp_path, ignore.case = TRUE)) {
     readRDS(lp_path)
@@ -257,9 +280,12 @@ loadLpGeometries <- function(lp_path) {
     sf::st_read(lp_path, quiet = TRUE)
   }
   if (!"lctn_pr" %in% names(shp)) {
-    stop("loadLpGeometries(): expected a `lctn_pr` column in ", lp_path)
+    stop("load_lp_geometries(): expected a `lctn_pr` column in ", lp_path)
   }
-  sf::st_sf(lctn_pr = as.character(shp$lctn_pr), geometry = sf::st_geometry(shp))
+  sf::st_sf(
+    lctn_pr = as.character(shp$lctn_pr),
+    geometry = sf::st_geometry(shp)
+  )
 }
 
 
@@ -285,33 +311,44 @@ loadLpGeometries <- function(lp_path) {
 #' exactly the condition under which its pieces arrive from two tasks.
 #'
 #' @return list(lp = sf subset, cross_border = logical aligned to that subset)
-selectLpsForCountry <- function(lp_sf, country_geom, area_tol = 1e-6) {
-  if (!nrow(lp_sf)) return(list(lp = lp_sf, cross_border = logical(0)))
+select_lps_for_country <- function(lp_sf, country_geom, area_tol = 1e-6) {
+  if (!nrow(lp_sf)) {
+    return(list(lp = lp_sf, cross_border = logical(0)))
+  }
 
   cand <- lengths(sf::st_intersects(lp_sf, country_geom)) > 0L
-  lp   <- lp_sf[cand, , drop = FALSE]
-  if (!nrow(lp)) return(list(lp = lp, cross_border = logical(0)))
+  lp <- lp_sf[cand, , drop = FALSE]
+  if (!nrow(lp)) {
+    return(list(lp = lp, cross_border = logical(0)))
+  }
 
   # st_intersection() silently drops empty results, so carry an index through it
   # rather than assuming the output is row-aligned with the input.
   lp$.lp_idx <- seq_len(nrow(lp))
-  cg <- sf::st_sf(geometry = if (inherits(country_geom, "sfc")) country_geom
-                             else sf::st_sfc(country_geom, crs = sf::st_crs(lp)))
+  cg <- sf::st_sf(
+    geometry = if (inherits(country_geom, "sfc")) {
+      country_geom
+    } else {
+      sf::st_sfc(country_geom, crs = sf::st_crs(lp))
+    }
+  )
   inter <- suppressWarnings(sf::st_intersection(lp, cg))
   a_in <- numeric(nrow(lp))
   if (nrow(inter)) {
-    agg <- tapply(suppressWarnings(as.numeric(sf::st_area(inter))),
-                  inter$.lp_idx, sum)
+    agg <- tapply(
+      suppressWarnings(as.numeric(sf::st_area(inter))),
+      inter$.lp_idx,
+      sum
+    )
     a_in[as.integer(names(agg))] <- as.numeric(agg)
   }
   a_tot <- suppressWarnings(as.numeric(sf::st_area(lp)))
 
   keep <- a_in > area_tol * pmax(a_tot, .Machine$double.eps)
-  lp   <- lp[keep, , drop = FALSE]
+  lp <- lp[keep, , drop = FALSE]
   lp$.lp_idx <- NULL
 
-  list(lp = lp,
-       cross_border = a_in[keep] < (1 - area_tol) * a_tot[keep])
+  list(lp = lp, cross_border = a_in[keep] < (1 - area_tol) * a_tot[keep])
 }
 
 #' LP x gid intersection pieces, sanitized and ready for extraction.
@@ -322,11 +359,15 @@ selectLpsForCountry <- function(lp_sf, country_geom, area_tol = 1e-6) {
 #' cells and reintroduce the very discretization bias this removes.
 #'
 #' @return sf with lctn_pr, gid, gadm_level, gid_iso3, n_parts, geom_repair
-buildCrosswalkPieces <- function(lp_sf, gadm_sf) {
+build_crosswalk_pieces <- function(lp_sf, gadm_sf) {
   if (!nrow(lp_sf) || !nrow(gadm_sf)) {
     return(sf::st_sf(
-      lctn_pr = character(0), gid = character(0), gadm_level = character(0),
-      gid_iso3 = character(0), n_parts = integer(0), geom_repair = character(0),
+      lctn_pr = character(0),
+      gid = character(0),
+      gadm_level = character(0),
+      gid_iso3 = character(0),
+      n_parts = integer(0),
+      geom_repair = character(0),
       geometry = sf::st_sfc(crs = sf::st_crs(gadm_sf))
     ))
   }
@@ -337,25 +378,32 @@ buildCrosswalkPieces <- function(lp_sf, gadm_sf) {
   pieces <- suppressWarnings(sf::st_intersection(lp_sf, gadm_sf))
   if (!nrow(pieces)) {
     return(sf::st_sf(
-      lctn_pr = character(0), gid = character(0), gadm_level = character(0),
-      gid_iso3 = character(0), n_parts = integer(0), geom_repair = character(0),
+      lctn_pr = character(0),
+      gid = character(0),
+      gadm_level = character(0),
+      gid_iso3 = character(0),
+      n_parts = integer(0),
+      geom_repair = character(0),
       geometry = sf::st_sfc(crs = sf::st_crs(gadm_sf))
     ))
   }
 
-  san <- sanitizePolygons(sf::st_geometry(pieces))
+  san <- sanitize_polygons(sf::st_geometry(pieces))
   out <- sf::st_sf(
-    lctn_pr     = as.character(pieces$lctn_pr),
-    gid         = as.character(pieces$gid),
-    gadm_level  = as.character(pieces$gadm_level),
-    gid_iso3    = as.character(pieces$gid_iso3),
+    lctn_pr = as.character(pieces$lctn_pr),
+    gid = as.character(pieces$gid),
+    gadm_level = as.character(pieces$gadm_level),
+    gid_iso3 = as.character(pieces$gid_iso3),
     geom_repair = san$repair,
-    geometry    = san$geom
+    geometry = san$geom
   )
   # Empty pieces carry no mass and would only produce NA rows downstream.
   out <- out[!san$empty, , drop = FALSE]
-  if (nrow(out)) out$n_parts <- countGeomParts(out)
-  else out$n_parts <- integer(0)
+  if (nrow(out)) {
+    out$n_parts <- count_geom_parts(out)
+  } else {
+    out$n_parts <- integer(0)
+  }
   out
 }
 
@@ -363,6 +411,20 @@ buildCrosswalkPieces <- function(lp_sf, gadm_sf) {
 # ---------------------------------------------------------------------------
 # The task worker
 # ---------------------------------------------------------------------------
+
+# WHY THE MANIFEST HAS NO `adj_factor`
+# ------------------------------------
+# `adj_factor` cannot be recovered:
+# estimate_pop_for_geometries() computes it internally and returns only the
+# adjusted numbers, and band_adj_factor() (OutbreakExtractR
+# R/get_country_boundary.R:105-120) is identity on [0.5, 2.0] and 1.0 outside,
+# so the adjusted national total alone does not identify it. Two substitutes,
+# both strictly better for the failure mode that matters:
+#   1. a HARD precondition that the boundary cache file exists — this is the
+#      exact detector for get_country_boundary() returning NULL, which SILENTLY
+#      SKIPS the UN adjustment (R/get_country_boundary.R:73) rather than failing;
+#   2. `natl_ratio` = sum(Q_g over ADM1) / WPP2024 national total, which is free
+#      because the ADM1 polygons tile the country and are extracted anyway.
 
 #' Assert the national-boundary cache entry exists.
 #'
@@ -373,68 +435,100 @@ buildCrosswalkPieces <- function(lp_sf, gadm_sf) {
 #' plausible and be systematically wrong by the adjustment factor. Fail loudly
 #' instead: the boundary cache must be built (on a node with internet) before
 #' any array is submitted.
-assertBoundaryCached <- function(iso3, boundary_cache_dir) {
+assert_boundary_cached <- function(iso3, boundary_cache_dir) {
   f <- file.path(boundary_cache_dir, paste0(toupper(iso3), "_adm0.geojson"))
   if (!file.exists(f)) {
-    stop("Boundary cache miss for ", iso3, " (expected ", f, ").\n",
-         "  get_country_boundary() would return NULL and the UN adjustment ",
-         "would be SILENTLY SKIPPED.\n",
-         "  Build the boundary cache (", boundary_cache_dir, ") first, or pass ",
-         "require_boundary = FALSE if you accept unadjusted population.")
+    stop(
+      "Boundary cache miss for ",
+      iso3,
+      " (expected ",
+      f,
+      ").\n",
+      "  get_country_boundary() would return NULL and the UN adjustment ",
+      "would be SILENTLY SKIPPED.\n",
+      "  Build the boundary cache (",
+      boundary_cache_dir,
+      ") first, or pass ",
+      "require_boundary = FALSE if you accept unadjusted population."
+    )
   }
   invisible(f)
 }
 
+# TESTABILITY: `extract_fn` is a defaulted argument, so tests substitute a
+# deterministic area-proportional stub and exercise the whole crosswalk algebra
+# with no raster, no network and no data/ access. run_population_task()
+# likewise takes `gadm_sf` / `lp_sf` as sf objects; the disk loaders are
+# separate functions.
 #' Run one (country, year) extraction task.
 #'
 #' @param iso3        ISO3 country code; owns the WorldPop raster for this task
 #' @param year        extraction year (clamped to [2015, 2030] by the extractor)
-#' @param gadm_sf     sf with gid, gadm_level, gid_iso3 (see loadGadmUnits)
-#' @param lp_sf       sf with lctn_pr (see loadLpGeometries); subset internally
+#' @param gadm_sf     sf with gid, gadm_level, gid_iso3 (see load_gadm_units)
+#' @param lp_sf       sf with lctn_pr (see load_lp_geometries); subset internally
 #' @param extract_fn  the extractor. Injected so tests can substitute a
 #'                    deterministic stub — see test_population_crosswalk.R.
 #'                    Contract: (geom_sf, country_iso3, year, raster_dir,
 #'                    boundary_cache_dir) -> numeric of length nrow(geom_sf).
 #' @param wpp_total   WPP2024 national total for (iso3, year), for natl_ratio.
 #' @return list(crosswalk, lp_pop, gid_pop, manifest)
-runPopulationTask <- function(iso3, year, gadm_sf, lp_sf,
-                              extract_fn = NULL,
-                              raster_dir         = "data/worldpop",
-                              boundary_cache_dir = "data/country_boundaries",
-                              sliver_mass_frac   = 1e-4,
-                              sliver_mass_min    = 1.0,
-                              wpp_total          = NA_real_,
-                              require_boundary   = TRUE,
-                              quiet              = FALSE,
-                              progress_tag       = "") {
-
+run_population_task <- function(
+  iso3,
+  year,
+  gadm_sf,
+  lp_sf,
+  extract_fn = NULL,
+  raster_dir = "data/worldpop",
+  boundary_cache_dir = "data/country_boundaries",
+  sliver_mass_frac = 1e-4,
+  sliver_mass_min = 1.0,
+  wpp_total = NA_real_,
+  require_boundary = TRUE,
+  quiet = FALSE,
+  progress_tag = ""
+) {
   iso3 <- toupper(iso3)
   year <- as.integer(year)
-  t0   <- Sys.time()
+  t0 <- Sys.time()
 
-  extract_fn <- .popExtractFn(extract_fn, "runPopulationTask")
-  if (isTRUE(require_boundary)) assertBoundaryCached(iso3, boundary_cache_dir)
+  extract_fn <- .pop_extract_fn(extract_fn, "run_population_task")
+  if (isTRUE(require_boundary)) {
+    assert_boundary_cached(iso3, boundary_cache_dir)
+  }
 
-  say <- .popSay(quiet, progress_tag, t0)
-  geo <- .popCountryGeometry(iso3, gadm_sf, lp_sf, say, "runPopulationTask")
-  by_role <- .popExtractRoles(geo, iso3, year, extract_fn, raster_dir,
-                              boundary_cache_dir, say, "runPopulationTask")
-  .popAssembleTask(geo, by_role, iso3, year,
-                   gid_pop            = NULL,
-                   sliver_mass_frac   = sliver_mass_frac,
-                   sliver_mass_min    = sliver_mass_min,
-                   wpp_total          = wpp_total,
-                   raster_dir         = raster_dir,
-                   boundary_cache_dir = boundary_cache_dir,
-                   t0                 = t0)
+  say <- .pop_say(quiet, progress_tag, t0)
+  geo <- .pop_country_geometry(iso3, gadm_sf, lp_sf, say, "run_population_task")
+  by_role <- .pop_extract_roles(
+    geo,
+    iso3,
+    year,
+    extract_fn,
+    raster_dir,
+    boundary_cache_dir,
+    say,
+    "run_population_task"
+  )
+  .pop_assemble_task(
+    geo,
+    by_role,
+    iso3,
+    year,
+    gid_pop = NULL,
+    sliver_mass_frac = sliver_mass_frac,
+    sliver_mass_min = sliver_mass_min,
+    wpp_total = wpp_total,
+    raster_dir = raster_dir,
+    boundary_cache_dir = boundary_cache_dir,
+    t0 = t0
+  )
 }
 
 #' Run one country over every year: geometry once, one extraction per year.
 #'
-#' The per-(country, year) runPopulationTask() rebuilds the country footprint,
+#' The per-(country, year) run_population_task() rebuilds the country footprint,
 #' the LP selection and the LP x gid pieces for every year, although none of
 #' them depends on the year. Here they are built once and each year reuses
-#' them; per year the extraction call and the assembly are runPopulationTask's,
+#' them; per year the extraction call and the assembly are run_population_task's,
 #' so a year's result is identical to the per-year task's.
 #'
 #' The GADM-unit populations Q_g (roles gadm1 / gadm2) do not depend on the
@@ -456,35 +550,50 @@ runPopulationTask <- function(iso3, year, gadm_sf, lp_sf,
 #'                      grows with it (one raster per worker).
 #' @return named list (names = years) of list(crosswalk, lp_pop, gid_pop,
 #'   manifest); manifest$gid_pop_cached says whether Q_g came from the cache.
-runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
-                                     extract_fn = NULL,
-                                     raster_dir         = "data/worldpop",
-                                     boundary_cache_dir = "data/country_boundaries",
-                                     sliver_mass_frac   = 1e-4,
-                                     sliver_mass_min    = 1.0,
-                                     wpp_totals         = rep(NA_real_, length(years)),
-                                     gid_pop_cache      = list(),
-                                     require_boundary   = TRUE,
-                                     quiet              = FALSE,
-                                     progress_tag       = "",
-                                     workers            = 1L) {
-
-  iso3  <- toupper(iso3)
+run_population_country_task <- function(
+  iso3,
+  years,
+  gadm_sf,
+  lp_sf,
+  extract_fn = NULL,
+  raster_dir = "data/worldpop",
+  boundary_cache_dir = "data/country_boundaries",
+  sliver_mass_frac = 1e-4,
+  sliver_mass_min = 1.0,
+  wpp_totals = rep(NA_real_, length(years)),
+  gid_pop_cache = list(),
+  require_boundary = TRUE,
+  quiet = FALSE,
+  progress_tag = "",
+  workers = 1L
+) {
+  iso3 <- toupper(iso3)
   years <- as.integer(years)
-  if (length(wpp_totals) != length(years))
-    stop("runPopulationCountryTask(): wpp_totals must have one value per year.")
+  if (length(wpp_totals) != length(years)) {
+    stop(
+      "run_population_country_task(): wpp_totals must have one value per year."
+    )
+  }
   t0 <- Sys.time()
 
-  extract_fn <- .popExtractFn(extract_fn, "runPopulationCountryTask")
-  if (isTRUE(require_boundary)) assertBoundaryCached(iso3, boundary_cache_dir)
+  extract_fn <- .pop_extract_fn(extract_fn, "run_population_country_task")
+  if (isTRUE(require_boundary)) {
+    assert_boundary_cached(iso3, boundary_cache_dir)
+  }
 
-  say <- .popSay(quiet, progress_tag, t0)
-  geo <- .popCountryGeometry(iso3, gadm_sf, lp_sf, say, "runPopulationCountryTask")
+  say <- .pop_say(quiet, progress_tag, t0)
+  geo <- .pop_country_geometry(
+    iso3,
+    gadm_sf,
+    lp_sf,
+    say,
+    "run_population_country_task"
+  )
 
   one_year <- function(i) {
-    yr    <- years[i]
-    t_yr  <- Sys.time()
-    say_y <- .popSay(quiet, paste0(progress_tag, yr, ": "), t_yr)
+    yr <- years[i]
+    t_yr <- Sys.time()
+    say_y <- .pop_say(quiet, paste0(progress_tag, yr, ": "), t_yr)
     cached <- gid_pop_cache[[as.character(yr)]]
     by_role <- NULL
     if (!is.null(cached)) {
@@ -492,27 +601,52 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
       # zero is returned as NA), which the raster-failure guard cannot tell
       # from a failed load. Then redo the year with every role, as a cold run.
       by_role <- tryCatch(
-        .popExtractRoles(geo, iso3, yr, extract_fn, raster_dir, boundary_cache_dir,
-                         say_y, "runPopulationCountryTask",
-                         roles = c("lp_whole", "lp_piece")),
+        .pop_extract_roles(
+          geo,
+          iso3,
+          yr,
+          extract_fn,
+          raster_dir,
+          boundary_cache_dir,
+          say_y,
+          "run_population_country_task",
+          roles = c("lp_whole", "lp_piece")
+        ),
         error = function(e) {
-          if (!grepl("all-NA", conditionMessage(e), fixed = TRUE)) stop(e)
+          if (!grepl("all-NA", conditionMessage(e), fixed = TRUE)) {
+            stop(e)
+          }
           say_y("LP roles all NA with Q_g cached: extracting every role")
           NULL
-        })
+        }
+      )
       if (is.null(by_role)) cached <- NULL
     }
-    if (is.null(by_role))
-      by_role <- .popExtractRoles(geo, iso3, yr, extract_fn, raster_dir,
-                                  boundary_cache_dir, say_y, "runPopulationCountryTask")
-    res <- .popAssembleTask(geo, by_role, iso3, yr,
-                            gid_pop            = cached,
-                            sliver_mass_frac   = sliver_mass_frac,
-                            sliver_mass_min    = sliver_mass_min,
-                            wpp_total          = wpp_totals[i],
-                            raster_dir         = raster_dir,
-                            boundary_cache_dir = boundary_cache_dir,
-                            t0                 = t_yr)
+    if (is.null(by_role)) {
+      by_role <- .pop_extract_roles(
+        geo,
+        iso3,
+        yr,
+        extract_fn,
+        raster_dir,
+        boundary_cache_dir,
+        say_y,
+        "run_population_country_task"
+      )
+    }
+    res <- .pop_assemble_task(
+      geo,
+      by_role,
+      iso3,
+      yr,
+      gid_pop = cached,
+      sliver_mass_frac = sliver_mass_frac,
+      sliver_mass_min = sliver_mass_min,
+      wpp_total = wpp_totals[i],
+      raster_dir = raster_dir,
+      boundary_cache_dir = boundary_cache_dir,
+      t0 = t_yr
+    )
     res$manifest$gid_pop_cached <- !is.null(cached)
     res
   }
@@ -522,8 +656,11 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
     old_plan <- future::plan(future::multicore, workers = workers)
     on.exit(future::plan(old_plan), add = TRUE)
     say("extracting ", length(years), " year(s) on ", workers, " worker(s)")
-    furrr::future_map(seq_along(years), one_year,
-                      .options = furrr::furrr_options(seed = NULL))
+    furrr::future_map(
+      seq_along(years),
+      one_year,
+      .options = furrr::furrr_options(seed = NULL)
+    )
   } else {
     lapply(seq_along(years), one_year)
   }
@@ -533,11 +670,16 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
 
 # -- shared steps of the two task runners ------------------------------------
 
-.popExtractFn <- function(extract_fn, caller) {
-  if (!is.null(extract_fn)) return(extract_fn)
+.pop_extract_fn <- function(extract_fn, caller) {
+  if (!is.null(extract_fn)) {
+    return(extract_fn)
+  }
   if (!requireNamespace("OutbreakExtractR", quietly = TRUE)) {
-    stop(caller, "(): package 'OutbreakExtractR' is not installed ",
-         "and no `extract_fn` was supplied.")
+    stop(
+      caller,
+      "(): package 'OutbreakExtractR' is not installed ",
+      "and no `extract_fn` was supplied."
+    )
   }
   OutbreakExtractR::estimate_pop_for_geometries
 }
@@ -545,87 +687,157 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
 # message() writes to stderr and is never block-buffered, unlike cat() to a
 # stdout redirected into a SLURM log file — cat() here could sit unflushed
 # for the entire duration of a slow step, making a working task look stuck.
-.popSay <- function(quiet, progress_tag, t0) {
+.pop_say <- function(quiet, progress_tag, t0) {
   function(...) {
-    if (!quiet) message(progress_tag, ..., " (", sprintf("%.1fs", as.numeric(
-      difftime(Sys.time(), t0, units = "secs"))), ")")
+    if (!quiet) {
+      message(
+        progress_tag,
+        ...,
+        " (",
+        sprintf(
+          "%.1fs",
+          as.numeric(
+            difftime(Sys.time(), t0, units = "secs")
+          )
+        ),
+        ")"
+      )
+    }
   }
 }
 
 #' The year-independent geometry of one country: its GADM units, the LPs that
 #' overlap it, their LP x gid pieces and the role-tagged geometries of the
 #' extraction call.
-.popCountryGeometry <- function(iso3, gadm_sf, lp_sf, say, caller) {
+.pop_country_geometry <- function(iso3, gadm_sf, lp_sf, say, caller) {
   gadm_sf <- gadm_sf[gadm_sf$gid_iso3 == iso3, , drop = FALSE]
-  if (!nrow(gadm_sf)) stop(caller, "(): no GADM units for ", iso3)
+  if (!nrow(gadm_sf)) {
+    stop(caller, "(): no GADM units for ", iso3)
+  }
 
   # The ADM1 units tile the country, so their union is the country footprint —
   # no separate ADM0 source, and pieces are guaranteed to tile by construction.
   adm1 <- gadm_sf[gadm_sf$gadm_level == "ADM1", , drop = FALSE]
-  if (!nrow(adm1)) stop(caller, "(): no ADM1 units for ", iso3)
+  if (!nrow(adm1)) {
+    stop(caller, "(): no ADM1 units for ", iso3)
+  }
   country_geom <- sf::st_union(sf::st_geometry(adm1))
   say("country footprint built")
 
-  sel  <- selectLpsForCountry(lp_sf, country_geom)
-  lps  <- sel$lp
-  say("LPs intersecting ", iso3, ": ", nrow(lps),
-      " (cross-border: ", sum(sel$cross_border), ")")
+  sel <- select_lps_for_country(lp_sf, country_geom)
+  lps <- sel$lp
+  say(
+    "LPs intersecting ",
+    iso3,
+    ": ",
+    nrow(lps),
+    " (cross-border: ",
+    sum(sel$cross_border),
+    ")"
+  )
 
-  pieces <- buildCrosswalkPieces(lps, gadm_sf)
+  pieces <- build_crosswalk_pieces(lps, gadm_sf)
   say("LP x gid pieces: ", nrow(pieces))
 
-  lp_san <- if (nrow(lps)) sanitizePolygons(sf::st_geometry(lps)) else NULL
+  lp_san <- if (nrow(lps)) sanitize_polygons(sf::st_geometry(lps)) else NULL
 
   bind_role <- function(role, g) {
-    if (is.null(g) || !length(g)) return(NULL)
+    if (is.null(g) || !length(g)) {
+      return(NULL)
+    }
     sf::st_sf(role = rep(role, length(g)), geometry = g)
   }
   parts <- list(
-    bind_role("gadm1",    sf::st_geometry(gadm_sf[gadm_sf$gadm_level == "ADM1", ])),
-    bind_role("gadm2",    sf::st_geometry(gadm_sf[gadm_sf$gadm_level == "ADM2", ])),
+    bind_role(
+      "gadm1",
+      sf::st_geometry(gadm_sf[gadm_sf$gadm_level == "ADM1", ])
+    ),
+    bind_role(
+      "gadm2",
+      sf::st_geometry(gadm_sf[gadm_sf$gadm_level == "ADM2", ])
+    ),
     bind_role("lp_whole", if (!is.null(lp_san)) lp_san$geom else NULL),
     bind_role("lp_piece", if (nrow(pieces)) sf::st_geometry(pieces) else NULL)
   )
   parts <- parts[!vapply(parts, is.null, logical(1))]
 
-  list(gadm_sf = gadm_sf, sel = sel, lps = lps, pieces = pieces,
-       geom_all = do.call(rbind, unname(parts)))
+  list(
+    gadm_sf = gadm_sf,
+    sel = sel,
+    lps = lps,
+    pieces = pieces,
+    geom_all = do.call(rbind, unname(parts))
+  )
 }
 
 #' One extraction call over the requested roles; values split by role.
-#' All four roles = runPopulationTask's single call. With no geometry left in
+#' All four roles = run_population_task's single call. With no geometry left in
 #' the requested roles no call is made.
-.popExtractRoles <- function(geo, iso3, year, extract_fn, raster_dir,
-                             boundary_cache_dir, say, caller,
-                             roles = POP_ROLES) {
+.pop_extract_roles <- function(
+  geo,
+  iso3,
+  year,
+  extract_fn,
+  raster_dir,
+  boundary_cache_dir,
+  say,
+  caller,
+  roles = POP_ROLES
+) {
   geom <- geo$geom_all[geo$geom_all$role %in% roles, , drop = FALSE]
   if (!nrow(geom)) {
-    say("no geometry in roles ", paste(roles, collapse = "/"), ": no extraction")
+    say(
+      "no geometry in roles ",
+      paste(roles, collapse = "/"),
+      ": no extraction"
+    )
     return(split(numeric(0), factor(character(0), levels = POP_ROLES)))
   }
 
-  say("single extraction call: ", nrow(geom), " geometries, year ", year,
-      " — raster load + exact_extract() next, this is usually the slow step")
+  say(
+    "single extraction call: ",
+    nrow(geom),
+    " geometries, year ",
+    year,
+    " — raster load + exact_extract() next, this is usually the slow step"
+  )
   extract_t0 <- Sys.time()
   extracted <- extract_fn(
-    geom_sf            = geom,
-    country_iso3       = iso3,
-    year               = year,
-    raster_dir         = raster_dir,
+    geom_sf = geom,
+    country_iso3 = iso3,
+    year = year,
+    raster_dir = raster_dir,
     boundary_cache_dir = boundary_cache_dir
   )
-  say("extract_fn() returned in ",
-      sprintf("%.1fs", as.numeric(difftime(Sys.time(), extract_t0, units = "secs"))))
+  say(
+    "extract_fn() returned in ",
+    sprintf(
+      "%.1fs",
+      as.numeric(difftime(Sys.time(), extract_t0, units = "secs"))
+    )
+  )
   if (length(extracted) != nrow(geom)) {
-    stop(caller, "(): extract_fn returned ", length(extracted),
-         " values for ", nrow(geom), " geometries.")
+    stop(
+      caller,
+      "(): extract_fn returned ",
+      length(extracted),
+      " values for ",
+      nrow(geom),
+      " geometries."
+    )
   }
   # An all-NA return means the raster never loaded (the download-failure branch
   # at R/add_population.R:453-461 only `message()`s and moves on). Coalescing
   # piece-level NA to 0 below is only sound once that is ruled out here.
   if (all(is.na(extracted))) {
-    stop(caller, "(): extraction returned all-NA for ", iso3, " ", year,
-         " — the WorldPop raster almost certainly failed to load.")
+    stop(
+      caller,
+      "(): extraction returned all-NA for ",
+      iso3,
+      " ",
+      year,
+      " — the WorldPop raster almost certainly failed to load."
+    )
   }
 
   split(extracted, factor(geom$role, levels = POP_ROLES))
@@ -633,102 +845,142 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
 
 #' Assemble a task's tables from its geometry and the per-role extraction.
 #' `gid_pop`, when given, replaces the Q_g derived from the gadm1/gadm2 roles.
-.popAssembleTask <- function(geo, by_role, iso3, year, gid_pop = NULL,
-                             sliver_mass_frac, sliver_mass_min, wpp_total,
-                             raster_dir, boundary_cache_dir, t0) {
+.pop_assemble_task <- function(
+  geo,
+  by_role,
+  iso3,
+  year,
+  gid_pop = NULL,
+  sliver_mass_frac,
+  sliver_mass_min,
+  wpp_total,
+  raster_dir,
+  boundary_cache_dir,
+  t0
+) {
   gadm_sf <- geo$gadm_sf
-  lps     <- geo$lps
-  pieces  <- geo$pieces
+  lps <- geo$lps
+  pieces <- geo$pieces
 
   # -- gid populations Q_g --------------------------------------------------
   if (is.null(gid_pop)) {
     gid_pop <- dplyr::bind_rows(
-      if (length(by_role$gadm1)) tibble::tibble(
-        gid = gadm_sf$gid[gadm_sf$gadm_level == "ADM1"], gadm_level = "ADM1",
-        Q   = as.numeric(by_role$gadm1)
-      ),
-      if (length(by_role$gadm2)) tibble::tibble(
-        gid = gadm_sf$gid[gadm_sf$gadm_level == "ADM2"], gadm_level = "ADM2",
-        Q   = as.numeric(by_role$gadm2)
-      )
+      if (length(by_role$gadm1)) {
+        tibble::tibble(
+          gid = gadm_sf$gid[gadm_sf$gadm_level == "ADM1"],
+          gadm_level = "ADM1",
+          Q = as.numeric(by_role$gadm1)
+        )
+      },
+      if (length(by_role$gadm2)) {
+        tibble::tibble(
+          gid = gadm_sf$gid[gadm_sf$gadm_level == "ADM2"],
+          gadm_level = "ADM2",
+          Q = as.numeric(by_role$gadm2)
+        )
+      }
     ) %>%
-      dplyr::mutate(iso3 = iso3, year = year,
-                    area_km2 = geomAreaKm2(gadm_sf)[match(
-                      paste(gid, gadm_level),
-                      paste(gadm_sf$gid, gadm_sf$gadm_level))]) %>%
+      dplyr::mutate(
+        iso3 = iso3,
+        year = year,
+        area_km2 = geom_area_km2(gadm_sf)[match(
+          paste(gid, gadm_level),
+          paste(gadm_sf$gid, gadm_sf$gadm_level)
+        )]
+      ) %>%
       dplyr::select(gid, gadm_level, iso3, year, Q, area_km2)
   }
 
   # -- whole-LP populations P_direct (the INDEPENDENT reconciliation target) -
   lp_pop <- if (nrow(lps)) {
     tibble::tibble(
-      lctn_pr      = as.character(lps$lctn_pr),
+      lctn_pr = as.character(lps$lctn_pr),
       extract_iso3 = iso3,
-      year         = year,
-      P_direct     = as.numeric(by_role$lp_whole),
-      lp_area_km2  = geomAreaKm2(lps),
+      year = year,
+      P_direct = as.numeric(by_role$lp_whole),
+      lp_area_km2 = geom_area_km2(lps),
       cross_border = geo$sel$cross_border
     )
   } else {
-    tibble::tibble(lctn_pr = character(0), extract_iso3 = character(0),
-                   year = integer(0), P_direct = numeric(0),
-                   lp_area_km2 = numeric(0), cross_border = logical(0))
+    tibble::tibble(
+      lctn_pr = character(0),
+      extract_iso3 = character(0),
+      year = integer(0),
+      P_direct = numeric(0),
+      lp_area_km2 = numeric(0),
+      cross_border = logical(0)
+    )
   }
 
   # -- crosswalk H[l,g] -----------------------------------------------------
   crosswalk <- if (nrow(pieces)) {
     tibble::tibble(
-      lctn_pr        = pieces$lctn_pr,
-      gid            = pieces$gid,
-      gadm_level     = pieces$gadm_level,
-      gid_iso3       = pieces$gid_iso3,
-      year           = year,
+      lctn_pr = pieces$lctn_pr,
+      gid = pieces$gid,
+      gadm_level = pieces$gadm_level,
+      gid_iso3 = pieces$gid_iso3,
+      year = year,
       # Zero-to-NA is right for a whole LP ("zero is never a population",
       # R/add_population.R:508-510) but wrong for a PIECE: a genuinely empty
       # sliver of an otherwise populated LP contributes 0, and leaving it NA
       # would break the additivity sum_g H == P_direct. Safe only because the
       # all-NA raster-failure case is hard-errored above.
-      H              = dplyr::coalesce(as.numeric(by_role$lp_piece), 0),
-      piece_area_km2 = geomAreaKm2(pieces),
-      n_parts        = pieces$n_parts,
-      geom_repair    = pieces$geom_repair
+      H = dplyr::coalesce(as.numeric(by_role$lp_piece), 0),
+      piece_area_km2 = geom_area_km2(pieces),
+      n_parts = pieces$n_parts,
+      geom_repair = pieces$geom_repair
     )
   } else {
-    tibble::tibble(lctn_pr = character(0), gid = character(0),
-                   gadm_level = character(0), gid_iso3 = character(0),
-                   year = integer(0), H = numeric(0),
-                   piece_area_km2 = numeric(0), n_parts = integer(0),
-                   geom_repair = character(0))
+    tibble::tibble(
+      lctn_pr = character(0),
+      gid = character(0),
+      gadm_level = character(0),
+      gid_iso3 = character(0),
+      year = integer(0),
+      H = numeric(0),
+      piece_area_km2 = numeric(0),
+      n_parts = integer(0),
+      geom_repair = character(0)
+    )
   }
 
-  crosswalk <- dropSliverPieces(crosswalk,
-                                sliver_mass_frac = sliver_mass_frac,
-                                sliver_mass_min  = sliver_mass_min)
+  crosswalk <- drop_sliver_pieces(
+    crosswalk,
+    sliver_mass_frac = sliver_mass_frac,
+    sliver_mass_min = sliver_mass_min
+  )
 
   # -- manifest -------------------------------------------------------------
   natl_from_adm1 <- sum(gid_pop$Q[gid_pop$gadm_level == "ADM1"], na.rm = TRUE)
   manifest <- list(
-    iso3           = iso3,
-    year           = year,
-    n_lp           = nrow(lp_pop),
-    n_lp_cross     = sum(lp_pop$cross_border),
-    n_gid          = nrow(gid_pop),
-    n_pieces       = nrow(crosswalk),
+    iso3 = iso3,
+    year = year,
+    n_lp = nrow(lp_pop),
+    n_lp_cross = sum(lp_pop$cross_border),
+    n_gid = nrow(gid_pop),
+    n_pieces = nrow(crosswalk),
     natl_from_adm1 = natl_from_adm1,
-    wpp_total      = as.numeric(wpp_total),
+    wpp_total = as.numeric(wpp_total),
     # ~1 when the UN adjustment landed. Departures are the GADM-vs-geoBoundaries
     # national footprint difference (small) or a clamped/skipped adjustment.
-    natl_ratio     = if (is.finite(wpp_total) && wpp_total > 0)
-                       natl_from_adm1 / wpp_total else NA_real_,
-    raster_dir     = raster_dir,
+    natl_ratio = if (is.finite(wpp_total) && wpp_total > 0) {
+      natl_from_adm1 / wpp_total
+    } else {
+      NA_real_
+    },
+    raster_dir = raster_dir,
     boundary_cache = boundary_cache_dir,
-    runtime_sec    = as.numeric(difftime(Sys.time(), t0, units = "secs")),
-    r_version      = paste(R.version$major, R.version$minor, sep = "."),
-    built_at       = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
+    runtime_sec = as.numeric(difftime(Sys.time(), t0, units = "secs")),
+    r_version = paste(R.version$major, R.version$minor, sep = "."),
+    built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
   )
 
-  list(crosswalk = crosswalk, lp_pop = lp_pop, gid_pop = gid_pop,
-       manifest = manifest)
+  list(
+    crosswalk = crosswalk,
+    lp_pop = lp_pop,
+    gid_pop = gid_pop,
+    manifest = manifest
+  )
 }
 
 # ---------------------------------------------------------------------------
@@ -747,45 +999,67 @@ runPopulationCountryTask <- function(iso3, years, gadm_sf, lp_sf,
 #' @param lp_shapefiles the LP corpus this run reads
 #' @param lp_md5        its md5 (pass it in to hash the file once per task)
 #' @return TRUE when the partition can be skipped
-popPartFresh <- function(part_dir, lp_shapefiles,
-                         lp_md5 = unname(tools::md5sum(path.expand(lp_shapefiles)))) {
+pop_part_fresh <- function(
+  part_dir,
+  lp_shapefiles,
+  lp_md5 = unname(tools::md5sum(path.expand(lp_shapefiles)))
+) {
   man_path <- file.path(part_dir, "manifest.yml")
-  if (!file.exists(file.path(part_dir, "_SUCCESS")) || !file.exists(man_path))
+  if (!file.exists(file.path(part_dir, "_SUCCESS")) || !file.exists(man_path)) {
     return(FALSE)
+  }
   man <- yaml::read_yaml(man_path)
-  if (!is.null(man$lp_md5)) return(identical(man$lp_md5, lp_md5))
+  if (!is.null(man$lp_md5)) {
+    return(identical(man$lp_md5, lp_md5))
+  }
   identical(man$lp_shapefiles, lp_shapefiles) &&
     identical(man$lp_mtime, format(file.mtime(lp_shapefiles)))
 }
 
 #' The inputs Q_g depends on: the GADM units, the rasters, the boundary cache
 #' and the extractor. Not the outbreak vintage.
-popGidCacheKey <- function(iso3, year, gadm_path, raster_dir, boundary_cache) {
-  list(iso3           = toupper(iso3),
-       year           = as.integer(year),
-       gadm_path      = gadm_path,
-       gadm_size      = unname(file.size(gadm_path)),
-       gadm_mtime     = format(file.mtime(gadm_path)),
-       raster_dir     = raster_dir,
-       boundary_cache = boundary_cache,
-       oer_version    = tryCatch(as.character(utils::packageVersion("OutbreakExtractR")),
-                                 error = function(e) NA_character_))
+pop_gid_cache_key <- function(
+  iso3,
+  year,
+  gadm_path,
+  raster_dir,
+  boundary_cache
+) {
+  list(
+    iso3 = toupper(iso3),
+    year = as.integer(year),
+    gadm_path = gadm_path,
+    gadm_size = unname(file.size(gadm_path)),
+    gadm_mtime = format(file.mtime(gadm_path)),
+    raster_dir = raster_dir,
+    boundary_cache = boundary_cache,
+    oer_version = tryCatch(
+      as.character(utils::packageVersion("OutbreakExtractR")),
+      error = function(e) NA_character_
+    )
+  )
 }
 
-popGidCachePath <- function(cache_dir, iso3, year) {
-  file.path(cache_dir, sprintf("iso3=%s", toupper(iso3)), sprintf("year=%d.qs", as.integer(year)))
+pop_gid_cache_path <- function(cache_dir, iso3, year) {
+  file.path(
+    cache_dir,
+    sprintf("iso3=%s", toupper(iso3)),
+    sprintf("year=%d.qs", as.integer(year))
+  )
 }
 
 #' Cached Q_g for one (country, year), or NULL when absent or keyed on other inputs.
-readGidPopCache <- function(cache_dir, key) {
-  f <- popGidCachePath(cache_dir, key$iso3, key$year)
-  if (!file.exists(f)) return(NULL)
+read_gid_pop_cache <- function(cache_dir, key) {
+  f <- pop_gid_cache_path(cache_dir, key$iso3, key$year)
+  if (!file.exists(f)) {
+    return(NULL)
+  }
   hit <- qs2::qs_read(f)
   if (identical(hit$key, key)) hit$gid_pop else NULL
 }
 
-writeGidPopCache <- function(cache_dir, key, gid_pop) {
-  f <- popGidCachePath(cache_dir, key$iso3, key$year)
+write_gid_pop_cache <- function(cache_dir, key, gid_pop) {
+  f <- pop_gid_cache_path(cache_dir, key$iso3, key$year)
   dir.create(dirname(f), recursive = TRUE, showWarnings = FALSE)
   tmp <- paste0(f, ".tmp")
   qs2::qs_save(list(key = key, gid_pop = gid_pop), tmp)
@@ -804,8 +1078,11 @@ writeGidPopCache <- function(cache_dir, key, gid_pop) {
 #' `w_dropped` (the fraction of P_l discarded) is retained per (lp, level) — if
 #' it is large for some country, that is a vintage-mismatch finding to report,
 #' not a threshold to tune away.
-dropSliverPieces <- function(crosswalk, sliver_mass_frac = 1e-4,
-                             sliver_mass_min = 1.0) {
+drop_sliver_pieces <- function(
+  crosswalk,
+  sliver_mass_frac = 1e-4,
+  sliver_mass_min = 1.0
+) {
   if (!nrow(crosswalk)) {
     return(dplyr::mutate(crosswalk, w_dropped = numeric(0)))
   }
@@ -816,12 +1093,16 @@ dropSliverPieces <- function(crosswalk, sliver_mass_frac = 1e-4,
     dplyr::group_by(lctn_pr, gadm_level) %>%
     dplyr::mutate(
       .P_all = sum(H, na.rm = TRUE),
-      .thr   = pmax(sliver_mass_min, sliver_mass_frac * .P_all),
+      .thr = pmax(sliver_mass_min, sliver_mass_frac * .P_all),
       .keep_piece = H >= .thr
     ) %>%
     dplyr::mutate(
-      w_dropped = if (all(.keep_piece)) 0 else
-        sum(H[!.keep_piece], na.rm = TRUE) / dplyr::first(pmax(.P_all, .Machine$double.eps))
+      w_dropped = if (all(.keep_piece)) {
+        0
+      } else {
+        sum(H[!.keep_piece], na.rm = TRUE) /
+          dplyr::first(pmax(.P_all, .Machine$double.eps))
+      }
     ) %>%
     dplyr::ungroup() %>%
     dplyr::filter(.keep_piece) %>%
@@ -835,18 +1116,28 @@ dropSliverPieces <- function(crosswalk, sliver_mass_frac = 1e-4,
 
 #' Derive P_l, Q_g, w, c, gid_cover, n_gid_eff from bound task outputs.
 #'
-#' Separated from runPopulationTask() because a cross-border LP's pieces arrive
+#' Separated from run_population_task() because a cross-border LP's pieces arrive
 #' from two different tasks: P_l is only correct once they are bound.
 #'
 #' @param crosswalk bound crosswalk rows (lctn_pr, gid, gadm_level, year, H, ...)
 #' @param gid_pop   bound gid populations (gid, gadm_level, year, Q, ...)
 #' @return crosswalk with P_l, Q, w, c, gid_cover, n_gid_eff, is_composite
-deriveCrosswalkShares <- function(crosswalk, gid_pop,
-                                  cover_threshold = 0.90) {
+derive_crosswalk_shares <- function(
+  crosswalk,
+  gid_pop,
+  cover_threshold = 0.90
+) {
   if (!nrow(crosswalk)) {
-    return(dplyr::mutate(crosswalk, P_l = numeric(0), Q = numeric(0),
-                         w = numeric(0), c = numeric(0), gid_cover = numeric(0),
-                         n_gid_eff = numeric(0), is_composite = logical(0)))
+    return(dplyr::mutate(
+      crosswalk,
+      P_l = numeric(0),
+      Q = numeric(0),
+      w = numeric(0),
+      c = numeric(0),
+      gid_cover = numeric(0),
+      n_gid_eff = numeric(0),
+      is_composite = logical(0)
+    ))
   }
 
   q <- gid_pop %>%
@@ -859,16 +1150,19 @@ deriveCrosswalkShares <- function(crosswalk, gid_pop,
     dplyr::group_by(lctn_pr, gadm_level, year) %>%
     dplyr::mutate(
       P_l = sum(H, na.rm = TRUE),
-      w   = dplyr::if_else(P_l > 0, H / P_l, NA_real_)
+      w = dplyr::if_else(P_l > 0, H / P_l, NA_real_)
     ) %>%
     dplyr::mutate(
       gid_cover = suppressWarnings(max(w, na.rm = TRUE)),
-      n_gid_eff = dplyr::if_else(sum(w^2, na.rm = TRUE) > 0,
-                                 1 / sum(w^2, na.rm = TRUE), NA_real_)
+      n_gid_eff = dplyr::if_else(
+        sum(w^2, na.rm = TRUE) > 0,
+        1 / sum(w^2, na.rm = TRUE),
+        NA_real_
+      )
     ) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(
-      gid_cover    = dplyr::if_else(is.finite(gid_cover), gid_cover, NA_real_),
+      gid_cover = dplyr::if_else(is.finite(gid_cover), gid_cover, NA_real_),
       is_composite = !is.na(gid_cover) & gid_cover < cover_threshold
     ) %>%
     dplyr::left_join(q, by = c("gid", "gadm_level", "year")) %>%
@@ -877,27 +1171,46 @@ deriveCrosswalkShares <- function(crosswalk, gid_pop,
 
 #' Per-LP composite summary: gid_cover, n_gid_eff, n_gid, is_composite.
 #' Composite status is a property of the crosswalk, never of a name string.
-computeGidCover <- function(crosswalk, cover_threshold = 0.90) {
+compute_gid_cover <- function(crosswalk, cover_threshold = 0.90) {
   stopifnot(all(c("lctn_pr", "gadm_level", "H") %in% names(crosswalk)))
   if (!nrow(crosswalk)) {
-    return(tibble::tibble(lctn_pr = character(0), gadm_level = character(0),
-                          year = integer(0), P_l = numeric(0), n_gid = integer(0),
-                          gid_cover = numeric(0), n_gid_eff = numeric(0),
-                          is_composite = logical(0)))
+    return(tibble::tibble(
+      lctn_pr = character(0),
+      gadm_level = character(0),
+      year = integer(0),
+      P_l = numeric(0),
+      n_gid = integer(0),
+      gid_cover = numeric(0),
+      n_gid_eff = numeric(0),
+      is_composite = logical(0)
+    ))
   }
-  grp <- if ("year" %in% names(crosswalk)) c("lctn_pr", "gadm_level", "year")
-         else c("lctn_pr", "gadm_level")
+  grp <- if ("year" %in% names(crosswalk)) {
+    c("lctn_pr", "gadm_level", "year")
+  } else {
+    c("lctn_pr", "gadm_level")
+  }
   crosswalk %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(grp))) %>%
     dplyr::summarise(
-      P_l   = sum(H, na.rm = TRUE),
+      P_l = sum(H, na.rm = TRUE),
       n_gid = dplyr::n_distinct(gid),
-      .w    = list(if (sum(H, na.rm = TRUE) > 0) H / sum(H, na.rm = TRUE) else NA_real_),
+      .w = list(
+        if (sum(H, na.rm = TRUE) > 0) H / sum(H, na.rm = TRUE) else NA_real_
+      ),
       .groups = "drop"
     ) %>%
     dplyr::mutate(
-      gid_cover    = vapply(.w, function(w) if (all(is.na(w))) NA_real_ else max(w), numeric(1)),
-      n_gid_eff    = vapply(.w, function(w) if (all(is.na(w))) NA_real_ else 1 / sum(w^2), numeric(1)),
+      gid_cover = vapply(
+        .w,
+        function(w) if (all(is.na(w))) NA_real_ else max(w),
+        numeric(1)
+      ),
+      n_gid_eff = vapply(
+        .w,
+        function(w) if (all(is.na(w))) NA_real_ else 1 / sum(w^2),
+        numeric(1)
+      ),
       is_composite = !is.na(gid_cover) & gid_cover < cover_threshold
     ) %>%
     dplyr::select(-.w)
@@ -935,7 +1248,7 @@ computeGidCover <- function(crosswalk, cover_threshold = 0.90) {
 #'
 #' NO MONOTONICITY ASSUMPTION. pcov_ADM1 >= pcov_ADM2 does NOT hold in general
 #' (1188 of 76144 LP-years violate it) because GADM ADM2 does not nest exactly
-#' inside ADM1 and `dropSliverPieces()` runs independently per level. The rule
+#' inside ADM1 and `drop_sliver_pieces()` runs independently per level. The rule
 #' above compares levels explicitly rather than assuming an ordering.
 #'
 #' STABILITY. The per-year statistics move as population is redistributed, which
@@ -972,7 +1285,7 @@ computeGidCover <- function(crosswalk, cover_threshold = 0.90) {
 #' @param crosswalk bound crosswalk rows (lctn_pr, gid, gadm_level, year, H,
 #'   piece_area_km2).
 #' @param cover_threshold population dominance required for a level to be
-#'   admissible. Shares the meaning of the threshold in `computeGidCover()`.
+#'   admissible. Shares the meaning of the threshold in `compute_gid_cover()`.
 #' @param tiebreak "strict" (default) or "tolerant" — see above.
 #' @param tiebreak_floor "tolerant" mode only: acov_ADM2 above this wins
 #'   outright, no comparison to ADM1.
@@ -981,67 +1294,112 @@ computeGidCover <- function(crosswalk, cover_threshold = 0.90) {
 #' @return tibble, one row per lctn_pr: lp_level, lp_level_reason, and the
 #'   diagnostics pcov_ADM1, pcov_ADM2, acov_ADM1, acov_ADM2, n_member_ADM1,
 #'   n_member_ADM2.
-deriveLpTilingLevel <- function(crosswalk, cover_threshold = 0.90,
-                                 tiebreak = c("strict", "tolerant"),
-                                 tiebreak_floor = 0.80, tiebreak_tol = 0.10) {
+derive_lp_tiling_level <- function(
+  crosswalk,
+  cover_threshold = 0.90,
+  tiebreak = c("strict", "tolerant"),
+  tiebreak_floor = 0.80,
+  tiebreak_tol = 0.10
+) {
   tiebreak <- match.arg(tiebreak)
   need <- c("lctn_pr", "gid", "gadm_level", "H")
   miss <- setdiff(need, names(crosswalk))
-  if (length(miss))
-    stop("deriveLpTilingLevel(): crosswalk is missing column(s): ",
-         paste(miss, collapse = ", "))
-  if (!is.numeric(cover_threshold) || length(cover_threshold) != 1L ||
-      !is.finite(cover_threshold) || cover_threshold < 0 || cover_threshold > 1)
-    stop("deriveLpTilingLevel(): cover_threshold must be a single number in [0, 1].")
+  if (length(miss)) {
+    stop(
+      "derive_lp_tiling_level(): crosswalk is missing column(s): ",
+      paste(miss, collapse = ", ")
+    )
+  }
+  if (
+    !is.numeric(cover_threshold) ||
+      length(cover_threshold) != 1L ||
+      !is.finite(cover_threshold) ||
+      cover_threshold < 0 ||
+      cover_threshold > 1
+  ) {
+    stop(
+      "derive_lp_tiling_level(): cover_threshold must be a single number in [0, 1]."
+    )
+  }
 
   empty <- tibble::tibble(
-    lctn_pr = character(0), lp_level = character(0), lp_level_reason = character(0),
-    pcov_ADM1 = numeric(0), pcov_ADM2 = numeric(0),
-    acov_ADM1 = numeric(0), acov_ADM2 = numeric(0),
-    n_member_ADM1 = numeric(0), n_member_ADM2 = numeric(0))
-  if (!nrow(crosswalk)) return(empty)
+    lctn_pr = character(0),
+    lp_level = character(0),
+    lp_level_reason = character(0),
+    pcov_ADM1 = numeric(0),
+    pcov_ADM2 = numeric(0),
+    acov_ADM1 = numeric(0),
+    acov_ADM2 = numeric(0),
+    n_member_ADM1 = numeric(0),
+    n_member_ADM2 = numeric(0)
+  )
+  if (!nrow(crosswalk)) {
+    return(empty)
+  }
 
   # An area column is not strictly required: without it every level scores 0 on
   # the tie-break, which degrades to "prefer the finer level among admissible"
   # rather than erroring. Flagged rather than silent, because the tie-break is
   # what stops a population-concentrated province being read at ADM2.
   has_area <- "piece_area_km2" %in% names(crosswalk)
-  if (!has_area)
-    warning("deriveLpTilingLevel(): no `piece_area_km2` column; the area ",
-            "tie-break between admissible levels is unavailable.")
+  if (!has_area) {
+    warning(
+      "derive_lp_tiling_level(): no `piece_area_km2` column; the area ",
+      "tie-break between admissible levels is unavailable."
+    )
+  }
 
   cw <- crosswalk %>%
     dplyr::filter(is.finite(.data$H), .data$H > 0) %>%
     dplyr::mutate(
-      lctn_pr    = as.character(.data$lctn_pr),
+      lctn_pr = as.character(.data$lctn_pr),
       gadm_level = as.character(.data$gadm_level),
-      .area      = if (has_area) as.numeric(.data$piece_area_km2) else NA_real_,
-      .year      = if ("year" %in% names(crosswalk)) as.integer(.data$year) else 0L)
-  if (!nrow(cw)) return(empty)
+      .area = if (has_area) as.numeric(.data$piece_area_km2) else NA_real_,
+      .year = if ("year" %in% names(crosswalk)) as.integer(.data$year) else 0L
+    )
+  if (!nrow(cw)) {
+    return(empty)
+  }
 
   per_level <- cw %>%
     dplyr::group_by(.data$lctn_pr, .data$gadm_level, .data$.year) %>%
     dplyr::summarise(
       n_member = dplyr::n(),
-      pcov     = max(.data$H) / sum(.data$H),
-      acov     = { s <- sum(.data$.area, na.rm = TRUE)
-                   if (is.finite(s) && s > 0) max(.data$.area, na.rm = TRUE) / s
-                   else NA_real_ },
-      .groups = "drop") %>%
+      pcov = max(.data$H) / sum(.data$H),
+      acov = {
+        s <- sum(.data$.area, na.rm = TRUE)
+        if (is.finite(s) && s > 0) {
+          max(.data$.area, na.rm = TRUE) / s
+        } else {
+          NA_real_
+        }
+      },
+      .groups = "drop"
+    ) %>%
     # Median across years: one decision per LP, immune to a single odd year.
     dplyr::group_by(.data$lctn_pr, .data$gadm_level) %>%
     dplyr::summarise(
       n_member = stats::median(.data$n_member),
-      pcov     = stats::median(.data$pcov),
-      acov     = stats::median(.data$acov, na.rm = TRUE),
-      .groups = "drop")
+      pcov = stats::median(.data$pcov),
+      acov = stats::median(.data$acov, na.rm = TRUE),
+      .groups = "drop"
+    )
 
   wide <- per_level %>%
-    tidyr::pivot_wider(names_from = "gadm_level",
-                       values_from = c("pcov", "acov", "n_member"))
-  for (nm in c("pcov_ADM1", "pcov_ADM2", "acov_ADM1", "acov_ADM2",
-               "n_member_ADM1", "n_member_ADM2"))
+    tidyr::pivot_wider(
+      names_from = "gadm_level",
+      values_from = c("pcov", "acov", "n_member")
+    )
+  for (nm in c(
+    "pcov_ADM1",
+    "pcov_ADM2",
+    "acov_ADM1",
+    "acov_ADM2",
+    "n_member_ADM1",
+    "n_member_ADM2"
+  )) {
     if (!nm %in% names(wide)) wide[[nm]] <- NA_real_
+  }
 
   wide %>%
     dplyr::mutate(
@@ -1049,42 +1407,62 @@ deriveLpTilingLevel <- function(crosswalk, cover_threshold = 0.90,
       .ok2 = !is.na(.data$pcov_ADM2) & .data$pcov_ADM2 >= cover_threshold,
       # NA area sorts below any real value, so a level that has no area
       # information never wins the tie-break by default.
-      .a1  = dplyr::coalesce(.data$acov_ADM1, -Inf),
-      .a2  = dplyr::coalesce(.data$acov_ADM2, -Inf),
+      .a1 = dplyr::coalesce(.data$acov_ADM1, -Inf),
+      .a2 = dplyr::coalesce(.data$acov_ADM2, -Inf),
       lp_level = if (tiebreak == "strict") {
         dplyr::case_when(
           .data$.ok1 & .data$.ok2 & .data$.a2 >= .data$.a1 ~ "ADM2",
-          .data$.ok1 & .data$.ok2                          ~ "ADM1",
-          .data$.ok2                                       ~ "ADM2",
-          .data$.ok1                                       ~ "ADM1",
-          TRUE                                             ~ "ADM1")
+          .data$.ok1 & .data$.ok2 ~ "ADM1",
+          .data$.ok2 ~ "ADM2",
+          .data$.ok1 ~ "ADM1",
+          TRUE ~ "ADM1"
+        )
       } else {
         dplyr::case_when(
-          .data$.ok1 & .data$.ok2 & .data$.a2 > tiebreak_floor              ~ "ADM2",
-          .data$.ok1 & .data$.ok2 & (.data$.a2 - .data$.a1) > -tiebreak_tol ~ "ADM2",
-          .data$.ok1 & .data$.ok2                                          ~ "ADM1",
-          .data$.ok2                                                       ~ "ADM2",
-          .data$.ok1                                                       ~ "ADM1",
-          TRUE                                                             ~ "ADM1")
+          .data$.ok1 & .data$.ok2 & .data$.a2 > tiebreak_floor ~ "ADM2",
+          .data$.ok1 &
+            .data$.ok2 &
+            (.data$.a2 - .data$.a1) > -tiebreak_tol ~ "ADM2",
+          .data$.ok1 & .data$.ok2 ~ "ADM1",
+          .data$.ok2 ~ "ADM2",
+          .data$.ok1 ~ "ADM1",
+          TRUE ~ "ADM1"
+        )
       },
       lp_level_reason = if (tiebreak == "strict") {
         dplyr::case_when(
           .data$.ok1 & .data$.ok2 ~ "both_admissible_area_tiebreak",
-          .data$.ok2              ~ "only_adm2_admissible",
-          .data$.ok1              ~ "only_adm1_admissible",
-          TRUE                    ~ "none_admissible_composite")
+          .data$.ok2 ~ "only_adm2_admissible",
+          .data$.ok1 ~ "only_adm1_admissible",
+          TRUE ~ "none_admissible_composite"
+        )
       } else {
         dplyr::case_when(
-          .data$.ok1 & .data$.ok2 & .data$.a2 > tiebreak_floor              ~ "both_admissible_acov_floor",
-          .data$.ok1 & .data$.ok2 & (.data$.a2 - .data$.a1) > -tiebreak_tol ~ "both_admissible_area_tiebreak_tolerant",
-          .data$.ok1 & .data$.ok2                                          ~ "both_admissible_area_tiebreak_adm1",
-          .data$.ok2                                                       ~ "only_adm2_admissible",
-          .data$.ok1                                                       ~ "only_adm1_admissible",
-          TRUE                                                             ~ "none_admissible_composite")
-      }) %>%
-    dplyr::select("lctn_pr", "lp_level", "lp_level_reason",
-                  "pcov_ADM1", "pcov_ADM2", "acov_ADM1", "acov_ADM2",
-                  "n_member_ADM1", "n_member_ADM2")
+          .data$.ok1 &
+            .data$.ok2 &
+            .data$.a2 > tiebreak_floor ~ "both_admissible_acov_floor",
+          .data$.ok1 &
+            .data$.ok2 &
+            (.data$.a2 - .data$.a1) >
+              -tiebreak_tol ~ "both_admissible_area_tiebreak_tolerant",
+          .data$.ok1 & .data$.ok2 ~ "both_admissible_area_tiebreak_adm1",
+          .data$.ok2 ~ "only_adm2_admissible",
+          .data$.ok1 ~ "only_adm1_admissible",
+          TRUE ~ "none_admissible_composite"
+        )
+      }
+    ) %>%
+    dplyr::select(
+      "lctn_pr",
+      "lp_level",
+      "lp_level_reason",
+      "pcov_ADM1",
+      "pcov_ADM2",
+      "acov_ADM1",
+      "acov_ADM2",
+      "n_member_ADM1",
+      "n_member_ADM2"
+    )
 }
 
 #' Reconciliation of the crosswalk against the independent whole-LP extraction.
@@ -1093,7 +1471,7 @@ deriveLpTilingLevel <- function(crosswalk, cover_threshold = 0.90,
 #' whole LP geometry. They agree only if the intersection geometry, the sliver
 #' filter and the NA handling are all correct — which is why this is the primary
 #' acceptance gate for Stage 1 and not a tautology.
-reconcileCrosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
+reconcile_crosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
   p_l <- crosswalk %>%
     dplyr::group_by(lctn_pr, gadm_level, year) %>%
     dplyr::summarise(P_l = sum(H, na.rm = TRUE), .groups = "drop")
@@ -1101,15 +1479,18 @@ reconcileCrosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
   # A cross-border LP is extracted once per country; P_direct sums across tasks.
   p_d <- lp_pop %>%
     dplyr::group_by(lctn_pr, year) %>%
-    dplyr::summarise(P_direct = sum(P_direct, na.rm = TRUE),
-                     cross_border = any(cross_border), .groups = "drop")
+    dplyr::summarise(
+      P_direct = sum(P_direct, na.rm = TRUE),
+      cross_border = any(cross_border),
+      .groups = "drop"
+    )
 
   p_l %>%
     dplyr::left_join(p_d, by = c("lctn_pr", "year")) %>%
     dplyr::mutate(
       abs_diff = abs(P_l - P_direct),
       rel_diff = dplyr::if_else(P_direct > 0, abs_diff / P_direct, NA_real_),
-      ok       = !is.na(rel_diff) & rel_diff <= tol
+      ok = !is.na(rel_diff) & rel_diff <= tol
     )
 }
 
@@ -1120,7 +1501,7 @@ reconcileCrosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
 #' ba1de5dd1a, all carrying pop = 1,632,251 and area = 413.92 km2). Upstream
 #' provenance columns (`pop_geom_dup_n`, `pop_geom_dup_class`) require a
 #' patched OutbreakExtractR re-extraction that has not run against this corpus
-#' (see utils/population_qc.R's checkDuplicateGeometryProvenance(), which no-ops
+#' (see utils/population_qc.R's check_duplicate_geometry_provenance(), which no-ops
 #' until those columns exist upstream). This is the same symptom made visible
 #' from data already on disk: two LPs with genuinely distinct polygons do not,
 #' by chance, produce the exact same (gid, H) set in every extracted year --
@@ -1140,28 +1521,45 @@ reconcileCrosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
 #'   == 1 and geom_dup_group == NA for an LP with no crosswalk twin. An LP
 #'   absent from `crosswalk` at a level (nothing to compare) is absent here too
 #'   -- left_join onto a fuller table yields NA, not a false "unique".
-detectGeomDupLps <- function(crosswalk, round_dp = 3) {
-  if (!nrow(crosswalk))
-    return(tibble::tibble(lctn_pr = character(0), gadm_level = character(0),
-                          geom_dup_n = integer(0), geom_dup_group = character(0)))
+detect_geom_dup_lps <- function(crosswalk, round_dp = 3) {
+  if (!nrow(crosswalk)) {
+    return(tibble::tibble(
+      lctn_pr = character(0),
+      gadm_level = character(0),
+      geom_dup_n = integer(0),
+      geom_dup_group = character(0)
+    ))
+  }
 
   sig <- crosswalk %>%
     dplyr::filter(is.finite(H)) %>%
-    dplyr::mutate(.piece = paste0(gid, "@", year, "=",
-                                  format(round(H, round_dp), scientific = FALSE))) %>%
+    dplyr::mutate(
+      .piece = paste0(
+        gid,
+        "@",
+        year,
+        "=",
+        format(round(H, round_dp), scientific = FALSE)
+      )
+    ) %>%
     dplyr::group_by(lctn_pr, gadm_level) %>%
-    dplyr::summarise(.sig = paste(sort(.piece), collapse = "|"), .groups = "drop")
+    dplyr::summarise(
+      .sig = paste(sort(.piece), collapse = "|"),
+      .groups = "drop"
+    )
 
   sig %>%
     dplyr::group_by(gadm_level, .sig) %>%
     dplyr::mutate(
-      geom_dup_n     = dplyr::n(),
+      geom_dup_n = dplyr::n(),
       # A stable, deterministic group label (lowest lctn_pr in the cluster) --
       # same convention as the "lowest id wins" representative pick elsewhere
       # in this project (e.g. 03_prepare_siz.R's legacy id-unification step).
-      geom_dup_group = if (dplyr::n() > 1L)
-                         paste0(gadm_level[1], ":", sort(lctn_pr)[1])
-                       else NA_character_
+      geom_dup_group = if (dplyr::n() > 1L) {
+        paste0(gadm_level[1], ":", sort(lctn_pr)[1])
+      } else {
+        NA_character_
+      }
     ) %>%
     dplyr::ungroup() %>%
     dplyr::select(lctn_pr, gadm_level, geom_dup_n, geom_dup_group)

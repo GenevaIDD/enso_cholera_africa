@@ -1,28 +1,42 @@
+# siz_post.R — postprocessing of size / monthly brms fits
+#
+# Provides:
+#   make_size_pp_check_tbl()       posterior-predictive scatter as a tibble
+#   summarise_size_coefs_brms()    fixed effects on the response scale
+#   compute_nested_size_re_stats_brms()   nested RE summaries (region,
+#                                  country, adm1), occurrence-side schema
+#
+# Details:
+#   Used by 04_fit_siz_brms(_cb).R, 05_fit_postprocess*.R and the size tests.
 
 #' Posterior-predictive scatter as a tibble (for plotting downstream).
 #'
 #' @param response name of the observed-response column in fit$data.
 #'   Default "suspected_cases" (size track); the monthly track passes
 #'   "cases_month".
-makeSizePpCheckTbl <- function(fit, response = "suspected_cases") {
+make_size_pp_check_tbl <- function(fit, response = "suspected_cases") {
   pred <- predict(fit) %>% tibble::as_tibble()
   pred$obs <- fit$data[[response]]
   pred
 }
 
 #' Fixed-effect coefficient summary on the response scale.
-summariseSizeCoefsBrms <- function(fit) {
+summarise_size_coefs_brms <- function(fit) {
   posterior::summarise_draws(
     brms::as_draws(fit, variable = "^b_", regex = TRUE)
   )
 }
 
-#' computeNestedSizeReStatsBrms
+#' compute_nested_size_re_stats_brms
 #'
 #' Port of the inline RE-unpack logic from legacy 07 (lines 136-276).
 #' Returns list(region, country, adm1) — same schema as the occurrence-side
 #' adapter. Effects are on the response (multiplicative) scale.
-computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
+compute_nested_size_re_stats_brms <- function(
+  fit,
+  opt = NULL,
+  drop_region = FALSE
+) {
   all_re <- brms::ranef(fit, summary = FALSE)
 
   # Apply exactly n_seps sub("_",":") calls per group, where n_seps is the
@@ -31,30 +45,37 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
   # regardless of nesting depth (handles both AFRO_region-rooted and
   # drop_region=TRUE country-rooted group structures).
   all_re_df <- purrr::map_df(seq_along(all_re), function(x) {
-    y        <- all_re[[x]]
+    y <- all_re[[x]]
     key_name <- names(all_re)[[x]]
-    n_seps   <- stringr::str_count(key_name, ":")
+    n_seps <- stringr::str_count(key_name, ":")
     var_names <- attr(y, "dimnames")[[3]]
-    n_draws   <- dim(y)[1]
+    n_draws <- dim(y)[1]
     purrr::map_df(seq_len(dim(y)[2]), function(z) {
       grp_label <- attr(y, "dimnames")[[2]][z]
       for (i in seq_len(n_seps)) {
         grp_label <- sub("_", ":", grp_label, fixed = TRUE)
       }
       # Robust slice: force (draws x vars) matrix even when vars == 1.
-      slice <- y[, z, , drop = FALSE]            # dim: (draws, 1, vars)
-      mat   <- matrix(slice, nrow = n_draws,
-                      ncol = length(var_names),
-                      dimnames = list(NULL, var_names))
+      slice <- y[, z, , drop = FALSE] # dim: (draws, 1, vars)
+      mat <- matrix(
+        slice,
+        nrow = n_draws,
+        ncol = length(var_names),
+        dimnames = list(NULL, var_names)
+      )
       tibble::as_tibble(mat) %>%
         dplyr::mutate(.draw = seq_len(n_draws)) %>%
-        tidyr::pivot_longer(cols = dplyr::any_of(var_names),
-                            names_to = "variable") %>%
-        dplyr::mutate(variable = paste(grp_label, variable, sep = "-"),
-                      .key = key_name)
+        tidyr::pivot_longer(
+          cols = dplyr::any_of(var_names),
+          names_to = "variable"
+        ) %>%
+        dplyr::mutate(
+          variable = paste(grp_label, variable, sep = "-"),
+          .key = key_name
+        )
     })
   })
-  rm(all_re)  # raw draw array no longer needed
+  rm(all_re) # raw draw array no longer needed
 
   # Variable layout produced above:
   #   non-drop region-level:  "<region>-<var>"           (e.g., "Eastern Africa-Intercept")
@@ -66,47 +87,59 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
     re_draws <- all_re_df %>%
       dplyr::mutate(
         grp_part = stringr::str_extract(variable, ".*(?=-)"),
-        var      = sub("^.*-", "", variable),
-        .parts   = stringr::str_split(grp_part, ":"),
-        n_parts  = lengths(.parts),
+        var = sub("^.*-", "", variable),
+        .parts = stringr::str_split(grp_part, ":"),
+        n_parts = lengths(.parts),
         # Under drop_region: 1-part = country tier, 2-part = adm1 tier
         AFRO_region = NA_character_,
-        country     = purrr::map_chr(.parts, ~ .x[1]),
-        adm1_unit   = purrr::map2_chr(.parts, n_parts,
-                                      ~ if (.y >= 2) .x[2] else NA_character_)
+        country = purrr::map_chr(.parts, ~ .x[1]),
+        adm1_unit = purrr::map2_chr(
+          .parts,
+          n_parts,
+          ~ if (.y >= 2) .x[2] else NA_character_
+        )
       ) %>%
       dplyr::select(-grp_part, -.parts, -n_parts, -.key)
   } else {
     re_draws <- all_re_df %>%
       dplyr::mutate(
         grp_part = stringr::str_extract(variable, ".*(?=-)"),
-        var      = sub("^.*-", "", variable),
-        .parts   = stringr::str_split(grp_part, ":"),
-        n_parts  = lengths(.parts),
+        var = sub("^.*-", "", variable),
+        .parts = stringr::str_split(grp_part, ":"),
+        n_parts = lengths(.parts),
         AFRO_region = purrr::map_chr(.parts, ~ .x[1]),
-        country     = purrr::map2_chr(.parts, n_parts,
-                                      ~ if (.y >= 2) .x[2] else NA_character_),
-        adm1_unit   = purrr::map2_chr(.parts, n_parts,
-                                      ~ if (.y >= 3) .x[3] else NA_character_)
+        country = purrr::map2_chr(
+          .parts,
+          n_parts,
+          ~ if (.y >= 2) .x[2] else NA_character_
+        ),
+        adm1_unit = purrr::map2_chr(
+          .parts,
+          n_parts,
+          ~ if (.y >= 3) .x[3] else NA_character_
+        )
       ) %>%
       dplyr::select(-grp_part, -.parts, -n_parts, -.key)
   }
 
   if (drop_region) {
-    re_region  <- NULL
+    re_region <- NULL
     re_country <- re_draws %>% dplyr::filter(is.na(adm1_unit))
-    re_adm1    <- re_draws %>% dplyr::filter(!is.na(adm1_unit))
+    re_adm1 <- re_draws %>% dplyr::filter(!is.na(adm1_unit))
   } else {
-    re_region  <- re_draws %>% dplyr::filter(is.na(country))
+    re_region <- re_draws %>% dplyr::filter(is.na(country))
     re_country <- re_draws %>% dplyr::filter(!is.na(country), is.na(adm1_unit))
-    re_adm1    <- re_draws %>% dplyr::filter(!is.na(adm1_unit))
+    re_adm1 <- re_draws %>% dplyr::filter(!is.na(adm1_unit))
   }
-  rm(all_re_df, re_draws)  # long pivot no longer needed; tier subsets are sufficient
+  rm(all_re_df, re_draws) # long pivot no longer needed; tier subsets are sufficient
 
   mean_draws <- brms::as_draws_df(fit, variable = "^b_", regex = TRUE) %>%
     tibble::as_tibble() %>%
-    tidyr::pivot_longer(cols = !dplyr::contains("."),
-                        names_to = "var", values_to = "mean") %>%
+    tidyr::pivot_longer(
+      cols = !dplyr::contains("."),
+      names_to = "var",
+      values_to = "mean"
+    ) %>%
     dplyr::mutate(var = sub("^b_", "", var)) %>%
     dplyr::select(.draw, var, mean)
 
@@ -133,7 +166,7 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
   country_tbl <- if (drop_region) {
     # b + r_country (no region level). AFRO_region is kept in the grouping
     # columns (constant NA_character_, set above) rather than dropped --
-    # mirrors occ_post.R's computeNestedSurvReStatsBrms(), which always keeps
+    # mirrors occ_post.R's compute_nested_surv_re_stats_brms(), which always keeps
     # an AFRO_region column (NA under drop_region) so downstream figure code
     # (decorate_covar() et al.) doesn't need a drop_region-specific branch.
     re_country %>%
@@ -147,7 +180,9 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
         by = c(".draw", "var")
       ) %>%
       dplyr::inner_join(mean_draws, by = c(".draw", "var")) %>%
-      dplyr::mutate(value = value + tidyr::replace_na(region_mean, 0) + mean) %>%
+      dplyr::mutate(
+        value = value + tidyr::replace_na(region_mean, 0) + mean
+      ) %>%
       summarise_grp(variable, AFRO_region, country, var)
   }
 
@@ -161,8 +196,11 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
         by = c(".draw", "var", "country")
       ) %>%
       dplyr::inner_join(mean_draws, by = c(".draw", "var")) %>%
-      dplyr::mutate(value = value +
-                            tidyr::replace_na(country_mean, 0) + mean) %>%
+      dplyr::mutate(
+        value = value +
+          tidyr::replace_na(country_mean, 0) +
+          mean
+      ) %>%
       summarise_grp(variable, AFRO_region, country, adm1_unit, var)
   } else {
     re_adm1 %>%
@@ -175,12 +213,16 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
         by = c(".draw", "var")
       ) %>%
       dplyr::inner_join(mean_draws, by = c(".draw", "var")) %>%
-      dplyr::mutate(value = value +
-                            tidyr::replace_na(country_mean, 0) +
-                            tidyr::replace_na(region_mean, 0) + mean) %>%
+      dplyr::mutate(
+        value = value +
+          tidyr::replace_na(country_mean, 0) +
+          tidyr::replace_na(region_mean, 0) +
+          mean
+      ) %>%
       summarise_grp(variable, AFRO_region, country, adm1_unit, var)
   }
-  rm(re_region, re_country, re_adm1, mean_draws); gc()
+  rm(re_region, re_country, re_adm1, mean_draws)
+  gc()
 
   # --- phi distributional RE (only when phi_re != "constant") ---
   phi_re_stats <- NULL
@@ -190,31 +232,47 @@ computeNestedSizeReStatsBrms <- function(fit, opt = NULL, drop_region = FALSE) {
     # brms names nested groups with the original column names from data.
     # For (1 | AFRO_region/country/ADM1) the keys are:
     #   "AFRO_region", "AFRO_region:country", "AFRO_region:country:ADM1"
-    phi_group_keys <- switch(phi_re,
-      region              = "AFRO_region",
-      region_country      = c("AFRO_region", "AFRO_region:country"),
-      region_country_adm1 = c("AFRO_region", "AFRO_region:country", "AFRO_region:country:ADM1")
+    phi_group_keys <- switch(
+      phi_re,
+      region = "AFRO_region",
+      region_country = c("AFRO_region", "AFRO_region:country"),
+      region_country_adm1 = c(
+        "AFRO_region",
+        "AFRO_region:country",
+        "AFRO_region:country:ADM1"
+      )
     )
     summarise_phi_ranef <- function(arr) {
       # arr: [draws x groups x 1]
       n_draws <- dim(arr)[1]
       n_groups <- dim(arr)[2]
       grp_names <- dimnames(arr)[[2]]
-      mat <- matrix(arr[, , 1, drop = TRUE], nrow = n_draws,
-                    dimnames = list(NULL, grp_names))
+      mat <- matrix(
+        arr[,, 1, drop = TRUE],
+        nrow = n_draws,
+        dimnames = list(NULL, grp_names)
+      )
       tibble::tibble(
-        group    = grp_names,
+        group = grp_names,
         mean_phi = colMeans(exp(mat)),
         q025_phi = apply(exp(mat), 2, stats::quantile, 0.025),
         q975_phi = apply(exp(mat), 2, stats::quantile, 0.975)
       )
     }
     phi_re_stats <- lapply(phi_group_keys, function(k) {
-      if (!is.null(phi_ranef[[k]])) summarise_phi_ranef(phi_ranef[[k]]) else NULL
+      if (!is.null(phi_ranef[[k]])) {
+        summarise_phi_ranef(phi_ranef[[k]])
+      } else {
+        NULL
+      }
     })
     names(phi_re_stats) <- phi_group_keys
   }
 
-  list(region = region_tbl, country = country_tbl, adm1 = adm1_tbl,
-       phi_re_stats = phi_re_stats)
+  list(
+    region = region_tbl,
+    country = country_tbl,
+    adm1 = adm1_tbl,
+    phi_re_stats = phi_re_stats
+  )
 }

@@ -1,15 +1,15 @@
-# make_batch_configs.R — batch config generator for the cholera pipeline
-#
-# Declarative BATCH_REGISTRY → expand.grid → per-config YAMLs + manifest.yml.
-# Closely mirrors uvira-modeling/analysis/config.R (BATCH_REGISTRY pattern).
+# make_batch_configs.R — batch config generator: declarative BATCH_REGISTRY ->
+#   expand.grid -> per-config YAMLs + manifest.yml.
 #
 # Usage:
-#   Rscript analysis/utils/make_batch_configs.R --batch run2_basehaz_sensitivity
-#   Rscript analysis/utils/make_batch_configs.R --all         # all non-frozen batches
-#   Rscript analysis/utils/make_batch_configs.R --list        # print registry summary
+#   Rscript analysis/utils/make_batch_configs.R --list   # registry summary
+#   Rscript analysis/utils/make_batch_configs.R --batch <batch name>
+#   Rscript analysis/utils/make_batch_configs.R --all    # all non-frozen
+#   Rscript analysis/utils/make_batch_configs.R --batch <name> --force_frozen
 #
-# The script can also be sourced to use generate_batch() / discover_batch()
-# interactively.
+# Details:
+#   Also sourced (no CLI run) by deploy_prod_run.R --stage gen_batches and for
+#   interactive use of generate_batch() / discover_batch() / list_batches().
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -18,11 +18,11 @@ suppressPackageStartupMessages({
   library(here)
 })
 
-source("analysis/utils/base.R")     # slToken() -- the single_lag filename token
-source("analysis/utils/config.R")   # get_default_options(), get_default_config()
-source("analysis/utils/formula.R")               # model-term assembly
-source("analysis/utils/priors.R")                # brms prior builders
-source("analysis/utils/paths.R")                 # nbrCovariateName() / nbrCovariatePattern()
+source("analysis/utils/base.R") # sl_token() -- the single_lag filename token
+source("analysis/utils/config.R") # get_default_options(), get_default_config()
+source("analysis/utils/formula.R") # model-term assembly
+source("analysis/utils/priors.R") # brms prior builders
+source("analysis/utils/paths.R") # nbr_covariate_name() / nbr_covariate_pattern()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,7 +30,9 @@ source("analysis/utils/paths.R")                 # nbrCovariateName() / nbrCovar
 
 get_config_dir <- function() here("analysis/configs/")
 
-get_default_config <- function() yaml::read_yaml(here("analysis/config_defaults.yml"))
+get_default_config <- function() {
+  yaml::read_yaml(here("analysis/config_defaults.yml"))
+}
 
 #' apply_anchored_defaults
 #'
@@ -64,22 +66,32 @@ get_default_config <- function() yaml::read_yaml(here("analysis/config_defaults.
 #' @param spec BATCH_REGISTRY entry
 #' @param all_spec_keys c(names(spec$overrides), names(spec$grid))
 apply_anchored_defaults <- function(config, batch_model, spec, all_spec_keys) {
-  if (is.null(batch_model)) return(config)
+  if (is.null(batch_model)) {
+    return(config)
+  }
 
   # An explicit registry setting always wins — a batch may deliberately want the
   # un-anchored model (e.g. a like-for-like comparison against an archived run).
-  explicit <- paste0(batch_model, ".offset_baserate") %in% all_spec_keys ||
-                !is.null(spec$overrides[[batch_model]]$offset_baserate)
-  backend  <- config[[batch_model]]$backend
-  if (explicit || is.null(backend) || !backend %in% c("brms", "brms_cb", "brms_kl")) return(config)
+  explicit <- paste0(batch_model, ".offset_baserate") %in%
+    all_spec_keys ||
+    !is.null(spec$overrides[[batch_model]]$offset_baserate)
+  backend <- config[[batch_model]]$backend
+  if (
+    explicit ||
+      is.null(backend) ||
+      !backend %in% c("brms", "brms_cb", "brms_kl")
+  ) {
+    return(config)
+  }
 
   config[[batch_model]]$offset_baserate <- TRUE
 
   inherited_pin <- .PRIOR_DEFAULTS[[batch_model]]$intercept
   for (b in c("brms", "brms_cb", "brms_kl")) {
     pin <- config[[batch_model]][[b]]$prior_intercept
-    if (!is.null(pin) && identical(pin, inherited_pin))
+    if (!is.null(pin) && identical(pin, inherited_pin)) {
       config[[batch_model]][[b]]$prior_intercept <- NULL
+    }
   }
   config
 }
@@ -103,21 +115,32 @@ apply_anchored_defaults <- function(config, batch_model, spec, all_spec_keys) {
 #' @return             model_block with irrelevant backend sub-blocks removed
 strip_backend_siblings <- function(model_block) {
   backend <- model_block$backend
-  if (is.null(backend)) return(model_block)  # ambiguous/unset — leave everything
+  if (is.null(backend)) {
+    return(model_block)
+  } # ambiguous/unset — leave everything
 
   BACKEND_SUBBLOCKS <- c("brms", "brms_cb", "brms_kl")
   sibling <- grepl("_(cb|kl)$", backend)
 
   if (sibling) {
     plain <- sub("_(cb|kl)$", "", backend)
-    model_block[[backend]] <- .merge1(model_block[[backend]], model_block[[plain]] %||% list())
+    model_block[[backend]] <- .merge1(
+      model_block[[backend]],
+      model_block[[plain]] %||% list()
+    )
   }
 
   strip <- setdiff(intersect(BACKEND_SUBBLOCKS, names(model_block)), backend)
-  for (s in strip) model_block[[s]] <- NULL
+  for (s in strip) {
+    model_block[[s]] <- NULL
+  }
 
-  if (!sibling) model_block[["dlnm"]] <- NULL
-  if (!endsWith(backend, "_kl")) model_block[["kernel"]] <- NULL
+  if (!sibling) {
+    model_block[["dlnm"]] <- NULL
+  }
+  if (!endsWith(backend, "_kl")) {
+    model_block[["kernel"]] <- NULL
+  }
 
   model_block
 }
@@ -126,34 +149,34 @@ strip_backend_siblings <- function(model_block) {
 # Pattern: {batch}_{backend}[_bh-{basehaz}][_ctry-{country}][_{abbrev}{val}...].
 DIM_ABBREV <- c(
   # Occurrence nested dim keys (new schema)
-  `occurrence.backend`              = "bknd",
+  `occurrence.backend` = "bknd",
   `occurrence.brms.basehaz_poisson` = "bhp",
-  `occurrence.brms.init`            = "init",
+  `occurrence.brms.init` = "init",
   # Shared / size keys
-  country                           = "ctry",
-  baseline                          = "base",
-  sampling                          = "samp",
-  warmup                            = "wup",
-  chains                            = "ch",
-  `enso.lag_months`                 = "elag",
+  country = "ctry",
+  baseline = "base",
+  sampling = "samp",
+  warmup = "wup",
+  chains = "ch",
+  `enso.lag_months` = "elag",
   `occurrence.dlnm.defaults.single_lag` = "sl",
-  `size.dlnm.defaults.single_lag`       = "sl",
-  `duration.dlnm.defaults.single_lag`   = "sl",
-  `monthly.dlnm.defaults.single_lag`    = "sl",
-  `size.seasonal_term`              = "sst",
-  `size.admin_level`                = "adml",
-  `size.family`                     = "fam",
-  `grouping.group`                  = "grp",
-  covar_combo                       = "cc",
+  `size.dlnm.defaults.single_lag` = "sl",
+  `duration.dlnm.defaults.single_lag` = "sl",
+  `monthly.dlnm.defaults.single_lag` = "sl",
+  `size.seasonal_term` = "sst",
+  `size.admin_level` = "adml",
+  `size.family` = "fam",
+  `grouping.group` = "grp",
+  covar_combo = "cc",
   # Monthly-track structure-compare dims
-  `monthly.backend`                     = "bknd",
-  `monthly.phi_re`                      = "phire",
-  `monthly.prev_cases`                  = "prevc",
+  `monthly.backend` = "bknd",
+  `monthly.phi_re` = "phire",
+  `monthly.prev_cases` = "prevc",
   `monthly.dlnm.defaults.re_adm1_slope` = "reslp",
   # brms_kl class sweep synthetic dims (removed by .kl_sweep_row())
-  `kl_sweep.basis`                      = "basis",
-  `kl_sweep.K`                          = "K",
-  `kl_sweep.prior`                      = "prior"
+  `kl_sweep.basis` = "basis",
+  `kl_sweep.K` = "K",
+  `kl_sweep.prior` = "prior"
 )
 
 # ---------------------------------------------------------------------------
@@ -194,42 +217,41 @@ DIM_ABBREV <- c(
 .ARGVAR_BS_DF5 <- list(fun = "bs", df = 5L)
 
 BATCH_REGISTRY <- list(
-
   # --------------------------------------------------------------------------
   # Smoke / CI tests
   # --------------------------------------------------------------------------
 
   smoke_test = list(
     description = "Smoke test: brms/factor, ETH, 3 warmup / 2 sampling",
-    grid        = list(
+    grid = list(
       `occurrence.backend` = "brms"
     ),
-    overrides   = list(
-      `occurrence.brms.sampling`        = 2L,
-      `occurrence.brms.warmup`          = 3L,
-      `occurrence.brms.chains`          = 1L,
-      `occurrence.brms.cores`           = 1L,
+    overrides = list(
+      `occurrence.brms.sampling` = 2L,
+      `occurrence.brms.warmup` = 3L,
+      `occurrence.brms.chains` = 1L,
+      `occurrence.brms.cores` = 1L,
       `occurrence.brms.basehaz_poisson` = "factor",
       country = "ETH",
-      seed    = 42L,
-      outdir  = "generated_data/smoke_test/"
+      seed = 42L,
+      outdir = "generated_data/smoke_test/"
     )
   ),
 
   smoke_test_brms_variants = list(
     description = "Smoke test: brms × 3 basehaz variants, ETH, 3 warmup / 2 sampling",
-    grid        = list(
+    grid = list(
       `occurrence.brms.basehaz_poisson` = c("factor", "cyclic", "ms")
     ),
-    overrides   = list(
-      `occurrence.backend`    = "brms",
+    overrides = list(
+      `occurrence.backend` = "brms",
       `occurrence.brms.sampling` = 2L,
       `occurrence.brms.warmup` = 3L,
       `occurrence.brms.chains` = 1L,
-      `occurrence.brms.cores`  = 1L,
+      `occurrence.brms.cores` = 1L,
       country = "ETH",
-      seed    = 42L,
-      outdir  = "generated_data/smoke_test/"
+      seed = 42L,
+      outdir = "generated_data/smoke_test/"
     )
   ),
 
@@ -239,17 +261,17 @@ BATCH_REGISTRY <- list(
 
   run1_benchmark = list(
     description = "Run 1: brms/seasonal + brms/factor, full Africa, default covariates",
-    grid        = list(
-      `occurrence.backend`              = c("brms", "brms"),
+    grid = list(
+      `occurrence.backend` = c("brms", "brms"),
       `occurrence.brms.basehaz_poisson` = c("seasonal", "factor")
     ),
-    overrides   = list(
-      `occurrence.brms.sampling`    = 1000L,
-      `occurrence.brms.warmup`      = 1000L,
-      `occurrence.brms.chains`      = 4L,
-      `occurrence.brms.cores`       = 4L,
+    overrides = list(
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       country = "all",
-      seed    = 1234L
+      seed = 1234L
     )
   ),
 
@@ -259,17 +281,17 @@ BATCH_REGISTRY <- list(
 
   run2_basehaz_sensitivity = list(
     description = "Run 2: brms × 3 basehaz variants, full Africa",
-    grid        = list(
+    grid = list(
       `occurrence.brms.basehaz_poisson` = c("factor", "cyclic", "seasonal")
     ),
-    overrides   = list(
-      `occurrence.backend`         = "brms",
-      `occurrence.brms.sampling`   = 1000L,
-      `occurrence.brms.warmup`     = 1000L,
-      `occurrence.brms.chains`     = 4L,
-      `occurrence.brms.cores`      = 4L,
+    overrides = list(
+      `occurrence.backend` = "brms",
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       country = "all",
-      seed    = 1234L
+      seed = 1234L
     )
   ),
 
@@ -279,16 +301,16 @@ BATCH_REGISTRY <- list(
 
   run4_country_sensitivity = list(
     description = "Run 4: brms/seasonal × ETH, KEN, TZA, all",
-    grid        = list(
+    grid = list(
       country = c("ETH", "KEN", "TZA", "all")
     ),
-    overrides   = list(
-      `occurrence.backend`              = "brms",
+    overrides = list(
+      `occurrence.backend` = "brms",
       `occurrence.brms.basehaz_poisson` = "seasonal",
-      `occurrence.brms.sampling`        = 1000L,
-      `occurrence.brms.warmup`          = 1000L,
-      `occurrence.brms.chains`          = 4L,
-      `occurrence.brms.cores`           = 4L,
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       seed = 1234L
     )
   ),
@@ -303,16 +325,16 @@ BATCH_REGISTRY <- list(
       "Run 5: brms/seasonal, full Africa, 4 covariate sets —",
       "default | +max_precip | +temp_daymax | +both"
     ),
-    grid        = list(
-      country = "all"   # placeholder; covariates varied via overrides below
+    grid = list(
+      country = "all" # placeholder; covariates varied via overrides below
     ),
-    overrides   = list(
-      `occurrence.backend`              = "brms",
+    overrides = list(
+      `occurrence.backend` = "brms",
       `occurrence.brms.basehaz_poisson` = "seasonal",
-      `occurrence.brms.sampling`        = 1000L,
-      `occurrence.brms.warmup`          = 1000L,
-      `occurrence.brms.chains`          = 4L,
-      `occurrence.brms.cores`           = 4L,
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       seed = 1234L
       # NOTE: covariate overrides require manual per-config customisation after
       # generation, or use of generate_covariate_sensitivity_batch() below.
@@ -325,31 +347,31 @@ BATCH_REGISTRY <- list(
 
   size_run1_benchmark = list(
     description = "Size Run 1: brms NB-log, full Africa, default RE/covariates",
-    grid        = list(
-      `size.seasonal_term` = "none"   # placeholder single-value grid
+    grid = list(
+      `size.seasonal_term` = "none" # placeholder single-value grid
     ),
-    overrides   = list(
+    overrides = list(
       country = "all",
-      seed    = 1234L,
+      seed = 1234L,
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
+        seasonal_term = "none",
         brms = list(
-          prior_b         = "normal(0, 0.5)",
+          prior_b = "normal(0, 0.5)",
           prior_intercept = "normal(-3, 1)",
-          prior_sd        = "normal(0, 0.5)",
-          sampling        = 1000L,
-          warmup          = 1000L,
-          chains          = 4L,
-          cores           = 4L,
-          adapt_delta     = 0.95,
-          max_treedepth   = 12L,
-          init            = 0.1
+          prior_sd = "normal(0, 0.5)",
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
+          max_treedepth = 12L,
+          init = 0.1
         )
       )
     )
@@ -361,27 +383,27 @@ BATCH_REGISTRY <- list(
 
   size_seasonal_sensitivity = list(
     description = "Size: seasonal_term × {none, factor_month, cyclic, harmonic2}, full Africa, brms NB-log",
-    grid        = list(
+    grid = list(
       `size.seasonal_term` = c("none", "factor_month", "cyclic", "harmonic2")
     ),
-    overrides   = list(
+    overrides = list(
       country = "all",
-      seed    = 1234L,
+      seed = 1234L,
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
         brms = list(
-          sampling      = 1000L,
-          warmup        = 1000L,
-          chains        = 4L,
-          cores         = 4L,
-          adapt_delta   = 0.95,
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
           max_treedepth = 12L,
-          init          = 0.1
+          init = 0.1
         )
       )
     )
@@ -393,34 +415,34 @@ BATCH_REGISTRY <- list(
 
   size_enso_lag_sensitivity = list(
     description = "Size: ENSO ONI lags 1-11, full Africa, brms NB-log",
-    grid        = list(
+    grid = list(
       `enso.lag_months` = 1:11
     ),
-    overrides   = list(
+    overrides = list(
       country = "all",
-      seed    = 1234L,
+      seed = 1234L,
       enso = list(
         lag_months = 6L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
-        covariates      = list(enso = TRUE),
+        seasonal_term = "none",
+        covariates = list(enso = TRUE),
         brms = list(
-          sampling      = 1000L,
-          warmup        = 1000L,
-          chains        = 4L,
-          cores         = 4L,
-          adapt_delta   = 0.95,
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
           max_treedepth = 12L,
-          init          = 0.1
+          init = 0.1
         )
       )
     )
@@ -432,28 +454,28 @@ BATCH_REGISTRY <- list(
 
   size_re_structure = list(
     description = "Size: RE structure {intercept_only, ttlo_only, full}, full Africa",
-    grid        = list(
-      `size.admin_level` = "ADM1"   # placeholder; RE variants encoded via N copies
+    grid = list(
+      `size.admin_level` = "ADM1" # placeholder; RE variants encoded via N copies
     ),
-    overrides   = list(
+    overrides = list(
       country = "all",
-      seed    = 1234L,
+      seed = 1234L,
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
+        seasonal_term = "none",
         brms = list(
-          sampling      = 1000L,
-          warmup        = 1000L,
-          chains        = 4L,
-          cores         = 4L,
-          adapt_delta   = 0.95,
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
           max_treedepth = 12L,
-          init          = 0.1
+          init = 0.1
           # NOTE: RE-toggle variants require manual customization after
           # generation since they vary boolean structure inside size$random_effects.
         )
@@ -478,52 +500,52 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
+      seed = 1234L,
+      outdir = "generated_data/",
       enso = list(
-        lag_months = 5L,          # unused by brms_cb single-lag (single_lag drives the column)
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        lag_months = 5L, # unused by brms_cb single-lag (single_lag drives the column)
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
-      `occurrence.backend`     = "brms_cb",
+      `occurrence.backend` = "brms_cb",
       `occurrence.admin_level` = "ADM1-ADM2",
       `occurrence.covariates` = list(
-        enso                      = FALSE,   # replaced by single-lag DLNM
+        enso = FALSE, # replaced by single-lag DLNM
         time_to_last_outbreak_cat = TRUE,
-        ongoing_outbreak_lag1     = TRUE,
-        mean_precip               = FALSE,
-        dev_precip                = FALSE,
-        mean_temp_daymean         = FALSE,
-        dev_temp_daymean          = FALSE
+        ongoing_outbreak_lag1 = TRUE,
+        mean_precip = FALSE,
+        dev_precip = FALSE,
+        mean_temp_daymean = FALSE,
+        dev_temp_daymean = FALSE
       ),
       `occurrence.random_effects` = list(
         re_region_country_adm1_intercept = TRUE,
-        re_adm2_intercept                = TRUE,
-        re_region_country_ttlo_slope     = TRUE,
-        re_region_country_ongoing_slope  = TRUE,
-        re_adm1_mean_precip_slope        = FALSE,
-        re_adm1_dev_precip_slope         = FALSE,
-        re_adm1_mean_temp_daymean_slope  = FALSE,
-        re_adm1_dev_temp_daymean_slope   = FALSE
+        re_adm2_intercept = TRUE,
+        re_region_country_ttlo_slope = TRUE,
+        re_region_country_ongoing_slope = TRUE,
+        re_adm1_mean_precip_slope = FALSE,
+        re_adm1_dev_precip_slope = FALSE,
+        re_adm1_mean_temp_daymean_slope = FALSE,
+        re_adm1_dev_temp_daymean_slope = FALSE
       ),
       `occurrence.dlnm` = list(
         enable = TRUE,
         defaults = list(
-          max_lag          = 11L,            # only used to validate the lag column exists
-          argvar           = .ARGVAR_BS_DF4,
+          max_lag = 11L, # only used to validate the lag column exists
+          argvar = .ARGVAR_BS_DF4,
           keep_linear_term = FALSE,
-          re_adm1_slope    = TRUE,
-          single_lag       = 1L              # placeholder; overwritten per grid row
+          re_adm1_slope = TRUE,
+          single_lag = 1L # placeholder; overwritten per grid row
         ),
         variables = list(enso = list())
       ),
       `occurrence.brms_cb` = list(
         basehaz_poisson = "seasonal",
-        sampling        = 1000L,
-        warmup          = 1000L,
-        chains          = 4L,
-        cores           = 4L,
-        init            = 0.2,
+        sampling = 1000L,
+        warmup = 1000L,
+        chains = 4L,
+        cores = 4L,
+        init = 0.2,
         re_uncorrelated = TRUE,
         threads_per_chain = 4L
       )
@@ -545,61 +567,61 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
+      seed = 1234L,
+      outdir = "generated_data/",
       enso = list(
         lag_months = 5L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       size = list(
-        backend         = "brms_cb",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1-ADM2",
-        offset_pop      = TRUE,
+        backend = "brms_cb",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1-ADM2",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
-        phi_re          = "region_country_adm1",
+        seasonal_term = "none",
+        phi_re = "region_country_adm1",
         covariates = list(
-          enso                      = FALSE,   # replaced by single-lag DLNM
+          enso = FALSE, # replaced by single-lag DLNM
           time_to_last_outbreak_cat = TRUE,
-          mean_precip               = FALSE,
-          dev_precip                = FALSE,
-          mean_temp_daymean         = FALSE,
-          dev_temp_daymean          = FALSE
+          mean_precip = FALSE,
+          dev_precip = FALSE,
+          mean_temp_daymean = FALSE,
+          dev_temp_daymean = FALSE
         ),
         random_effects = list(
           re_region_country_adm1_intercept = TRUE,
-          re_adm2_intercept                = TRUE,
-          re_region_country_ttlo_slope     = TRUE,
-          re_adm1_mean_precip_slope        = FALSE,
-          re_adm1_dev_precip_slope         = FALSE,
-          re_adm1_mean_temp_daymean_slope  = FALSE,
-          re_adm1_dev_temp_daymean_slope   = FALSE
+          re_adm2_intercept = TRUE,
+          re_region_country_ttlo_slope = TRUE,
+          re_adm1_mean_precip_slope = FALSE,
+          re_adm1_dev_precip_slope = FALSE,
+          re_adm1_mean_temp_daymean_slope = FALSE,
+          re_adm1_dev_temp_daymean_slope = FALSE
         ),
         dlnm = list(
           enable = TRUE,
           defaults = list(
-            max_lag          = 11L,
-            argvar           = .ARGVAR_BS_DF4,
+            max_lag = 11L,
+            argvar = .ARGVAR_BS_DF4,
             keep_linear_term = FALSE,
-            re_adm1_slope    = TRUE,
-            single_lag       = 1L            # placeholder; overwritten per grid row
+            re_adm1_slope = TRUE,
+            single_lag = 1L # placeholder; overwritten per grid row
           ),
           variables = list(enso = list())
         ),
         brms_cb = list(
-          prior_b         = "normal(0, 0.5)",
+          prior_b = "normal(0, 0.5)",
           prior_intercept = "normal(-3, 1)",
-          prior_sd        = "normal(0, 0.5)",
-          sampling        = 1000L,
-          warmup          = 1000L,
-          chains          = 4L,
-          cores           = 4L,
-          adapt_delta     = 0.95,
-          max_treedepth   = 12L,
-          init            = 0.1,
+          prior_sd = "normal(0, 0.5)",
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
+          max_treedepth = 12L,
+          init = 0.1,
           re_uncorrelated = TRUE,
           threads_per_chain = 2L
         )
@@ -625,64 +647,64 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
-        lag_months = 5L,        # unused by brms_cb single-lag
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        lag_months = 5L, # unused by brms_cb single-lag
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
-      `occurrence.backend`        = "brms_cb",
-      `occurrence.admin_level`    = "ADM1-ADM2",
+      `occurrence.backend` = "brms_cb",
+      `occurrence.admin_level` = "ADM1-ADM2",
       `occurrence.ongoing_outbreak_re` = TRUE,
       `occurrence.covariates` = list(
-        enso                        = FALSE,
-        time_to_last_outbreak_cat   = TRUE,
-        ongoing_outbreak_lag1       = TRUE,
+        enso = FALSE,
+        time_to_last_outbreak_cat = TRUE,
+        ongoing_outbreak_lag1 = TRUE,
         ongoing_outbreak_country_lag1 = TRUE,
-        ongoing_outbreak_tu_lag1    = TRUE,
-        mean_precip                 = FALSE,
-        dev_precip                  = FALSE,
-        mean_temp_daymean           = FALSE,
-        dev_temp_daymean            = FALSE
+        ongoing_outbreak_tu_lag1 = TRUE,
+        mean_precip = FALSE,
+        dev_precip = FALSE,
+        mean_temp_daymean = FALSE,
+        dev_temp_daymean = FALSE
       ),
       `occurrence.random_effects` = list(
-        re_region_country_adm1_intercept       = TRUE,
-        re_adm2_intercept                      = TRUE,
-        re_region_country_ttlo_slope           = TRUE,
-        re_region_country_ongoing_slope        = TRUE,
+        re_region_country_adm1_intercept = TRUE,
+        re_adm2_intercept = TRUE,
+        re_region_country_ttlo_slope = TRUE,
+        re_region_country_ongoing_slope = TRUE,
         re_region_country_ongoing_country_slope = TRUE,
-        re_region_country_ongoing_tu_slope     = TRUE,
-        re_adm1_mean_precip_slope              = FALSE,
-        re_adm1_dev_precip_slope               = FALSE,
-        re_adm1_mean_temp_daymean_slope        = FALSE,
-        re_adm1_dev_temp_daymean_slope         = FALSE,
-        re_adm1_enso_lag5_slope                = FALSE   # replaced by dlnm re_adm1_slope
+        re_region_country_ongoing_tu_slope = TRUE,
+        re_adm1_mean_precip_slope = FALSE,
+        re_adm1_dev_precip_slope = FALSE,
+        re_adm1_mean_temp_daymean_slope = FALSE,
+        re_adm1_dev_temp_daymean_slope = FALSE,
+        re_adm1_enso_lag5_slope = FALSE # replaced by dlnm re_adm1_slope
       ),
       `occurrence.dlnm` = list(
         enable = TRUE,
         defaults = list(
-          max_lag          = 11L,
-          argvar           = .ARGVAR_BS_DF4,
+          max_lag = 11L,
+          argvar = .ARGVAR_BS_DF4,
           keep_linear_term = FALSE,
-          re_adm1_slope    = TRUE,
-          single_lag       = 1L              # placeholder; overwritten per grid row
+          re_adm1_slope = TRUE,
+          single_lag = 1L # placeholder; overwritten per grid row
         ),
         variables = list(enso = list())
       ),
       `occurrence.brms` = list(
-        re_uncorrelated = TRUE          # controls regular (non-CB) slope RE separator
+        re_uncorrelated = TRUE # controls regular (non-CB) slope RE separator
       ),
       `occurrence.brms_cb` = list(
-        basehaz_poisson   = "seasonal",
-        sampling          = 100L,
-        warmup            = 100L,
-        chains            = 4L,
-        cores             = 4L,
-        init              = 0.2,
-        re_uncorrelated   = TRUE,
+        basehaz_poisson = "seasonal",
+        sampling = 100L,
+        warmup = 100L,
+        chains = 4L,
+        cores = 4L,
+        init = 0.2,
+        re_uncorrelated = TRUE,
         threads_per_chain = 4L
       )
     )
@@ -705,64 +727,64 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
         lag_months = 5L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       size = list(
-        backend         = "brms_cb",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1-ADM2",
-        offset_pop      = TRUE,
+        backend = "brms_cb",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1-ADM2",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
-        phi_re          = "region_country_adm1",
+        seasonal_term = "none",
+        phi_re = "region_country_adm1",
         covariates = list(
-          enso                      = FALSE,
+          enso = FALSE,
           time_to_last_outbreak_cat = TRUE,
-          mean_precip               = FALSE,
-          dev_precip                = FALSE,
-          mean_temp_daymean         = FALSE,
-          dev_temp_daymean          = FALSE
+          mean_precip = FALSE,
+          dev_precip = FALSE,
+          mean_temp_daymean = FALSE,
+          dev_temp_daymean = FALSE
         ),
         random_effects = list(
           re_region_country_adm1_intercept = TRUE,
-          re_adm2_intercept                = TRUE,
-          re_region_country_ttlo_slope     = TRUE,
-          re_adm1_mean_precip_slope        = FALSE,
-          re_adm1_dev_precip_slope         = FALSE,
-          re_adm1_mean_temp_daymean_slope  = FALSE,
-          re_adm1_dev_temp_daymean_slope   = FALSE,
-          re_adm1_enso_lag10_slope         = FALSE   # replaced by dlnm re_adm1_slope
+          re_adm2_intercept = TRUE,
+          re_region_country_ttlo_slope = TRUE,
+          re_adm1_mean_precip_slope = FALSE,
+          re_adm1_dev_precip_slope = FALSE,
+          re_adm1_mean_temp_daymean_slope = FALSE,
+          re_adm1_dev_temp_daymean_slope = FALSE,
+          re_adm1_enso_lag10_slope = FALSE # replaced by dlnm re_adm1_slope
         ),
         dlnm = list(
           enable = TRUE,
           defaults = list(
-            max_lag          = 11L,
-            argvar           = .ARGVAR_BS_DF4,
+            max_lag = 11L,
+            argvar = .ARGVAR_BS_DF4,
             keep_linear_term = FALSE,
-            re_adm1_slope    = TRUE,
-            single_lag       = 1L            # placeholder; overwritten per grid row
+            re_adm1_slope = TRUE,
+            single_lag = 1L # placeholder; overwritten per grid row
           ),
           variables = list(enso = list())
         ),
         brms_cb = list(
-          prior_b         = "normal(0, 0.5)",
+          prior_b = "normal(0, 0.5)",
           prior_intercept = "normal(-3, 1)",
-          prior_sd        = "normal(0, 0.5)",
-          sampling        = 1000L,
-          warmup          = 1000L,
-          chains          = 4L,
-          cores           = 4L,
-          adapt_delta     = 0.95,
-          max_treedepth   = 12L,
-          init            = 0.1,
+          prior_sd = "normal(0, 0.5)",
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
+          max_treedepth = 12L,
+          init = 0.1,
           re_uncorrelated = TRUE,
           threads_per_chain = 2L
         )
@@ -781,45 +803,45 @@ BATCH_REGISTRY <- list(
 
   occ_grouped_afro_subregion = list(
     description = "Occurrence: brms/seasonal per AFRO subregion (east/central/west), country/ADM1 nesting",
-    grouping    = "afro_subregion",
-    grid        = list(
-      `occurrence.backend` = "brms"   # placeholder single-value grid
+    grouping = "afro_subregion",
+    grid = list(
+      `occurrence.backend` = "brms" # placeholder single-value grid
     ),
-    overrides   = list(
-      `occurrence.backend`              = "brms",
+    overrides = list(
+      `occurrence.backend` = "brms",
       `occurrence.brms.basehaz_poisson` = "seasonal",
-      `occurrence.brms.sampling`        = 1000L,
-      `occurrence.brms.warmup`          = 1000L,
-      `occurrence.brms.chains`          = 4L,
-      `occurrence.brms.cores`           = 4L,
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       seed = 1234L
     )
   ),
 
   size_grouped_afro_subregion = list(
     description = "Size: brms NB-log per AFRO subregion (east/central/west), country/ADM1 nesting",
-    grouping    = "afro_subregion",
-    grid        = list(
-      `size.seasonal_term` = "none"   # placeholder single-value grid
+    grouping = "afro_subregion",
+    grid = list(
+      `size.seasonal_term` = "none" # placeholder single-value grid
     ),
-    overrides   = list(
-      seed    = 1234L,
+    overrides = list(
+      seed = 1234L,
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
+        seasonal_term = "none",
         brms = list(
-          sampling      = 1000L,
-          warmup        = 1000L,
-          chains        = 4L,
-          cores         = 4L,
-          adapt_delta   = 0.95,
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
           max_treedepth = 12L,
-          init          = 0.1
+          init = 0.1
         )
       )
     )
@@ -828,44 +850,44 @@ BATCH_REGISTRY <- list(
   # HMM cluster groupings (3 groups: hmmCE / hmmS / hmmW)
   occ_grouped_hmm_clusters = list(
     description = "Occurrence: brms/seasonal per HMM cluster (hmmCE/hmmS/hmmW), country/ADM1 nesting",
-    grouping    = "hmm_clusters",
-    grid        = list(
-      `occurrence.backend` = "brms"   # placeholder single-value grid
+    grouping = "hmm_clusters",
+    grid = list(
+      `occurrence.backend` = "brms" # placeholder single-value grid
     ),
-    overrides   = list(
+    overrides = list(
       `occurrence.brms.basehaz_poisson` = "seasonal",
-      `occurrence.brms.sampling`        = 1000L,
-      `occurrence.brms.warmup`          = 1000L,
-      `occurrence.brms.chains`          = 4L,
-      `occurrence.brms.cores`           = 4L,
+      `occurrence.brms.sampling` = 1000L,
+      `occurrence.brms.warmup` = 1000L,
+      `occurrence.brms.chains` = 4L,
+      `occurrence.brms.cores` = 4L,
       seed = 1234L
     )
   ),
 
   size_grouped_hmm_clusters = list(
     description = "Size: brms NB-log per HMM cluster (hmmCE/hmmS/hmmW), country/ADM1 nesting",
-    grouping    = "hmm_clusters",
-    grid        = list(
-      `size.seasonal_term` = "none"   # placeholder single-value grid
+    grouping = "hmm_clusters",
+    grid = list(
+      `size.seasonal_term` = "none" # placeholder single-value grid
     ),
-    overrides   = list(
-      seed    = 1234L,
+    overrides = list(
+      seed = 1234L,
       size = list(
-        backend         = "brms",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1",
-        offset_pop      = TRUE,
+        backend = "brms",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
+        seasonal_term = "none",
         brms = list(
-          sampling      = 1000L,
-          warmup        = 1000L,
-          chains        = 4L,
-          cores         = 4L,
-          adapt_delta   = 0.95,
+          sampling = 1000L,
+          warmup = 1000L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
           max_treedepth = 12L,
-          init          = 0.1
+          init = 0.1
         )
       )
     )
@@ -891,50 +913,50 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
-        lag_months = 5L,        # unused by brms_cb single-lag
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        lag_months = 5L, # unused by brms_cb single-lag
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
-      `occurrence.backend`             = "brms_cb",
-      `occurrence.admin_level`         = "ADM1-ADM2",
+      `occurrence.backend` = "brms_cb",
+      `occurrence.admin_level` = "ADM1-ADM2",
       `occurrence.ongoing_outbreak_re` = TRUE,
       `occurrence.covariates` = list(
-        enso                          = FALSE,   # replaced by single-lag DLNM
-        time_to_last_outbreak_cat     = TRUE,
-        ongoing_outbreak_lag1         = TRUE,
+        enso = FALSE, # replaced by single-lag DLNM
+        time_to_last_outbreak_cat = TRUE,
+        ongoing_outbreak_lag1 = TRUE,
         ongoing_outbreak_country_lag1 = TRUE,
-        ongoing_outbreak_tu_lag1      = TRUE,
-        mean_precip                   = FALSE,
-        dev_precip                    = FALSE,
-        mean_temp_daymean             = FALSE,
-        dev_temp_daymean              = FALSE
+        ongoing_outbreak_tu_lag1 = TRUE,
+        mean_precip = FALSE,
+        dev_precip = FALSE,
+        mean_temp_daymean = FALSE,
+        dev_temp_daymean = FALSE
       ),
       `occurrence.random_effects` = list(
-        re_region_country_adm1_intercept        = TRUE,
-        re_adm2_intercept                       = TRUE,
-        re_region_country_ttlo_slope            = TRUE,
-        re_region_country_ongoing_slope         = TRUE,
+        re_region_country_adm1_intercept = TRUE,
+        re_adm2_intercept = TRUE,
+        re_region_country_ttlo_slope = TRUE,
+        re_region_country_ongoing_slope = TRUE,
         re_region_country_ongoing_country_slope = TRUE,
-        re_region_country_ongoing_tu_slope      = TRUE,
-        re_adm1_mean_precip_slope               = FALSE,
-        re_adm1_dev_precip_slope                = FALSE,
-        re_adm1_mean_temp_daymean_slope         = FALSE,
-        re_adm1_dev_temp_daymean_slope          = FALSE,
-        re_adm1_enso_lag5_slope                 = FALSE   # replaced by dlnm re_adm1_slope
+        re_region_country_ongoing_tu_slope = TRUE,
+        re_adm1_mean_precip_slope = FALSE,
+        re_adm1_dev_precip_slope = FALSE,
+        re_adm1_mean_temp_daymean_slope = FALSE,
+        re_adm1_dev_temp_daymean_slope = FALSE,
+        re_adm1_enso_lag5_slope = FALSE # replaced by dlnm re_adm1_slope
       ),
       `occurrence.dlnm` = list(
         enable = TRUE,
         defaults = list(
-          max_lag          = 11L,
-          argvar           = .ARGVAR_BS_DF4,
+          max_lag = 11L,
+          argvar = .ARGVAR_BS_DF4,
           keep_linear_term = FALSE,
-          re_adm1_slope    = TRUE,
-          single_lag       = 1L          # placeholder; overwritten per grid row
+          re_adm1_slope = TRUE,
+          single_lag = 1L # placeholder; overwritten per grid row
         ),
         variables = list(enso = list())
       ),
@@ -942,21 +964,17 @@ BATCH_REGISTRY <- list(
         re_uncorrelated = TRUE
       ),
       `occurrence.brms_cb` = list(
-        basehaz_poisson   = "seasonal",
-        sampling          = 200L,
-        warmup            = 300L,
-        chains            = 4L,
-        cores             = 4L,
-        init              = 0.2,
-        re_uncorrelated   = TRUE,
+        basehaz_poisson = "seasonal",
+        sampling = 200L,
+        warmup = 300L,
+        chains = 4L,
+        cores = 4L,
+        init = 0.2,
+        re_uncorrelated = TRUE,
         threads_per_chain = 4L
       )
     )
   ),
-
-
-
-
 
   # --------------------------------------------------------------------------
   # mon_smoketest — smallest batch-registry-generated config exercising the
@@ -975,35 +993,34 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
         lag_months = 4L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       `grouping.enable` = TRUE,
       `grouping.source` = "enso_grouping",
-      `grouping.group`  = "enso_east",
+      `grouping.group` = "enso_east",
       monthly = list(
         backend = "brms_cb",
         brms_cb = list(
-          sampling        = 200L,
-          warmup          = 200L,
-          chains          = 2L,
-          cores           = 2L,
-          refresh         = NULL,
-          init            = "random",
+          sampling = 200L,
+          warmup = 200L,
+          chains = 2L,
+          cores = 2L,
+          refresh = NULL,
+          init = "random",
           re_uncorrelated = FALSE,
-          adapt_delta     = 0.95,
-          max_treedepth   = 12L
+          adapt_delta = 0.95,
+          max_treedepth = 12L
         )
       )
     )
   ),
-
 
   # --------------------------------------------------------------------------
   # mon_structure_compare — structural sensitivity sweep for the monthly
@@ -1024,57 +1041,58 @@ BATCH_REGISTRY <- list(
       "300 warmup / 300 sampling"
     ),
     grid = list(
-      `monthly.backend`                     = c("brms", "brms_cb"),
-      `monthly.phi_re`                      = c("constant", "region_country_adm1"),
-      `monthly.prev_cases`                  = c(FALSE, TRUE),
+      `monthly.backend` = c("brms", "brms_cb"),
+      `monthly.phi_re` = c("constant", "region_country_adm1"),
+      `monthly.prev_cases` = c(FALSE, TRUE),
       `monthly.dlnm.defaults.re_adm1_slope` = c(FALSE, TRUE)
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
         lag_months = 4L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       monthly = list(
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1-ADM2",
-        offset_pop      = TRUE,
-        seasonal_term   = "harmonic2",
-        covariates      = list(),
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1-ADM2",
+        offset_pop = TRUE,
+        seasonal_term = "harmonic2",
+        covariates = list(),
         random_effects = list(
           re_region_country_adm1_intercept = TRUE,
-          re_adm2_intercept                = TRUE
+          re_adm2_intercept = TRUE
         ),
         dlnm = list(
           enable = TRUE,
           defaults = list(
-            max_lag          = 3L,
-            argvar           = .ARGVAR_BS_DF4,
-            arglag           = list(fun = "ns", df = 3L),
+            max_lag = 3L,
+            argvar = .ARGVAR_BS_DF4,
+            arglag = list(fun = "ns", df = 3L),
             keep_linear_term = FALSE,
-            single_lag       = 0L
+            single_lag = 0L
           ),
           variables = list(
-            mso  = list(single_lag = 0L,
-                        argvar = .ARGVAR_BS_DF4),
-            enso = list(single_lag = 4L,
-                        argvar = list(fun = "bs", degree = 3L, df = 8L))
+            mso = list(single_lag = 0L, argvar = .ARGVAR_BS_DF4),
+            enso = list(
+              single_lag = 4L,
+              argvar = list(fun = "bs", degree = 3L, df = 8L)
+            )
           )
         ),
         brms = list(
-          sampling        = 300L,
-          warmup          = 300L,
-          chains          = 4L,
-          cores           = 4L,
-          adapt_delta     = 0.95,
-          max_treedepth   = 12L,
-          init            = 0.1
+          sampling = 300L,
+          warmup = 300L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
+          max_treedepth = 12L,
+          init = 0.1
         )
       )
     )
@@ -1092,71 +1110,70 @@ BATCH_REGISTRY <- list(
     ),
     overrides = list(
       country = "all",
-      seed    = 1234L,
-      outdir  = "generated_data/",
-      TL      = "1970-01-01",
-      TR      = "2024-12-31",
+      seed = 1234L,
+      outdir = "generated_data/",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
       enso = list(
         lag_months = 5L,
-        source     = "oni",
-        cache_dir  = "generated_data/"
+        source = "oni",
+        cache_dir = "generated_data/"
       ),
       size = list(
-        backend         = "brms_cb",
-        family          = "negbinomial",
-        link            = "log",
-        admin_level     = "ADM1-ADM2",
-        offset_pop      = TRUE,
+        backend = "brms_cb",
+        family = "negbinomial",
+        link = "log",
+        admin_level = "ADM1-ADM2",
+        offset_pop = TRUE,
         offset_meanrate = TRUE,
-        seasonal_term   = "none",
-        phi_re          = "region_country_adm1",
+        seasonal_term = "none",
+        phi_re = "region_country_adm1",
         covariates = list(
-          enso                      = FALSE,   # replaced by single-lag DLNM
+          enso = FALSE, # replaced by single-lag DLNM
           time_to_last_outbreak_cat = TRUE,
-          mean_precip               = FALSE,
-          dev_precip                = FALSE,
-          mean_temp_daymean         = FALSE,
-          dev_temp_daymean          = FALSE
+          mean_precip = FALSE,
+          dev_precip = FALSE,
+          mean_temp_daymean = FALSE,
+          dev_temp_daymean = FALSE
         ),
         random_effects = list(
           re_region_country_adm1_intercept = TRUE,
-          re_adm2_intercept                = TRUE,
-          re_region_country_ttlo_slope     = TRUE,
-          re_adm1_mean_precip_slope        = FALSE,
-          re_adm1_dev_precip_slope         = FALSE,
-          re_adm1_mean_temp_daymean_slope  = FALSE,
-          re_adm1_dev_temp_daymean_slope   = FALSE,
-          re_adm1_enso_lag10_slope         = FALSE   # replaced by dlnm re_adm1_slope
+          re_adm2_intercept = TRUE,
+          re_region_country_ttlo_slope = TRUE,
+          re_adm1_mean_precip_slope = FALSE,
+          re_adm1_dev_precip_slope = FALSE,
+          re_adm1_mean_temp_daymean_slope = FALSE,
+          re_adm1_dev_temp_daymean_slope = FALSE,
+          re_adm1_enso_lag10_slope = FALSE # replaced by dlnm re_adm1_slope
         ),
         dlnm = list(
           enable = TRUE,
           defaults = list(
-            max_lag          = 11L,
-            argvar           = .ARGVAR_BS_DF4,
+            max_lag = 11L,
+            argvar = .ARGVAR_BS_DF4,
             keep_linear_term = FALSE,
-            re_adm1_slope    = TRUE,
-            single_lag       = 1L          # placeholder; overwritten per grid row
+            re_adm1_slope = TRUE,
+            single_lag = 1L # placeholder; overwritten per grid row
           ),
           variables = list(enso = list())
         ),
         brms_cb = list(
-          prior_b           = "normal(0, 0.5)",
-          prior_intercept   = "normal(-3, 1)",
-          prior_sd          = "normal(0, 0.5)",
-          sampling          = 200L,
-          warmup            = 300L,
-          chains            = 4L,
-          cores             = 4L,
-          adapt_delta       = 0.95,
-          max_treedepth     = 12L,
-          init              = 0.1,
-          re_uncorrelated   = TRUE,
+          prior_b = "normal(0, 0.5)",
+          prior_intercept = "normal(-3, 1)",
+          prior_sd = "normal(0, 0.5)",
+          sampling = 200L,
+          warmup = 300L,
+          chains = 4L,
+          cores = 4L,
+          adapt_delta = 0.95,
+          max_treedepth = 12L,
+          init = 0.1,
+          re_uncorrelated = TRUE,
           threads_per_chain = 2L
         )
       )
     )
   )
-
 )
 
 
@@ -1177,10 +1194,15 @@ BATCH_REGISTRY <- list(
 #' one tier or none keeps `prior_sd`.
 .drop_superseded_prior_sd <- function(model_block) {
   be <- model_block[["backend"]]
-  if (is.null(be) || !is.list(model_block[[be]])) return(model_block)
+  if (is.null(be) || !is.list(model_block[[be]])) {
+    return(model_block)
+  }
   blk <- model_block[[be]]
-  if (!is.null(blk[["prior_sd_region_country"]]) && !is.null(blk[["prior_sd_adm1"]]) &&
-      "prior_sd" %in% names(blk)) {
+  if (
+    !is.null(blk[["prior_sd_region_country"]]) &&
+      !is.null(blk[["prior_sd_adm1"]]) &&
+      "prior_sd" %in% names(blk)
+  ) {
     blk[["prior_sd"]] <- NULL
     model_block[[be]] <- blk
   }
@@ -1189,177 +1211,726 @@ BATCH_REGISTRY <- list(
 
 #' Per-row transform of the class sweep: sets the leaves of the row's cell
 #' (basis x K, from `cells`) and removes the synthetic kl_sweep.* grid keys.
-.prod_run_kl_cell_row <- function(cells) function(cfg) {
-  key  <- paste0(cfg$kl_sweep$basis, "_K", cfg$kl_sweep$K)
-  cell <- cells[[key]]
-  if (is.null(cell)) stop("prod_run_kl_sweep_classes: unknown sweep cell ", key, call. = FALSE)
-  cfg$kl_sweep <- NULL
-  for (d in cell) {
-    if (isTRUE(d$remove)) cfg[[d$path]] <- NULL else cfg[[d$path]] <- d$value
+.prod_run_kl_cell_row <- function(cells) {
+  function(cfg) {
+    key <- paste0(cfg$kl_sweep$basis, "_K", cfg$kl_sweep$K)
+    cell <- cells[[key]]
+    if (is.null(cell)) {
+      stop("prod_run_kl_sweep_classes: unknown sweep cell ", key, call. = FALSE)
+    }
+    cfg$kl_sweep <- NULL
+    for (d in cell) {
+      if (isTRUE(d$remove)) cfg[[d$path]] <- NULL else cfg[[d$path]] <- d$value
+    }
+    cfg
   }
-  cfg
 }
 
-BATCH_REGISTRY$prod_run_occ_grouped_enso_singlelag <- list(description = "Occurrence (onset hazard): Poisson GLMM per unit-month at risk, seasonal cyclic spline, ENSO crossbasis (ONI at one group lag, ns df 4) with country and country:ADM1 slopes, recorded contagion and outbreak history; ONI lags -11..11 x the fit groups.", 
-    grouping = "enso_grouping_prod_run", grid = list(occurrence.dlnm.defaults.single_lag = -11:11), 
-    overrides = list(country = "all", seed = 1234L, outdir = "generated_data/", TL = "1970-01-01", 
-        TR = "2024-12-31", enso = list(source = "oni", cache_dir = "generated_data/"), occurrence.backend = "brms_cb", 
-        occurrence.admin_level = "ADM1-ADM2", occurrence.ongoing_outbreak_re = TRUE, occurrence.covariates = list(
-            enso = FALSE, time_to_last_outbreak_cat = TRUE, ongoing_outbreak_lag1 = TRUE, ongoing_outbreak_country_lag1 = FALSE, 
-            ongoing_outbreak_tu_lag1 = FALSE, mean_precip = FALSE, dev_precip = FALSE, mean_temp_daymean = FALSE, 
-            dev_temp_daymean = FALSE, nbr_contagion_lag1 = TRUE), occurrence.random_effects = list(
-            re_region_country_adm1_intercept = TRUE, re_adm2_intercept = TRUE, re_region_country_ttlo_slope = TRUE, 
-            re_region_country_ongoing_slope = TRUE, re_region_country_ongoing_country_slope = FALSE, 
-            re_region_country_ongoing_tu_slope = FALSE, re_adm1_mean_precip_slope = FALSE, 
-            re_adm1_dev_precip_slope = FALSE, re_adm1_mean_temp_daymean_slope = FALSE, re_adm1_dev_temp_daymean_slope = FALSE, 
-            re_region_country_nbr_contagion_slope = TRUE, re_adm1_nbr_contagion_slope = TRUE), 
-        occurrence.dlnm = list(enable = TRUE, defaults = list(max_lag = 11L, argvar = list(
-            fun = "ns", df = 4L), keep_linear_term = FALSE, re_adm1_slope = TRUE, single_lag = 1L), 
-            variables = list(enso = list())), occurrence.brms = list(re_uncorrelated = TRUE), 
-        occurrence.brms_cb = list(basehaz_poisson = "seasonal", sampling = 1000L, warmup = 350L, 
-            chains = 4L, cores = 4L, init = 0.2, re_uncorrelated = TRUE, threads_per_chain = 4L, 
-            prior_sd_region_country = "normal(0, 0.35)", prior_sd_adm1 = "normal(0, 0.35)", 
-            prior_sds = "normal(0, 0.35)"), contagion = list(rho_km = 500L, scale = "rownorm", 
-            partition = "registry", partition_source = "hmm_clusters"), episodes = list(key = "gid_season", 
-            national_zero_fill = TRUE, national_zero_threshold = 60L, national_zero_rule = "r3", 
-            at_risk_start = "after_episode", adm1_overlap = "censor_orphan"), occurrence.canonical_admin_level = TRUE, 
-        population = list(gid_pop_path = "generated_data/gid_population_2015-2030.qs")), drop_superseded_prior_sd = TRUE)
+BATCH_REGISTRY$prod_run_occ_grouped_enso_singlelag <- list(
+  description = "Occurrence (onset hazard): Poisson GLMM per unit-month at risk, seasonal cyclic spline, ENSO crossbasis (ONI at one group lag, ns df 4) with country and country:ADM1 slopes, recorded contagion and outbreak history; ONI lags -11..11 x the fit groups.",
+  grouping = "enso_grouping_prod_run",
+  grid = list(occurrence.dlnm.defaults.single_lag = -11:11),
+  overrides = list(
+    country = "all",
+    seed = 1234L,
+    outdir = "generated_data/",
+    TL = "1970-01-01",
+    TR = "2024-12-31",
+    enso = list(source = "oni", cache_dir = "generated_data/"),
+    occurrence.backend = "brms_cb",
+    occurrence.admin_level = "ADM1-ADM2",
+    occurrence.ongoing_outbreak_re = TRUE,
+    occurrence.covariates = list(
+      enso = FALSE,
+      time_to_last_outbreak_cat = TRUE,
+      ongoing_outbreak_lag1 = TRUE,
+      ongoing_outbreak_country_lag1 = FALSE,
+      ongoing_outbreak_tu_lag1 = FALSE,
+      mean_precip = FALSE,
+      dev_precip = FALSE,
+      mean_temp_daymean = FALSE,
+      dev_temp_daymean = FALSE,
+      nbr_contagion_lag1 = TRUE
+    ),
+    occurrence.random_effects = list(
+      re_region_country_adm1_intercept = TRUE,
+      re_adm2_intercept = TRUE,
+      re_region_country_ttlo_slope = TRUE,
+      re_region_country_ongoing_slope = TRUE,
+      re_region_country_ongoing_country_slope = FALSE,
+      re_region_country_ongoing_tu_slope = FALSE,
+      re_adm1_mean_precip_slope = FALSE,
+      re_adm1_dev_precip_slope = FALSE,
+      re_adm1_mean_temp_daymean_slope = FALSE,
+      re_adm1_dev_temp_daymean_slope = FALSE,
+      re_region_country_nbr_contagion_slope = TRUE,
+      re_adm1_nbr_contagion_slope = TRUE
+    ),
+    occurrence.dlnm = list(
+      enable = TRUE,
+      defaults = list(
+        max_lag = 11L,
+        argvar = list(
+          fun = "ns",
+          df = 4L
+        ),
+        keep_linear_term = FALSE,
+        re_adm1_slope = TRUE,
+        single_lag = 1L
+      ),
+      variables = list(enso = list())
+    ),
+    occurrence.brms = list(re_uncorrelated = TRUE),
+    occurrence.brms_cb = list(
+      basehaz_poisson = "seasonal",
+      sampling = 1000L,
+      warmup = 350L,
+      chains = 4L,
+      cores = 4L,
+      init = 0.2,
+      re_uncorrelated = TRUE,
+      threads_per_chain = 4L,
+      prior_sd_region_country = "normal(0, 0.35)",
+      prior_sd_adm1 = "normal(0, 0.35)",
+      prior_sds = "normal(0, 0.35)"
+    ),
+    contagion = list(
+      rho_km = 500L,
+      scale = "rownorm",
+      partition = "registry",
+      partition_source = "hmm_clusters"
+    ),
+    episodes = list(
+      key = "gid_season",
+      national_zero_fill = TRUE,
+      national_zero_threshold = 60L,
+      national_zero_rule = "r3",
+      at_risk_start = "after_episode",
+      adm1_overlap = "censor_orphan"
+    ),
+    occurrence.canonical_admin_level = TRUE,
+    population = list(
+      gid_pop_path = "generated_data/gid_population_2015-2030.qs"
+    )
+  ),
+  drop_superseded_prior_sd = TRUE
+)
 
-BATCH_REGISTRY$prod_run_dur_grouped_enso_singlelag <- list(description = "Duration (cessation hazard): Poisson GLMM per active episode-month, months-since-onset bands (prior normal(0, 1.5)) and harmonic2 cessation seasonality, ENSO crossbasis with country and country:ADM1 slopes; ONI lags -11..11 x the fit groups.", 
-    grouping = "enso_grouping_prod_run", grid = list(duration.dlnm.defaults.single_lag = -11:11), 
-    overrides = list(country = "all", seed = 1234L, outdir = "generated_data/", TL = "1970-01-01", 
-        TR = "2024-12-31", enso = list(source = "oni", cache_dir = "generated_data/"), duration.backend = "brms_cb", 
-        duration.admin_level = "ADM1-ADM2", duration.basehaz_duration = "factor", duration.basehaz_poisson = "none", 
-        duration.ttlo_reset = "onset", duration.covariates = list(enso = FALSE), duration.random_effects = list(
-            re_region_country_adm1_intercept = TRUE, re_adm1_mean_precip_slope = FALSE, re_adm1_dev_precip_slope = FALSE, 
-            re_adm1_mean_temp_daymean_slope = FALSE, re_adm1_dev_temp_daymean_slope = FALSE, 
-            re_adm2_intercept = TRUE, re_adm2_leaf_scope = "adm2_only"), duration.dlnm = list(
-            enable = TRUE, defaults = list(argvar = list(fun = "ns", df = 4L), keep_linear_term = FALSE, 
-                re_adm1_slope = TRUE, single_lag = 1L), variables = list(enso = list())), duration.brms_cb = list(
-            sampling = 1000L, warmup = 350L, chains = 4L, cores = 4L, refresh = NULL, init = "random", 
-            re_uncorrelated = TRUE, adapt_delta = 0.95, max_treedepth = 12L, threads_per_chain = 4L, 
-            prior_sd_region_country = "normal(0, 0.35)", prior_sd_adm1 = "normal(0, 0.35)", 
-            prior_mso_band = "normal(0, 1.5)"), episodes = list(key = "gid_season"), duration.canonical_admin_level = TRUE, 
-        population = list(gid_pop_path = "generated_data/gid_population_2015-2030.qs"), duration.seasonal_term = "harmonic2"), 
-    drop_superseded_prior_sd = TRUE)
+BATCH_REGISTRY$prod_run_dur_grouped_enso_singlelag <- list(
+  description = "Duration (cessation hazard): Poisson GLMM per active episode-month, months-since-onset bands (prior normal(0, 1.5)) and harmonic2 cessation seasonality, ENSO crossbasis with country and country:ADM1 slopes; ONI lags -11..11 x the fit groups.",
+  grouping = "enso_grouping_prod_run",
+  grid = list(duration.dlnm.defaults.single_lag = -11:11),
+  overrides = list(
+    country = "all",
+    seed = 1234L,
+    outdir = "generated_data/",
+    TL = "1970-01-01",
+    TR = "2024-12-31",
+    enso = list(source = "oni", cache_dir = "generated_data/"),
+    duration.backend = "brms_cb",
+    duration.admin_level = "ADM1-ADM2",
+    duration.basehaz_duration = "factor",
+    duration.basehaz_poisson = "none",
+    duration.ttlo_reset = "onset",
+    duration.covariates = list(enso = FALSE),
+    duration.random_effects = list(
+      re_region_country_adm1_intercept = TRUE,
+      re_adm1_mean_precip_slope = FALSE,
+      re_adm1_dev_precip_slope = FALSE,
+      re_adm1_mean_temp_daymean_slope = FALSE,
+      re_adm1_dev_temp_daymean_slope = FALSE,
+      re_adm2_intercept = TRUE,
+      re_adm2_leaf_scope = "adm2_only"
+    ),
+    duration.dlnm = list(
+      enable = TRUE,
+      defaults = list(
+        argvar = list(fun = "ns", df = 4L),
+        keep_linear_term = FALSE,
+        re_adm1_slope = TRUE,
+        single_lag = 1L
+      ),
+      variables = list(enso = list())
+    ),
+    duration.brms_cb = list(
+      sampling = 1000L,
+      warmup = 350L,
+      chains = 4L,
+      cores = 4L,
+      refresh = NULL,
+      init = "random",
+      re_uncorrelated = TRUE,
+      adapt_delta = 0.95,
+      max_treedepth = 12L,
+      threads_per_chain = 4L,
+      prior_sd_region_country = "normal(0, 0.35)",
+      prior_sd_adm1 = "normal(0, 0.35)",
+      prior_mso_band = "normal(0, 1.5)"
+    ),
+    episodes = list(key = "gid_season"),
+    duration.canonical_admin_level = TRUE,
+    population = list(
+      gid_pop_path = "generated_data/gid_population_2015-2030.qs"
+    ),
+    duration.seasonal_term = "harmonic2"
+  ),
+  drop_superseded_prior_sd = TRUE
+)
 
-BATCH_REGISTRY$prod_run_mon_grouped_enso_singlelag <- list(description = "Monthly case counts: negative-binomial GLMM per active episode-month, population offset and elasticity, harmonic2 seasonality, months-since-onset spline, ENSO crossbasis with country and country:ADM1 slopes; ONI lags -11..11 x the fit groups.", 
-    grouping = "enso_grouping_prod_run", grid = list(monthly.dlnm.defaults.single_lag = -11:11), 
-    overrides = list(country = "all", seed = 1234L, outdir = "generated_data/", TL = "1970-01-01", 
-        TR = "2024-12-31", enso = list(source = "oni", cache_dir = "generated_data/"), monthly = list(
-            backend = "brms_cb", family = "negbinomial", link = "log", admin_level = "ADM1-ADM2", 
-            offset_pop = TRUE, seasonal_term = "harmonic2", phi_re = "region_country_adm1", 
-            prev_cases = FALSE, covariates = list(), random_effects = list(re_region_country_adm1_intercept = TRUE, 
-                re_adm2_intercept = TRUE, re_adm2_leaf_scope = "adm2_only"), dlnm = list(enable = TRUE, 
-                defaults = list(max_lag = 11L, argvar = list(fun = "ns", df = 4L), keep_linear_term = FALSE, 
-                  re_adm1_slope = TRUE, single_lag = 1L), variables = list(mso = list(single_lag = 0L, 
-                  argvar = list(fun = "bs", degree = 3L, df = 4L), re_adm1_slope = TRUE, re_slope_levels = c("region", 
-                  "country")), enso = list())), brms_cb = list(sampling = 1000L, warmup = 350L, 
-                chains = 4L, cores = 4L, refresh = NULL, init = "random", re_uncorrelated = TRUE, 
-                adapt_delta = 0.95, max_treedepth = 12L, threads_per_chain = 4L, prior_sd_region_country = "normal(0, 0.35)", 
-                prior_sd_adm1 = "normal(0, 0.35)"), estimand = list(denominator = "gid", rate_denominator = "gid", 
-                underreporting_multiplier = 1), pop_elasticity = "free", canonical_admin_level = TRUE), 
-        population = list(gid_pop_path = "generated_data/gid_population_2015-2030.qs"), episodes = list(
-            key = "gid_season")), drop_superseded_prior_sd = TRUE)
+BATCH_REGISTRY$prod_run_mon_grouped_enso_singlelag <- list(
+  description = "Monthly case counts: negative-binomial GLMM per active episode-month, population offset and elasticity, harmonic2 seasonality, months-since-onset spline, ENSO crossbasis with country and country:ADM1 slopes; ONI lags -11..11 x the fit groups.",
+  grouping = "enso_grouping_prod_run",
+  grid = list(monthly.dlnm.defaults.single_lag = -11:11),
+  overrides = list(
+    country = "all",
+    seed = 1234L,
+    outdir = "generated_data/",
+    TL = "1970-01-01",
+    TR = "2024-12-31",
+    enso = list(source = "oni", cache_dir = "generated_data/"),
+    monthly = list(
+      backend = "brms_cb",
+      family = "negbinomial",
+      link = "log",
+      admin_level = "ADM1-ADM2",
+      offset_pop = TRUE,
+      seasonal_term = "harmonic2",
+      phi_re = "region_country_adm1",
+      prev_cases = FALSE,
+      covariates = list(),
+      random_effects = list(
+        re_region_country_adm1_intercept = TRUE,
+        re_adm2_intercept = TRUE,
+        re_adm2_leaf_scope = "adm2_only"
+      ),
+      dlnm = list(
+        enable = TRUE,
+        defaults = list(
+          max_lag = 11L,
+          argvar = list(fun = "ns", df = 4L),
+          keep_linear_term = FALSE,
+          re_adm1_slope = TRUE,
+          single_lag = 1L
+        ),
+        variables = list(
+          mso = list(
+            single_lag = 0L,
+            argvar = list(fun = "bs", degree = 3L, df = 4L),
+            re_adm1_slope = TRUE,
+            re_slope_levels = c("region", "country")
+          ),
+          enso = list()
+        )
+      ),
+      brms_cb = list(
+        sampling = 1000L,
+        warmup = 350L,
+        chains = 4L,
+        cores = 4L,
+        refresh = NULL,
+        init = "random",
+        re_uncorrelated = TRUE,
+        adapt_delta = 0.95,
+        max_treedepth = 12L,
+        threads_per_chain = 4L,
+        prior_sd_region_country = "normal(0, 0.35)",
+        prior_sd_adm1 = "normal(0, 0.35)"
+      ),
+      estimand = list(
+        denominator = "gid",
+        rate_denominator = "gid",
+        underreporting_multiplier = 1
+      ),
+      pop_elasticity = "free",
+      canonical_admin_level = TRUE
+    ),
+    population = list(
+      gid_pop_path = "generated_data/gid_population_2015-2030.qs"
+    ),
+    episodes = list(
+      key = "gid_season"
+    )
+  ),
+  drop_superseded_prior_sd = TRUE
+)
 
-.PROD_RUN_KL_CELLS <- list(ns4_K2 = list(list(path = "outdir", value = "generated_data/prod_run_kl_sweep_classes/", 
-    remove = FALSE), list(path = c("occurrence", "dlnm", "defaults", "argvar", "df"), value = 4L, 
-    remove = FALSE), list(path = c("occurrence", "kernel", "classes"), value = 2L, remove = FALSE), 
-    list(path = c("occurrence", "kernel", "prior_grouping", "source"), value = "enso_grouping_k2", 
-        remove = FALSE), list(path = c("occurrence", "kernel", "seeds"), value = list(iso3 = list(
-        enso_east = list("TZA", "UGA", "BDI"), enso_west = list("NER", "LBR", "TGO"))), remove = FALSE), 
-    list(path = c("occurrence", "kernel", "init_mu"), value = list(enso_east = 0L, enso_west = -6L), 
-        remove = FALSE)), ns4_K3 = list(list(path = "outdir", value = "generated_data/prod_run_kl_sweep_classes/", 
-    remove = FALSE), list(path = c("occurrence", "dlnm", "defaults", "argvar", "df"), value = 4L, 
-    remove = FALSE), list(path = c("occurrence", "kernel", "classes"), value = 3L, remove = FALSE), 
-    list(path = c("occurrence", "kernel", "prior_grouping", "source"), value = "enso_grouping_k3", 
-        remove = FALSE), list(path = c("occurrence", "kernel", "seeds"), value = list(iso3 = list(
-        enso_east = list("TZA", "UGA", "BDI"), enso_south = list("MWI", "ZWE", "ZMB"), enso_west = list(
-            "NER", "LBR", "TGO"))), remove = FALSE), list(path = c("occurrence", "kernel", 
-    "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, enso_west = -6L), remove = FALSE)), 
-    ns4_K4 = list(list(path = "outdir", value = "generated_data/prod_run_kl_sweep_classes/", 
-        remove = FALSE), list(path = c("occurrence", "dlnm", "defaults", "argvar", "df"), value = 4L, 
-        remove = FALSE), list(path = c("occurrence", "kernel", "classes"), value = 4L, remove = FALSE), 
-        list(path = c("occurrence", "kernel", "prior_grouping", "source"), value = "enso_grouping_k4", 
-            remove = FALSE), list(path = c("occurrence", "kernel", "seeds"), value = list(iso3 = list(
-            enso_east = list("TZA", "UGA", "BDI"), enso_south = list("MWI", "ZWE", "ZMB"), 
-            enso_west = list("NER", "LBR", "TGO"), enso_horn = list("ETH", "SDN"))), remove = FALSE), 
-        list(path = c("occurrence", "kernel", "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, 
-            enso_west = -6L, enso_horn = 9.5), remove = FALSE)), ns4_K5 = list(list(path = "outdir", 
-        value = "generated_data/prod_run_kl_sweep_classes/", remove = FALSE), list(path = c("occurrence", 
-    "dlnm", "defaults", "argvar", "df"), value = 4L, remove = FALSE), list(path = c("occurrence", 
-    "kernel", "classes"), value = 5L, remove = FALSE), list(path = c("occurrence", "kernel", 
-    "prior_grouping", "source"), value = "enso_grouping_nga", remove = FALSE), list(path = c("occurrence", 
-    "kernel", "seeds"), value = list(iso3 = list(enso_east = list("TZA", "UGA", "BDI"), enso_south = list(
-        "MWI", "ZWE", "ZMB"), enso_west = list("NER", "LBR", "TGO"), enso_nga = list("NGA"), 
-        enso_horn = list("ETH", "SDN"))), remove = FALSE), list(path = c("occurrence", "kernel", 
-    "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, enso_west = -6L, enso_nga = 10L, 
-        enso_horn = 9.5), remove = FALSE)), ns5_K2 = list(list(path = "outdir", value = "generated_data/prod_run_kl_sweep_classes/", 
-        remove = FALSE), list(path = c("occurrence", "dlnm", "defaults", "argvar", "df"), value = 5L, 
-        remove = FALSE), list(path = c("occurrence", "kernel", "classes"), value = 2L, remove = FALSE), 
-        list(path = c("occurrence", "kernel", "prior_grouping", "source"), value = "enso_grouping_k2", 
-            remove = FALSE), list(path = c("occurrence", "kernel", "seeds"), value = list(iso3 = list(
-            enso_east = list("TZA", "UGA", "BDI"), enso_west = list("NER", "LBR", "TGO"))), 
-            remove = FALSE), list(path = c("occurrence", "kernel", "init_mu"), value = list(
-            enso_east = 0L, enso_west = -6L), remove = FALSE)), ns5_K3 = list(list(path = "outdir", 
-        value = "generated_data/prod_run_kl_sweep_classes/", remove = FALSE), list(path = c("occurrence", 
-    "dlnm", "defaults", "argvar", "df"), value = 5L, remove = FALSE), list(path = c("occurrence", 
-    "kernel", "classes"), value = 3L, remove = FALSE), list(path = c("occurrence", "kernel", 
-    "prior_grouping", "source"), value = "enso_grouping_k3", remove = FALSE), list(path = c("occurrence", 
-    "kernel", "seeds"), value = list(iso3 = list(enso_east = list("TZA", "UGA", "BDI"), enso_south = list(
-        "MWI", "ZWE", "ZMB"), enso_west = list("NER", "LBR", "TGO"))), remove = FALSE), list(
-        path = c("occurrence", "kernel", "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, 
-            enso_west = -6L), remove = FALSE)), ns5_K4 = list(list(path = "outdir", value = "generated_data/prod_run_kl_sweep_classes/", 
-        remove = FALSE), list(path = c("occurrence", "dlnm", "defaults", "argvar", "df"), value = 5L, 
-        remove = FALSE), list(path = c("occurrence", "kernel", "classes"), value = 4L, remove = FALSE), 
-        list(path = c("occurrence", "kernel", "prior_grouping", "source"), value = "enso_grouping_k4", 
-            remove = FALSE), list(path = c("occurrence", "kernel", "seeds"), value = list(iso3 = list(
-            enso_east = list("TZA", "UGA", "BDI"), enso_south = list("MWI", "ZWE", "ZMB"), 
-            enso_west = list("NER", "LBR", "TGO"), enso_horn = list("ETH", "SDN"))), remove = FALSE), 
-        list(path = c("occurrence", "kernel", "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, 
-            enso_west = -6L, enso_horn = 9.5), remove = FALSE)), ns5_K5 = list(list(path = "outdir", 
-        value = "generated_data/prod_run_kl_sweep_classes/", remove = FALSE), list(path = c("occurrence", 
-    "dlnm", "defaults", "argvar", "df"), value = 5L, remove = FALSE), list(path = c("occurrence", 
-    "kernel", "classes"), value = 5L, remove = FALSE), list(path = c("occurrence", "kernel", 
-    "prior_grouping", "source"), value = "enso_grouping_nga", remove = FALSE), list(path = c("occurrence", 
-    "kernel", "seeds"), value = list(iso3 = list(enso_east = list("TZA", "UGA", "BDI"), enso_south = list(
-        "MWI", "ZWE", "ZMB"), enso_west = list("NER", "LBR", "TGO"), enso_nga = list("NGA"), 
-        enso_horn = list("ETH", "SDN"))), remove = FALSE), list(path = c("occurrence", "kernel", 
-    "init_mu"), value = list(enso_east = 0L, enso_south = 4.3, enso_west = -6L, enso_nga = 10L, 
-        enso_horn = 9.5), remove = FALSE)))
+.PROD_RUN_KL_CELLS <- list(
+  ns4_K2 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 2L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k2",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_west = list("NER", "LBR", "TGO")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(enso_east = 0L, enso_west = -6L),
+      remove = FALSE
+    )
+  ),
+  ns4_K3 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 3L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k3",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list("MWI", "ZWE", "ZMB"),
+          enso_west = list(
+            "NER",
+            "LBR",
+            "TGO"
+          )
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(enso_east = 0L, enso_south = 4.3, enso_west = -6L),
+      remove = FALSE
+    )
+  ),
+  ns4_K4 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k4",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list("MWI", "ZWE", "ZMB"),
+          enso_west = list("NER", "LBR", "TGO"),
+          enso_horn = list("ETH", "SDN")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(
+        enso_east = 0L,
+        enso_south = 4.3,
+        enso_west = -6L,
+        enso_horn = 9.5
+      ),
+      remove = FALSE
+    )
+  ),
+  ns4_K5 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_nga",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list(
+            "MWI",
+            "ZWE",
+            "ZMB"
+          ),
+          enso_west = list("NER", "LBR", "TGO"),
+          enso_nga = list("NGA"),
+          enso_horn = list("ETH", "SDN")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(
+        enso_east = 0L,
+        enso_south = 4.3,
+        enso_west = -6L,
+        enso_nga = 10L,
+        enso_horn = 9.5
+      ),
+      remove = FALSE
+    )
+  ),
+  ns5_K2 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 2L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k2",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_west = list("NER", "LBR", "TGO")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(
+        enso_east = 0L,
+        enso_west = -6L
+      ),
+      remove = FALSE
+    )
+  ),
+  ns5_K3 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 3L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k3",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list(
+            "MWI",
+            "ZWE",
+            "ZMB"
+          ),
+          enso_west = list("NER", "LBR", "TGO")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(enso_east = 0L, enso_south = 4.3, enso_west = -6L),
+      remove = FALSE
+    )
+  ),
+  ns5_K4 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 4L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_k4",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list("MWI", "ZWE", "ZMB"),
+          enso_west = list("NER", "LBR", "TGO"),
+          enso_horn = list("ETH", "SDN")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(
+        enso_east = 0L,
+        enso_south = 4.3,
+        enso_west = -6L,
+        enso_horn = 9.5
+      ),
+      remove = FALSE
+    )
+  ),
+  ns5_K5 = list(
+    list(
+      path = "outdir",
+      value = "generated_data/prod_run_kl_sweep_classes/",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "dlnm", "defaults", "argvar", "df"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "classes"),
+      value = 5L,
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "prior_grouping", "source"),
+      value = "enso_grouping_nga",
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "seeds"),
+      value = list(
+        iso3 = list(
+          enso_east = list("TZA", "UGA", "BDI"),
+          enso_south = list(
+            "MWI",
+            "ZWE",
+            "ZMB"
+          ),
+          enso_west = list("NER", "LBR", "TGO"),
+          enso_nga = list("NGA"),
+          enso_horn = list("ETH", "SDN")
+        )
+      ),
+      remove = FALSE
+    ),
+    list(
+      path = c("occurrence", "kernel", "init_mu"),
+      value = list(
+        enso_east = 0L,
+        enso_south = 4.3,
+        enso_west = -6L,
+        enso_nga = 10L,
+        enso_horn = 9.5
+      ),
+      remove = FALSE
+    )
+  )
+)
 
-BATCH_REGISTRY$prod_run_kl_sweep_classes <- c(list(description = "brms_kl latent-class sweep that derives the fit grouping: K 2-5 x ENSO basis {ns df 4, 5}, Gaussian lag kernel seeded by core countries, ADM1 ENSO slopes, 400 warm-up + 300 sampling.", 
-    grid = list(kl_sweep.basis = c("ns4", "ns5"), kl_sweep.K = 2:5), overrides = list(baseline = "1990_2019", 
-        country = "all", TL = "1970-01-01", TR = "2024-12-31", seed = 1234L, contagion = list(
-            rho_km = 500L, scale = "rownorm", partition = "registry", partition_source = "hmm_clusters"), 
-        enso = list(lag_months = 5L, source = "oni", cache_dir = "generated_data/"), population = list(
-            gid_pop_path = "generated_data/gid_population_2015-2030.qs"), episodes = list(key = "gid_season", 
-            national_zero_fill = TRUE, national_zero_threshold = 60L, national_zero_rule = "r3", 
-            at_risk_start = "after_episode", adm1_overlap = "censor_orphan"), occurrence.backend = "brms_kl", 
-        occurrence.admin_level = "ADM1-ADM2", occurrence.ongoing_outbreak_re = TRUE, occurrence.offset_baserate = TRUE, 
-        occurrence.canonical_admin_level = TRUE, occurrence.covariates = list(enso = FALSE, 
-            time_to_last_outbreak_cat = TRUE, ongoing_outbreak_lag1 = TRUE, ongoing_outbreak_country_lag1 = FALSE, 
-            ongoing_outbreak_tu_lag1 = FALSE, mean_precip = FALSE, dev_precip = FALSE, mean_temp_daymean = FALSE, 
-            dev_temp_daymean = FALSE, nbr_contagion_lag1 = TRUE), occurrence.random_effects = list(
-            re_region_country_adm1_intercept = TRUE, re_adm2_intercept = TRUE, re_region_country_ttlo_slope = TRUE, 
-            re_region_country_ongoing_slope = TRUE, re_region_country_ongoing_country_slope = FALSE, 
-            re_region_country_ongoing_tu_slope = FALSE, re_adm1_mean_precip_slope = FALSE, 
-            re_adm1_dev_precip_slope = FALSE, re_adm1_mean_temp_daymean_slope = FALSE, re_adm1_dev_temp_daymean_slope = FALSE, 
-            re_adm1_enso_lag5_slope = FALSE, re_region_country_nbr_contagion_slope = TRUE, 
-            re_adm1_nbr_contagion_slope = TRUE), occurrence.dlnm = list(enable = TRUE, defaults = list(
-            argvar = list(fun = "ns", df = 3L), keep_linear_term = FALSE, re_adm1_slope = FALSE), 
-            variables = list(enso = list(lags = list(-11L, 11L)))), occurrence.kernel = list(
-            classes = 1L, form = "gaussian", identify = "seed", ksd_fixed = 1.5, prior_beta_sd = 1L, 
-            init = "given", re_slope = list(enable = TRUE, country = TRUE, sd_country = 0.35, 
-                sd_adm1 = 0.35, adm1 = TRUE), prior_grouping = list(source = "enso_grouping_prod_run_prior", 
-                membership = TRUE), spatial = list(enable = FALSE), alpha = 1, repel = list(
-                enable = FALSE)), occurrence.brms_kl = list(basehaz_poisson = "seasonal", sampling = 300L, 
-            warmup = 400L, chains = 8L, cores = 8L, threads_per_chain = 4L, init = 0.2, re_uncorrelated = TRUE, 
-            adapt_delta = 0.9, max_treedepth = 10L, prior_sd_region_country = "normal(0, 1)", 
-            prior_sd_adm1 = "normal(0, 0.35)", prior_sds = "normal(0, 0.35)", coef_prior_b = list(
-                nbr_lag1_r500_rn_parthmmclusters = "normal(0, 2)", ongoing_outbreak_lag1TRUE = "normal(0, 1)"), 
-            coef_prior_sd = list("country:ADM1" = list(nbr_lag1_r500_rn_parthmmclusters = "normal(0, 1)"))))),
-  list(row_transform = .prod_run_kl_cell_row(.PROD_RUN_KL_CELLS)))
+BATCH_REGISTRY$prod_run_kl_sweep_classes <- c(
+  list(
+    description = "brms_kl latent-class sweep that derives the fit grouping: K 2-5 x ENSO basis {ns df 4, 5}, Gaussian lag kernel seeded by core countries, ADM1 ENSO slopes, 400 warm-up + 300 sampling.",
+    grid = list(kl_sweep.basis = c("ns4", "ns5"), kl_sweep.K = 2:5),
+    overrides = list(
+      baseline = "1990_2019",
+      country = "all",
+      TL = "1970-01-01",
+      TR = "2024-12-31",
+      seed = 1234L,
+      contagion = list(
+        rho_km = 500L,
+        scale = "rownorm",
+        partition = "registry",
+        partition_source = "hmm_clusters"
+      ),
+      enso = list(
+        lag_months = 5L,
+        source = "oni",
+        cache_dir = "generated_data/"
+      ),
+      population = list(
+        gid_pop_path = "generated_data/gid_population_2015-2030.qs"
+      ),
+      episodes = list(
+        key = "gid_season",
+        national_zero_fill = TRUE,
+        national_zero_threshold = 60L,
+        national_zero_rule = "r3",
+        at_risk_start = "after_episode",
+        adm1_overlap = "censor_orphan"
+      ),
+      occurrence.backend = "brms_kl",
+      occurrence.admin_level = "ADM1-ADM2",
+      occurrence.ongoing_outbreak_re = TRUE,
+      occurrence.offset_baserate = TRUE,
+      occurrence.canonical_admin_level = TRUE,
+      occurrence.covariates = list(
+        enso = FALSE,
+        time_to_last_outbreak_cat = TRUE,
+        ongoing_outbreak_lag1 = TRUE,
+        ongoing_outbreak_country_lag1 = FALSE,
+        ongoing_outbreak_tu_lag1 = FALSE,
+        mean_precip = FALSE,
+        dev_precip = FALSE,
+        mean_temp_daymean = FALSE,
+        dev_temp_daymean = FALSE,
+        nbr_contagion_lag1 = TRUE
+      ),
+      occurrence.random_effects = list(
+        re_region_country_adm1_intercept = TRUE,
+        re_adm2_intercept = TRUE,
+        re_region_country_ttlo_slope = TRUE,
+        re_region_country_ongoing_slope = TRUE,
+        re_region_country_ongoing_country_slope = FALSE,
+        re_region_country_ongoing_tu_slope = FALSE,
+        re_adm1_mean_precip_slope = FALSE,
+        re_adm1_dev_precip_slope = FALSE,
+        re_adm1_mean_temp_daymean_slope = FALSE,
+        re_adm1_dev_temp_daymean_slope = FALSE,
+        re_adm1_enso_lag5_slope = FALSE,
+        re_region_country_nbr_contagion_slope = TRUE,
+        re_adm1_nbr_contagion_slope = TRUE
+      ),
+      occurrence.dlnm = list(
+        enable = TRUE,
+        defaults = list(
+          argvar = list(fun = "ns", df = 3L),
+          keep_linear_term = FALSE,
+          re_adm1_slope = FALSE
+        ),
+        variables = list(enso = list(lags = list(-11L, 11L)))
+      ),
+      occurrence.kernel = list(
+        classes = 1L,
+        form = "gaussian",
+        identify = "seed",
+        ksd_fixed = 1.5,
+        prior_beta_sd = 1L,
+        init = "given",
+        re_slope = list(
+          enable = TRUE,
+          country = TRUE,
+          sd_country = 0.35,
+          sd_adm1 = 0.35,
+          adm1 = TRUE
+        ),
+        prior_grouping = list(
+          source = "enso_grouping_prod_run_prior",
+          membership = TRUE
+        ),
+        spatial = list(enable = FALSE),
+        alpha = 1,
+        repel = list(
+          enable = FALSE
+        )
+      ),
+      occurrence.brms_kl = list(
+        basehaz_poisson = "seasonal",
+        sampling = 300L,
+        warmup = 400L,
+        chains = 8L,
+        cores = 8L,
+        threads_per_chain = 4L,
+        init = 0.2,
+        re_uncorrelated = TRUE,
+        adapt_delta = 0.9,
+        max_treedepth = 10L,
+        prior_sd_region_country = "normal(0, 1)",
+        prior_sd_adm1 = "normal(0, 0.35)",
+        prior_sds = "normal(0, 0.35)",
+        coef_prior_b = list(
+          nbr_lag1_r500_rn_parthmmclusters = "normal(0, 2)",
+          ongoing_outbreak_lag1TRUE = "normal(0, 1)"
+        ),
+        coef_prior_sd = list(
+          "country:ADM1" = list(
+            nbr_lag1_r500_rn_parthmmclusters = "normal(0, 1)"
+          )
+        )
+      )
+    )
+  ),
+  list(row_transform = .prod_run_kl_cell_row(.PROD_RUN_KL_CELLS))
+)
 
 # synth_run1: the prod_run specs on the synthetic world
 # (00_ingest_synthetic.R; fake countries, analysis/groupings/synthetic_countries.csv):
@@ -1369,18 +1940,28 @@ BATCH_REGISTRY$prod_run_kl_sweep_classes <- c(list(description = "brms_kl latent
 # sampler: 2 chains x (150 warm-up + 150 sampling), one thread each.
 # 4 lags x 2 groups x 3 tracks = 24 fits. Deploy configs/deploy/synth_run1.yml;
 # driver analysis/bash/tools/run_synthetic_pipeline.sh.
-.SYNTH_RUN1_LAGS    <- c(-5L, -3L, -1L, 1L)
-.SYNTH_RUN1_SAMPLER <- list(warmup = 150L, sampling = 150L, chains = 2L, cores = 2L,
-                            threads_per_chain = 1L, adapt_delta = 0.90)
+.SYNTH_RUN1_LAGS <- c(-5L, -3L, -1L, 1L)
+.SYNTH_RUN1_SAMPLER <- list(
+  warmup = 150L,
+  sampling = 150L,
+  chains = 2L,
+  cores = 2L,
+  threads_per_chain = 1L,
+  adapt_delta = 0.90
+)
 .derive_synth_run1 <- function(code) {
-  tr   <- c(occ = "occurrence", dur = "duration", mon = "monthly")[[code]]
-  run  <- "prod_run"
+  tr <- c(occ = "occurrence", dur = "duration", mon = "monthly")[[code]]
+  run <- "prod_run"
   spec <- BATCH_REGISTRY[[sprintf("%s_%s_grouped_enso_singlelag", run, code)]]
   spec$grouping <- "enso_grouping_synth"
-  if (!is.null(spec$overrides$contagion))           # occurrence only
+  if (!is.null(spec$overrides$contagion)) {
+    # occurrence only
     spec$overrides$contagion$partition_source <- "hmm_clusters_synth"
+  }
   key <- paste0(tr, ".dlnm.defaults.single_lag")
-  if (is.null(spec$grid[[key]])) stop("synth_run1: expected the prod_run lag grid ", key)
+  if (is.null(spec$grid[[key]])) {
+    stop("synth_run1: expected the prod_run lag grid ", key)
+  }
   spec$grid[[key]] <- .SYNTH_RUN1_LAGS
   if (identical(tr, "monthly")) {
     b <- spec$overrides[["monthly"]][["brms_cb"]]
@@ -1392,13 +1973,24 @@ BATCH_REGISTRY$prod_run_kl_sweep_classes <- c(list(description = "brms_kl latent
     b[names(.SYNTH_RUN1_SAMPLER)] <- .SYNTH_RUN1_SAMPLER
     spec$overrides[[k]] <- b
   }
-  spec$description <- paste0("[synth run 1] ", tr, ": the ", run, " spec on the synthetic world ",
-                             "(fake countries), lags ", paste(.SYNTH_RUN1_LAGS, collapse = ", "),
-                             ", 2 chains x (150 + 150)")
+  spec$description <- paste0(
+    "[synth run 1] ",
+    tr,
+    ": the ",
+    run,
+    " spec on the synthetic world ",
+    "(fake countries), lags ",
+    paste(.SYNTH_RUN1_LAGS, collapse = ", "),
+    ", 2 chains x (150 + 150)"
+  )
   spec
 }
-for (.code in c("occ", "dur", "mon"))
-  BATCH_REGISTRY[[sprintf("synth_run1_%s_grouped_enso_singlelag", .code)]] <- .derive_synth_run1(.code)
+for (.code in c("occ", "dur", "mon")) {
+  BATCH_REGISTRY[[sprintf(
+    "synth_run1_%s_grouped_enso_singlelag",
+    .code
+  )]] <- .derive_synth_run1(.code)
+}
 rm(.code)
 
 
@@ -1407,10 +1999,16 @@ rm(.code)
 #' `spec$deferred()` says so. Every batch outside a sweep rollout has a
 #' registry and no `deferred`, so it is never deferred.
 .batch_deferred <- function(spec) {
-  if (!is.null(spec$grouping) && !file.exists(registry_path(spec$grouping)))
-    return(paste0("grouping registry ", registry_path(spec$grouping),
-                  " not written yet (deploy_prod_run.R --stage gen_grouping)"))
-  if (is.function(spec$deferred)) return(spec$deferred())
+  if (!is.null(spec$grouping) && !file.exists(registry_path(spec$grouping))) {
+    return(paste0(
+      "grouping registry ",
+      registry_path(spec$grouping),
+      " not written yet (deploy_prod_run.R --stage gen_grouping)"
+    ))
+  }
+  if (is.function(spec$deferred)) {
+    return(spec$deferred())
+  }
   NULL
 }
 
@@ -1431,38 +2029,68 @@ make_config_filename <- function(batch_name, row, varying_dims, defaults) {
   be <- row[["occurrence.backend"]] %||% row[["backend"]] %||% "brms_cb"
 
   # Backend token — omit if only one backend is varying
-  be_key   <- if ("occurrence.backend" %in% varying_dims) "occurrence.backend"
-               else if ("backend" %in% varying_dims) "backend"
-               else NULL
+  be_key <- if ("occurrence.backend" %in% varying_dims) {
+    "occurrence.backend"
+  } else if ("backend" %in% varying_dims) {
+    "backend"
+  } else {
+    NULL
+  }
   be_token <- if (!is.null(be_key)) paste0("_", be) else ""
 
   # Basehaz token — use the key that matches this row's backend
-  bh_key_for_be <- switch(be,
-    brms     = "occurrence.brms.basehaz_poisson",
+  bh_key_for_be <- switch(
+    be,
+    brms = "occurrence.brms.basehaz_poisson",
     NA_character_
   )
   if (is.na(bh_key_for_be) || !bh_key_for_be %in% varying_dims) {
-    bh_key_for_be <- if ("basehaz_poisson" %in% varying_dims) "basehaz_poisson" else NA_character_
+    bh_key_for_be <- if ("basehaz_poisson" %in% varying_dims) {
+      "basehaz_poisson"
+    } else {
+      NA_character_
+    }
   }
-  bh_token <- if (!is.na(bh_key_for_be)) paste0("_bh-", row[[bh_key_for_be]]) else ""
+  bh_token <- if (!is.na(bh_key_for_be)) {
+    paste0("_bh-", row[[bh_key_for_be]])
+  } else {
+    ""
+  }
 
   # Country token
-  ctry_token <- if ("country" %in% varying_dims) paste0("_ctry-", row[["country"]]) else ""
+  ctry_token <- if ("country" %in% varying_dims) {
+    paste0("_ctry-", row[["country"]])
+  } else {
+    ""
+  }
 
   # Remaining extra dims (anything not already handled above)
-  handled    <- c("occurrence.backend", "backend",
-                  "occurrence.brms.basehaz_poisson",
-                  "basehaz_poisson",
-                  "country")
+  handled <- c(
+    "occurrence.backend",
+    "backend",
+    "occurrence.brms.basehaz_poisson",
+    "basehaz_poisson",
+    "country"
+  )
   extra_dims <- setdiff(varying_dims, handled)
-  extra_token <- paste(vapply(extra_dims, function(dim) {
-    abbrev  <- if (dim %in% names(DIM_ABBREV)) DIM_ABBREV[[dim]] else dim
-    # single_lag goes through slToken(): stripping the sign would make lag -3
-    # and lag 3 share one filename (a lead sweep).
-    val_str <- if (identical(abbrev, "sl")) slToken(row[[dim]])
-               else gsub("[^A-Za-z0-9]", "", as.character(row[[dim]]))
-    paste0("_", abbrev, "-", val_str)
-  }, character(1L)), collapse = "")
+  extra_token <- paste(
+    vapply(
+      extra_dims,
+      function(dim) {
+        abbrev <- if (dim %in% names(DIM_ABBREV)) DIM_ABBREV[[dim]] else dim
+        # single_lag goes through sl_token(): stripping the sign would make lag -3
+        # and lag 3 share one filename (a lead sweep).
+        val_str <- if (identical(abbrev, "sl")) {
+          sl_token(row[[dim]])
+        } else {
+          gsub("[^A-Za-z0-9]", "", as.character(row[[dim]]))
+        }
+        paste0("_", abbrev, "-", val_str)
+      },
+      character(1L)
+    ),
+    collapse = ""
+  )
 
   paste0(batch_name, be_token, bh_token, ctry_token, extra_token)
 }
@@ -1476,19 +2104,30 @@ make_config_filename <- function(batch_name, row, varying_dims, defaults) {
 # ---------------------------------------------------------------------------
 
 # Every artefact name of a generated fit config fits NAME_MAX
-# (paths.R::checkRunFileNames()), checked as the config is written so a too-long
+# (paths.R::check_run_file_names()), checked as the config is written so a too-long
 # name fails here and not after its fit. A config over the limit is removed and
 # the batch stops; one that does not resolve here (e.g. its registry is absent
 # locally) is left to its fit worker, which runs the same check before fitting.
 .check_config_run_names <- function(cfg_file, model) {
-  o <- tryCatch({
-    out <- NULL
-    invisible(capture.output(out <- suppressMessages(suppressWarnings(
-      make_options_from_config(option_list = list(), cli_argv = c("--config", cfg_file))))))
-    out
-  }, error = function(e) NULL)
-  if (is.null(o)) return(invisible(NULL))
-  tryCatch(checkRunFileNames(o, model), error = function(e) {
+  o <- tryCatch(
+    {
+      out <- NULL
+      invisible(capture.output(
+        out <- suppressMessages(suppressWarnings(
+          make_options_from_config(
+            option_list = list(),
+            cli_argv = c("--config", cfg_file)
+          )
+        ))
+      ))
+      out
+    },
+    error = function(e) NULL
+  )
+  if (is.null(o)) {
+    return(invisible(NULL))
+  }
+  tryCatch(check_run_file_names(o, model), error = function(e) {
     unlink(cfg_file)
     stop(basename(cfg_file), ": ", conditionMessage(e), call. = FALSE)
   })
@@ -1497,17 +2136,25 @@ make_config_filename <- function(batch_name, row, varying_dims, defaults) {
 
 generate_batch <- function(batch_name, force_frozen = FALSE) {
   spec <- BATCH_REGISTRY[[batch_name]]
-  if (is.null(spec)) stop("Unknown batch: '", batch_name, "'")
+  if (is.null(spec)) {
+    stop("Unknown batch: '", batch_name, "'")
+  }
   if (isTRUE(spec$frozen) && !force_frozen) {
-    cat("-- Batch '", batch_name, "' is frozen; skipping (use force_frozen=TRUE to override)\n",
-        sep = "")
+    cat(
+      "-- Batch '",
+      batch_name,
+      "' is frozen; skipping (use force_frozen=TRUE to override)\n",
+      sep = ""
+    )
     return(invisible(NULL))
   }
   # Not generatable yet (registry not written / spec$deferred): a clear stop
   # instead of load_grouping()'s missing-file error. Never true for a batch
   # whose registry exists and that has no `deferred` (every batch outside a sweep rollout).
   why <- .batch_deferred(spec)
-  if (!is.null(why)) stop("Batch '", batch_name, "' is deferred: ", why, call. = FALSE)
+  if (!is.null(why)) {
+    stop("Batch '", batch_name, "' is deferred: ", why, call. = FALSE)
+  }
 
   # Country-grouping expansion: when spec$grouping names a registry, expand one
   # config per group. Read analysis/groupings/<source>.csv, derive the distinct
@@ -1517,17 +2164,25 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
   # registry stays the single source of truth.
   if (!is.null(spec$grouping)) {
     grp_source <- spec$grouping
-    grp_reg    <- load_grouping(grp_source)
-    grp_names  <- unique(grp_reg$group)
+    grp_reg <- load_grouping(grp_source)
+    grp_names <- unique(grp_reg$group)
     if (!is.null(spec$grouping_exclude)) {
       unknown <- setdiff(spec$grouping_exclude, grp_names)
-      if (length(unknown) > 0L)
-        stop("grouping_exclude names no group in '", grp_source, "': ",
-             paste(unknown, collapse = ", "), call. = FALSE)
+      if (length(unknown) > 0L) {
+        stop(
+          "grouping_exclude names no group in '",
+          grp_source,
+          "': ",
+          paste(unknown, collapse = ", "),
+          call. = FALSE
+        )
+      }
       grp_names <- setdiff(grp_names, spec$grouping_exclude)
     }
     spec$grid[["grouping.group"]] <- grp_names
-    if (is.null(spec$overrides)) spec$overrides <- list()
+    if (is.null(spec$overrides)) {
+      spec$overrides <- list()
+    }
     spec$overrides[["grouping.enable"]] <- TRUE
     spec$overrides[["grouping.source"]] <- grp_source
   }
@@ -1542,39 +2197,54 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
   all_spec_keys <- c(names(spec$overrides), names(spec$grid))
   batch_model <- if (any(startsWith(all_spec_keys, "occurrence."))) {
     "occurrence"
-  } else if (any(startsWith(all_spec_keys, "size.")) || !is.null(spec$overrides$size)) {
+  } else if (
+    any(startsWith(all_spec_keys, "size.")) || !is.null(spec$overrides$size)
+  ) {
     "size"
-  } else if (any(startsWith(all_spec_keys, "duration.")) || !is.null(spec$overrides$duration)) {
+  } else if (
+    any(startsWith(all_spec_keys, "duration.")) ||
+      !is.null(spec$overrides$duration)
+  ) {
     "duration"
-  } else if (any(startsWith(all_spec_keys, "monthly.")) || !is.null(spec$overrides$monthly)) {
+  } else if (
+    any(startsWith(all_spec_keys, "monthly.")) ||
+      !is.null(spec$overrides$monthly)
+  ) {
     "monthly"
   } else {
-    NULL  # ambiguous — keep all blocks (should not happen in practice)
+    NULL # ambiguous — keep all blocks (should not happen in practice)
   }
 
-  grid_df      <- as_tibble(do.call(expand.grid,
-                                    c(spec$grid, list(stringsAsFactors = FALSE))))
+  grid_df <- as_tibble(do.call(
+    expand.grid,
+    c(spec$grid, list(stringsAsFactors = FALSE))
+  ))
   varying_dims <- names(spec$grid)[vapply(spec$grid, length, integer(1L)) > 1L]
   # Optional row selection (spec$rows_fn, e.g. the deployed-lag rows of the
   # deployed run's no-contagion batch), applied after the varying dimensions are
   # fixed so the filenames match the unfiltered batch's. Absent = every row.
-  if (is.function(spec$rows_fn)) grid_df <- spec$rows_fn(grid_df)
-  defaults     <- get_default_config()
+  if (is.function(spec$rows_fn)) {
+    grid_df <- spec$rows_fn(grid_df)
+  }
+  defaults <- get_default_config()
 
   # Fill occurrence.backend for filename generation if not explicitly in grid.
   # Reads from: overrides occurrence.backend key → overrides$occurrence$backend →
   #             config_defaults occurrence.backend → hard default "brms_cb".
-  if (!"occurrence.backend" %in% names(grid_df) && !"backend" %in% names(grid_df)) {
+  if (
+    !"occurrence.backend" %in% names(grid_df) && !"backend" %in% names(grid_df)
+  ) {
     occ_be <- spec$overrides[["occurrence.backend"]] %||%
-                spec$overrides$occurrence$backend %||%
-                defaults$occurrence$backend %||% "brms_cb"
+      spec$overrides$occurrence$backend %||%
+      defaults$occurrence$backend %||%
+      "brms_cb"
     grid_df[["occurrence.backend"]] <- occ_be
   }
 
   config_names <- character(nrow(grid_df))
 
   for (i in seq_len(nrow(grid_df))) {
-    row    <- as.list(grid_df[i, ])
+    row <- as.list(grid_df[i, ])
     config <- defaults
 
     # Dotted keys ("occurrence.dlnm.defaults.single_lag") set nested leaves via
@@ -1582,12 +2252,18 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
 
     # Apply batch-level overrides first
     if (!is.null(spec$overrides)) {
-      for (k in names(spec$overrides)) config <- config_set_leaf(config, k, spec$overrides[[k]])
+      for (k in names(spec$overrides)) {
+        config <- config_set_leaf(config, k, spec$overrides[[k]])
+      }
     }
     # Apply this row's grid values (may override batch-level overrides)
-    for (k in names(row)) config <- config_set_leaf(config, k, row[[k]])
+    for (k in names(row)) {
+      config <- config_set_leaf(config, k, row[[k]])
+    }
     # Optional per-row transform (e.g. to inject a concrete ENSO slope key)
-    if (!is.null(spec$row_transform)) config <- spec$row_transform(config)
+    if (!is.null(spec$row_transform)) {
+      config <- spec$row_transform(config)
+    }
 
     config <- apply_anchored_defaults(config, batch_model, spec, all_spec_keys)
 
@@ -1595,8 +2271,13 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
     # that 04_fit_run.R dispatcher does not misroute (e.g. size configs must
     # not carry an occurrence: block inherited from config_defaults.yml).
     if (!is.null(batch_model)) {
-      strip_models <- setdiff(c("occurrence", "size", "duration", "monthly"), batch_model)
-      for (sm in strip_models) config[[sm]] <- NULL
+      strip_models <- setdiff(
+        c("occurrence", "size", "duration", "monthly"),
+        batch_model
+      )
+      for (sm in strip_models) {
+        config[[sm]] <- NULL
+      }
 
       # A generated fit-batch config is never a simulator run (make_batch_configs.R
       # never emits `simulator:`). simulator has fill_when_absent = FALSE in
@@ -1614,11 +2295,14 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
 
       config[[batch_model]] <- strip_backend_siblings(config[[batch_model]])
       # Opt-in per spec: drop the superseded prior_sd.
-      if (isTRUE(spec$drop_superseded_prior_sd))
-        config[[batch_model]] <- .drop_superseded_prior_sd(config[[batch_model]])
+      if (isTRUE(spec$drop_superseded_prior_sd)) {
+        config[[batch_model]] <- .drop_superseded_prior_sd(config[[
+          batch_model
+        ]])
+      }
     }
 
-    cfg_stem        <- make_config_filename(batch_name, row, varying_dims, defaults)
+    cfg_stem <- make_config_filename(batch_name, row, varying_dims, defaults)
     config_names[i] <- paste0(cfg_stem, ".yml")
 
     # Coerce integer fields so write_yaml emits 10, not 10.0
@@ -1626,32 +2310,42 @@ generate_batch <- function(batch_name, force_frozen = FALSE) {
       if (!is.null(config[[f]])) config[[f]] <- as.integer(config[[f]])
     }
 
-    cfg_file <- assertBasenameLength(file.path(dir_path, paste0(cfg_stem, ".yml")), "make_config_filename")
+    cfg_file <- assert_basename_length(
+      file.path(dir_path, paste0(cfg_stem, ".yml")),
+      "make_config_filename"
+    )
     yaml::write_yaml(config, cfg_file)
     if (!is.null(batch_model)) .check_config_run_names(cfg_file, batch_model)
   }
 
   # Write (or update) manifest.yml — preserve original created date
-  manifest_path       <- file.path(dir_path, "manifest.yml")
-  existing_created    <- if (file.exists(manifest_path))
+  manifest_path <- file.path(dir_path, "manifest.yml")
+  existing_created <- if (file.exists(manifest_path)) {
     yaml::read_yaml(manifest_path)$created
-  else
+  } else {
     as.character(Sys.Date())
+  }
 
   manifest <- list(
-    batch       = batch_name,
+    batch = batch_name,
     description = if (!is.null(spec$description)) spec$description else "",
-    created     = existing_created,
-    varies      = as.list(varying_dims),
-    fixed       = c(spec$overrides,
-                    spec$grid[setdiff(names(spec$grid), varying_dims)]),
-    n_configs   = nrow(grid_df),
-    configs     = as.list(config_names)
+    created = existing_created,
+    varies = as.list(varying_dims),
+    fixed = c(
+      spec$overrides,
+      spec$grid[setdiff(names(spec$grid), varying_dims)]
+    ),
+    n_configs = nrow(grid_df),
+    configs = as.list(config_names)
   )
   yaml::write_yaml(manifest, manifest_path)
 
-  cat(sprintf("-- Generated batch '%s': %d config(s) -> %s\n",
-              batch_name, nrow(grid_df), dir_path))
+  cat(sprintf(
+    "-- Generated batch '%s': %d config(s) -> %s\n",
+    batch_name,
+    nrow(grid_df),
+    dir_path
+  ))
   invisible(config_names)
 }
 
@@ -1687,10 +2381,12 @@ discover_batch <- function(batch_name_or_dir) {
   } else {
     file.path(get_config_dir(), batch_name_or_dir)
   }
-  if (!dir.exists(dir_path)) stop("Batch directory not found: ", dir_path)
+  if (!dir.exists(dir_path)) {
+    stop("Batch directory not found: ", dir_path)
+  }
 
   manifest_path <- file.path(dir_path, "manifest.yml")
-  config_files  <- if (file.exists(manifest_path)) {
+  config_files <- if (file.exists(manifest_path)) {
     manifest <- yaml::read_yaml(manifest_path)
     file.path(dir_path, unlist(manifest$configs))
   } else {
@@ -1699,8 +2395,8 @@ discover_batch <- function(batch_name_or_dir) {
   }
 
   purrr::map_dfr(config_files, function(f) {
-    cfg  <- yaml::read_yaml(f)
-    be   <- cfg$occurrence$backend %||% cfg$size$backend %||% "brms_cb"
+    cfg <- yaml::read_yaml(f)
+    be <- cfg$occurrence$backend %||% cfg$size$backend %||% "brms_cb"
     brms <- cfg$occurrence[[be]] %||% cfg$occurrence$brms
     # brms configs store post-warmup draws as `sampling` (warmup + sampling =
     # total iter); pre-migration configs may still have `iter` directly.
@@ -1710,19 +2406,22 @@ discover_batch <- function(batch_name_or_dir) {
       brms$iter %||% NA_integer_
     }
     tibble::tibble(
-      config_path      = f,
-      config_name      = basename(f),
-      backend          = be,
-      country          = cfg$country %||% "all",
-      basehaz_poisson  = cfg$occurrence$brms_cb$basehaz_poisson %||%
-                           cfg$occurrence$brms$basehaz_poisson %||% NA_character_,
-      iter             = brms_iter %||% NA_integer_,
-      warmup           = cfg$occurrence$brms_cb$warmup %||%
-                           cfg$occurrence$brms$warmup %||% NA_integer_,
-      chains           = cfg$occurrence$brms_cb$chains %||%
-                           cfg$occurrence$brms$chains %||% NA_integer_,
-      seed             = cfg$seed %||% NA_integer_,
-      config           = list(cfg)
+      config_path = f,
+      config_name = basename(f),
+      backend = be,
+      country = cfg$country %||% "all",
+      basehaz_poisson = cfg$occurrence$brms_cb$basehaz_poisson %||%
+        cfg$occurrence$brms$basehaz_poisson %||%
+        NA_character_,
+      iter = brms_iter %||% NA_integer_,
+      warmup = cfg$occurrence$brms_cb$warmup %||%
+        cfg$occurrence$brms$warmup %||%
+        NA_integer_,
+      chains = cfg$occurrence$brms_cb$chains %||%
+        cfg$occurrence$brms$chains %||%
+        NA_integer_,
+      seed = cfg$seed %||% NA_integer_,
+      config = list(cfg)
     )
   })
 }
@@ -1738,14 +2437,19 @@ list_batches <- function() {
   cat(sprintf("%-35s  %s\n", "batch", "description"))
   cat(strrep("-", 80), "\n")
   for (nm in names(BATCH_REGISTRY)) {
-    spec   <- BATCH_REGISTRY[[nm]]
+    spec <- BATCH_REGISTRY[[nm]]
     frozen <- if (isTRUE(spec$frozen)) " [frozen]" else ""
     n_cfgs <- tryCatch(
       nrow(do.call(expand.grid, c(spec$grid, list(stringsAsFactors = FALSE)))),
       error = function(e) "?"
     )
-    cat(sprintf("%-35s  %s  (%s config(s))%s\n",
-                nm, spec$description, n_cfgs, frozen))
+    cat(sprintf(
+      "%-35s  %s  (%s config(s))%s\n",
+      nm,
+      spec$description,
+      n_cfgs,
+      frozen
+    ))
   }
 }
 
@@ -1761,23 +2465,36 @@ list_batches <- function() {
 # `Rscript -e 'source("analysis/utils/make_batch_configs.R")'`.
 
 if (sys.nframe() == 0L) {
-
   option_list <- list(
-    make_option(c("--batch"),
-                default = NULL, type = "character",
-                help    = "Name of batch to generate (see --list for options)"),
-    make_option(c("--all"),
-                default = FALSE, action = "store_true",
-                help    = "Generate all non-frozen batches"),
-    make_option(c("--list"),
-                default = FALSE, action = "store_true",
-                help    = "Print the batch registry and exit"),
-    make_option(c("--force_frozen"),
-                default = FALSE, action = "store_true",
-                help    = "Regenerate even frozen batches (use with care)")
+    make_option(
+      c("--batch"),
+      default = NULL,
+      type = "character",
+      help = "Name of batch to generate (see --list for options)"
+    ),
+    make_option(
+      c("--all"),
+      default = FALSE,
+      action = "store_true",
+      help = "Generate all non-frozen batches"
+    ),
+    make_option(
+      c("--list"),
+      default = FALSE,
+      action = "store_true",
+      help = "Print the batch registry and exit"
+    ),
+    make_option(
+      c("--force_frozen"),
+      default = FALSE,
+      action = "store_true",
+      help = "Regenerate even frozen batches (use with care)"
+    )
   )
 
-  cli_opt <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
+  cli_opt <- optparse::parse_args(optparse::OptionParser(
+    option_list = option_list
+  ))
 
   if (cli_opt$list) {
     list_batches()

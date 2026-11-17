@@ -1,21 +1,33 @@
-# run_all_size.R — outbreak-size pipeline validation harness.
+# run_all_size.R — the outbreak-size pipeline's test harness.
 #
-# Mirror of analysis/tests/run_all.R for the size pipeline.
+# Usage:
+#   Rscript analysis/tests/run_all_size.R
+#   Rscript analysis/tests/run_all_size.R --quick --baseline 1990_2019
 #
-# CLI:
-#   Rscript analysis/tests/run_all_size.R [--quick] [--baseline 1990_2019]
+# Details:
+#   Mirrors analysis/tests/run_all.R for the size pipeline.
 
 suppressPackageStartupMessages({
   library(optparse)
 })
 
-opt <- parse_args(OptionParser(option_list = list(
-  make_option(c("-b", "--baseline"), default = "1990_2019", type = "character"),
-  make_option(c("--quick"), default = FALSE, type = "logical",
-              help = "skip slow tests (diagnostics)")
-)))
+opt <- parse_args(OptionParser(
+  option_list = list(
+    make_option(
+      c("-b", "--baseline"),
+      default = "1990_2019",
+      type = "character"
+    ),
+    make_option(
+      c("--quick"),
+      default = FALSE,
+      type = "logical",
+      help = "skip slow tests (diagnostics)"
+    )
+  )
+))
 
-report_dir   <- "generated_data/test_reports"
+report_dir <- "generated_data/test_reports"
 dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 summary_path <- file.path(report_dir, "SIZE_SUMMARY.md")
 
@@ -23,8 +35,12 @@ run_one <- function(script, args = character(), hard_fail = FALSE) {
   cmd <- paste(c("Rscript", script, args), collapse = " ")
   message("\n>>> ", cmd)
   status <- system(cmd)
-  list(script = script, args = paste(args, collapse = " "),
-       status = status, hard_fail = hard_fail)
+  list(
+    script = script,
+    args = paste(args, collapse = " "),
+    status = status,
+    hard_fail = hard_fail
+  )
 }
 
 results <- list()
@@ -107,7 +123,8 @@ if (!opt$quick) {
 
 # Summary ----------------------------------------------------------------
 
-con <- file(summary_path, "w"); on.exit(close(con), add = TRUE)
+con <- file(summary_path, "w")
+on.exit(close(con), add = TRUE)
 cat("# Size test harness summary\n\n", file = con)
 cat(sprintf("Generated: %s\n\n", Sys.time()), file = con)
 cat("| test | status | hard_fail | result |\n", file = con)
@@ -116,9 +133,13 @@ hard_failed <- FALSE
 for (nm in names(results)) {
   r <- results[[nm]]
   res <- if (r$status == 0) "PASS" else "FAIL"
-  if (r$status != 0 && r$hard_fail) hard_failed <- TRUE
-  cat(sprintf("| %s | %d | %s | %s |\n",
-              nm, r$status, r$hard_fail, res), file = con)
+  if (r$status != 0 && r$hard_fail) {
+    hard_failed <- TRUE
+  }
+  cat(
+    sprintf("| %s | %d | %s | %s |\n", nm, r$status, r$hard_fail, res),
+    file = con
+  )
 }
 
 if (hard_failed) {

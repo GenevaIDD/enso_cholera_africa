@@ -15,7 +15,7 @@
 # Both occurrence calls pass --redo TRUE (03_prepare_occ.R defaults to FALSE, 03_prepare_siz.R
 # to TRUE): with FALSE the occurrence prep can reuse a stale matched_ob_gids_seasonality_occ.rds,
 # whose episode digest then differs from the size / duration / monthly preps and deploy_fits
-# refuses the pair (assertEpisodeCoherence).
+# refuses the pair (assert_episode_coherence).
 #
 # The model and simulation steps run one after another: they share caches in
 # generated_data/ (seasonality matches, contagion distances) and the sim panels

@@ -1,5 +1,5 @@
 # Past ENSO events of the SYNTHETIC world (00_ingest_synthetic.R, --seed 1):
-# utils/synthetic_world.R::synthEnsoEvents() on its synthetic ONI. The registry
+# utils/synthetic_world.R::synth_enso_events() on its synthetic ONI. The registry
 # of deploy synth_run1.yml (event_attribution.registry); the generator warns when
 # its ONI gives other events (another seed). Format: enso_events_v2.yml.
 events:

@@ -1,22 +1,22 @@
-# results_core.R — shared kernel for the manuscript results phase.
+# results_core.R — shared kernel of the manuscript results phase: registries,
+#   manifest/config accessors, artefact freshness and provenance contract
 #
-# Single-sources everything BOTH halves of the manuscript phase need:
+# Provides:
+#   results_inputs(), results_config_path(), resolve_results_sets()
+#   load_manifest(), manifest_groups_all(), results_run_configs()
+#   results_write(), results_read_if_fresh(), results_require()
+#                            write / read derived tables under the stamp
+#   load_sim_run_monthly(), load_sim_run_stitched(), load_arm_run()
+#   results_group_meta(), group_display_meta(), relabel_groups()
+#   summarise_reps(), adm1_prob_stats()   replicate summaries
+#   TRACK_*, GROUP_* registries
 #
-#   09b_postprocess_results.R  → derives the aggregated tables from raw model
-#                               fits and simulator partitions, writes them to
-#                               generated_data/results/<tag>/
-#   10_manuscript_figures.R   → plots those tables and NOTHING else; it has no
-#                               path to a fit object or a particle filter
-#
-# It holds the track and group registries, the manifest/config accessors, and
-# the artefact freshness + provenance contract.
-#
-# Why this module sources its own dependency closure, when the 17 utils.R split
-# modules deliberately never source each other: the `_core` libraries are the
-# documented exception (see analysis/utils/smoothing_core.R:26-38, which sources
-# 13 modules with a per-line justification). A `_core` module is a kernel meant
-# to be sourced standalone by several pipeline scripts, so it owns its closure
-# rather than pushing it onto every caller.
+# Details:
+#   Single-sources what both halves of the phase need:
+#   09b_postprocess_results.R derives the tables from fits and simulator
+#   partitions into generated_data/results/<tag>/; 10_manuscript_figures.R
+#   plots those tables and nothing else (no path to a fit or a particle
+#   filter). A `_core` kernel: it sources its own dependency closure.
 
 suppressPackageStartupMessages({
   library(dplyr)
@@ -24,18 +24,25 @@ suppressPackageStartupMessages({
   library(qs2)
 })
 
+# Why this module sources its own dependency closure, when the utils modules
+# deliberately never source each other: the `_core` libraries are the
+# documented exception (see analysis/utils/smoothing_core.R, which sources its
+# modules with a per-line justification). A `_core` module is a kernel meant
+# to be sourced standalone by several pipeline scripts, so it owns its closure
+# rather than pushing it onto every caller.
 source("analysis/utils/base.R")
-source("analysis/utils/config.R")   # .flag_val() -- required by results_config_path() to recover -C for the re-run hint
-source("analysis/utils/paths.R")   # makeResultsRunFile() -- the artefact-path builder both halves call
-source("analysis/utils/provenance.R")   # attachResultsProvenance()/getResultsProvenance() -- the stamp carried on every derived table
-source("analysis/utils/enso.R")   # ENSO_ANALOG_SETS + ensoGroupColours() -- required by resolve_results_sets() and GROUP_COLOURS
-source("analysis/utils/gid.R")   # flattenGid() -- required by load_sim_run_monthly()
-source("analysis/utils/sim_io.R")   # censor_sim_by_country()/manifest_*() -- per-country firm horizons of partition units (load_sim_run_monthly(), results_derive.R)
-source("analysis/utils/figures_cb.R")   # COMPOSITE_CONDS + the shared ENSO crossbasis extractors (extract_adm1_irr() ...)
-source("analysis/utils/footprint.R")   # finestLevelTotals() -- observed monthly cases per gid of the event attribution (results_derive.R::event_observed_panel())
+source("analysis/utils/config.R") # .flag_val() -- required by results_config_path() to recover -C for the re-run hint
+source("analysis/utils/paths.R") # make_results_run_file() -- the artefact-path builder both halves call
+source("analysis/utils/provenance.R") # attach_results_provenance()/get_results_provenance() -- the stamp carried on every derived table
+source("analysis/utils/enso.R") # ENSO_ANALOG_SETS + enso_group_colours() -- required by resolve_results_sets() and GROUP_COLOURS
+source("analysis/utils/gid.R") # flatten_gid() -- required by load_sim_run_monthly()
+source("analysis/utils/sim_io.R") # censor_sim_by_country()/manifest_*() -- per-country firm horizons of partition units (load_sim_run_monthly(), results_derive.R)
+source("analysis/utils/figures_cb.R") # COMPOSITE_CONDS + the shared ENSO crossbasis extractors (extract_adm1_irr() ...)
+source("analysis/utils/footprint.R") # finest_level_totals() -- observed monthly cases per gid of the event attribution (results_derive.R::event_observed_panel())
 
-if (!exists("%||%", mode = "function"))
+if (!exists("%||%", mode = "function")) {
   `%||%` <- function(a, b) if (!is.null(a)) a else b
+}
 
 # ---------------------------------------------------------------------------
 # Registries: tracks, groups, metrics
@@ -46,7 +53,7 @@ if (!exists("%||%", mode = "function"))
 #' values dispatched by select_best_lag() (analysis/utils/loo_lags.R -- it only
 #' special-cases "occurrence", so these names are usable as-is). The other
 #' three tables key off the SAME per-track filesystem/archive conventions used
-#' elsewhere in the repo (04_fit_<TRACK_CODE>_brms_cb.R, makeRunFile()-family
+#' elsewhere in the repo (04_fit_<TRACK_CODE>_brms_cb.R, make_run_file()-family
 #' kind prefixes, <lag_loo_batch>_<LOO_DIR_STUB>_grouped_enso_singlelag/
 #' batches). Kept as one registry rather than split across the two scripts:
 #' only TRACK_LABEL is plot-side, and splitting the table across files to save
@@ -62,11 +69,14 @@ TRACK_ADVERSE_SIGN <- c(occurrence = 1, duration = -1, monthly = 1)
 #' The size track is retired downstream (the monthly track's
 #' `cases_month` is the sole case estimand) and has no entry here, so a
 #' `results.scope.fig1_tracks` naming "size" fails on the first registry lookup.
-TRACK_CODE        <- c(occurrence = "occ", duration = "dur", monthly = "mon")
+TRACK_CODE <- c(occurrence = "occ", duration = "dur", monthly = "mon")
 TRACK_KIND_PREFIX <- c(occurrence = "", duration = "dur_", monthly = "mon_")
 TRACK_LOO_DIR_STUB <- c(occurrence = "occ", duration = "dur", monthly = "mon")
-TRACK_LABEL       <- c(occurrence = "Occurrence", duration = "Duration",
-                       monthly = "Monthly")
+TRACK_LABEL <- c(
+  occurrence = "Occurrence",
+  duration = "Duration",
+  monthly = "Monthly"
+)
 
 # Group display tables, read from the enso_grouping sidecar
 # (analysis/groupings/enso_grouping.yml via utils/config.R::load_grouping_meta()).
@@ -76,15 +86,15 @@ TRACK_LABEL       <- c(occurrence = "Occurrence", duration = "Duration",
 # registry use results_group_meta(ctx), which reads the manifest's `grouping`.
 .ENSO_GROUP_META <- load_grouping_meta("enso_grouping")
 GROUP_LABELS <- .ENSO_GROUP_META$label
-GROUP_SHORT  <- .ENSO_GROUP_META$short
-GROUP_ORDER  <- .ENSO_GROUP_META$order
+GROUP_SHORT <- .ENSO_GROUP_META$short
+GROUP_ORDER <- .ENSO_GROUP_META$order
 # Display-only short group names ("Southern" -> "South"); GROUP_SHORT itself
 # stays as stored data and is only relabelled at plot time. Shared by
 # 10_manuscript_figures.R and notebooks/hindcast_skill.qmd.
 GROUP_SHORT_FIG <- .ENSO_GROUP_META$short_fig
 # ENSO-region palette, deliberately red/blue-free so it never collides with
 # the figures' red/blue ENSO-phase colours and diverging effect scales.
-GROUP_COLOURS <- groupColours(.ENSO_GROUP_META)
+GROUP_COLOURS <- group_colour_map(.ENSO_GROUP_META)
 
 #' results_group_meta
 #'
@@ -92,7 +102,11 @@ GROUP_COLOURS <- groupColours(.ENSO_GROUP_META)
 #' manifest's `grouping` (forecast_horizons.yml), else enso_grouping. Returns
 #' the load_grouping_meta() list.
 results_group_meta <- function(ctx = NULL) {
-  src <- if (!is.null(ctx) && !is.null(ctx$MAN$grouping)) ctx$MAN$grouping else "enso_grouping"
+  src <- if (!is.null(ctx) && !is.null(ctx$MAN$grouping)) {
+    ctx$MAN$grouping
+  } else {
+    "enso_grouping"
+  }
   load_grouping_meta(src)
 }
 
@@ -121,13 +135,21 @@ GROUP_LABEL_MODES <- c("registry", "lag", "centroid")
 #' One group's lag as display text: "lead 6" (negative lag), "lag +7", "lag 0".
 group_lag_text <- function(lag) {
   lag <- as.integer(lag)
-  ifelse(lag < 0L, sprintf("lead %d", -lag), ifelse(lag > 0L, sprintf("lag +%d", lag), "lag 0"))
+  ifelse(
+    lag < 0L,
+    sprintf("lead %d", -lag),
+    ifelse(lag > 0L, sprintf("lag +%d", lag), "lag 0")
+  )
 }
 
 #' Short signed lag with a true minus: "−6", "+7", "0".
 group_lag_signed <- function(lag) {
   lag <- as.integer(lag)
-  ifelse(lag < 0L, sprintf("−%d", -lag), ifelse(lag > 0L, sprintf("+%d", lag), "0"))
+  ifelse(
+    lag < 0L,
+    sprintf("−%d", -lag),
+    ifelse(lag > 0L, sprintf("+%d", lag), "0")
+  )
 }
 
 #' group_display_meta
@@ -146,75 +168,171 @@ group_lag_signed <- function(lag) {
 #'   short and short_fig -> display short))
 group_display_meta <- function(meta, lags = NULL, mode = "registry") {
   mode <- as.character(mode %||% "registry")
-  if (length(mode) != 1L || !mode %in% GROUP_LABEL_MODES)
-    stop("group_display_meta: results.style.group_labels must be one of ",
-         paste(GROUP_LABEL_MODES, collapse = " | "), "; got '", paste(mode, collapse = ","), "'.",
-         call. = FALSE)
+  if (length(mode) != 1L || !mode %in% GROUP_LABEL_MODES) {
+    stop(
+      "group_display_meta: results.style.group_labels must be one of ",
+      paste(GROUP_LABEL_MODES, collapse = " | "),
+      "; got '",
+      paste(mode, collapse = ","),
+      "'.",
+      call. = FALSE
+    )
+  }
   ids <- as.character(meta$order)
-  colour <- if (!is.null(meta$colour)) stats::setNames(as.character(meta$colour[ids]), ids) else NULL
+  colour <- if (!is.null(meta$colour)) {
+    stats::setNames(as.character(meta$colour[ids]), ids)
+  } else {
+    NULL
+  }
   if (identical(mode, "registry")) {
-    out <- list(mode = mode, ids = ids, order = ids,
-                letter = stats::setNames(rep(NA_character_, length(ids)), ids), lag = NULL,
-                label = stats::setNames(as.character(meta$label[ids]), ids),
-                short = stats::setNames(as.character(meta$short[ids]), ids),
-                short_fig = stats::setNames(as.character((meta$short_fig %||% meta$short)[ids]), ids),
-                colour = colour)
+    out <- list(
+      mode = mode,
+      ids = ids,
+      order = ids,
+      letter = stats::setNames(rep(NA_character_, length(ids)), ids),
+      lag = NULL,
+      label = stats::setNames(as.character(meta$label[ids]), ids),
+      short = stats::setNames(as.character(meta$short[ids]), ids),
+      short_fig = stats::setNames(
+        as.character((meta$short_fig %||% meta$short)[ids]),
+        ids
+      ),
+      colour = colour
+    )
   } else if (identical(mode, "centroid")) {
-    cs <- meta[["centroid_short"]]; cl <- meta[["centroid_label"]]
-    cs <- if (is.null(cs)) rep(NA_character_, length(ids)) else as.character(cs[ids])
-    cl <- if (is.null(cl)) rep(NA_character_, length(ids)) else as.character(cl[ids])
+    cs <- meta[["centroid_short"]]
+    cl <- meta[["centroid_label"]]
+    cs <- if (is.null(cs)) {
+      rep(NA_character_, length(ids))
+    } else {
+      as.character(cs[ids])
+    }
+    cl <- if (is.null(cl)) {
+      rep(NA_character_, length(ids))
+    } else {
+      as.character(cl[ids])
+    }
     bad <- ids[is.na(cs) | !nzchar(cs) | is.na(cl) | !nzchar(cl)]
-    if (length(bad))
-      stop("group_display_meta: group_labels 'centroid' needs centroid_short and centroid_label ",
-           "in the grouping sidecar (", meta$source %||% "?", ") for group(s) ",
-           paste(bad, collapse = ", "), ". Add them to the sidecar, or to ",
-           "kl_grouping.R::KL_CENTROID_NAMES for a derived registry (gen_grouping), ",
-           "or use group_labels 'registry'.", call. = FALSE)
-    if (anyDuplicated(cs))
-      stop("group_display_meta: duplicated centroid_short in the grouping sidecar.", call. = FALSE)
+    if (length(bad)) {
+      stop(
+        "group_display_meta: group_labels 'centroid' needs centroid_short and centroid_label ",
+        "in the grouping sidecar (",
+        meta$source %||% "?",
+        ") for group(s) ",
+        paste(bad, collapse = ", "),
+        ". Add them to the sidecar, or to ",
+        "kl_grouping.R::KL_CENTROID_NAMES for a derived registry (gen_grouping), ",
+        "or use group_labels 'registry'.",
+        call. = FALSE
+      )
+    }
+    if (anyDuplicated(cs)) {
+      stop(
+        "group_display_meta: duplicated centroid_short in the grouping sidecar.",
+        call. = FALSE
+      )
+    }
     ord <- as.character(meta[["centroid_order"]] %||% character(0))
-    if (!length(ord)) ord <- ids
-    if (!setequal(ord, ids))
-      stop("group_display_meta: centroid_order must list every group once.", call. = FALSE)
+    if (!length(ord)) {
+      ord <- ids
+    }
+    if (!setequal(ord, ids)) {
+      stop(
+        "group_display_meta: centroid_order must list every group once.",
+        call. = FALSE
+      )
+    }
     short <- stats::setNames(cs, ids)
     # Named vectors in DISPLAY order (legends / facets list GW, GG, ...).
     lab <- stats::setNames(sprintf("%s [%s]", cl, cs), ids)
-    out <- list(mode = mode, ids = ids, order = ord,
-                letter = stats::setNames(rep(NA_character_, length(ids)), ids)[ord], lag = NULL,
-                label = lab[ord], short = short[ord], short_fig = short[ord], colour = colour)
+    out <- list(
+      mode = mode,
+      ids = ids,
+      order = ord,
+      letter = stats::setNames(rep(NA_character_, length(ids)), ids)[ord],
+      lag = NULL,
+      label = lab[ord],
+      short = short[ord],
+      short_fig = short[ord],
+      colour = colour
+    )
   } else {
-    if (is.data.frame(lags))
-      lags <- stats::setNames(as.integer(lags$lag_occ), as.character(lags$enso_group))
-    if (is.null(lags) || !length(lags))
-      stop("group_display_meta: group_labels 'lag' needs each group's deployed occurrence lag ",
-           "(the group_labels artefact; 09 step group_labels).", call. = FALSE)
+    if (is.data.frame(lags)) {
+      lags <- stats::setNames(
+        as.integer(lags$lag_occ),
+        as.character(lags$enso_group)
+      )
+    }
+    if (is.null(lags) || !length(lags)) {
+      stop(
+        "group_display_meta: group_labels 'lag' needs each group's deployed occurrence lag ",
+        "(the group_labels artefact; 09 step group_labels).",
+        call. = FALSE
+      )
+    }
     miss <- setdiff(ids, names(lags))
-    if (length(miss))
-      stop("group_display_meta: no deployed occurrence lag for group(s) ", paste(miss, collapse = ", "),
-           " (group_labels artefact of another registry?).", call. = FALSE)
+    if (length(miss)) {
+      stop(
+        "group_display_meta: no deployed occurrence lag for group(s) ",
+        paste(miss, collapse = ", "),
+        " (group_labels artefact of another registry?).",
+        call. = FALSE
+      )
+    }
     lag <- stats::setNames(as.integer(lags[ids]), ids)
-    if (anyNA(lag)) stop("group_display_meta: NA occurrence lag for ", paste(ids[is.na(lag)], collapse = ", "),
-                         call. = FALSE)
-    if (length(ids) > 26L) stop("group_display_meta: more than 26 groups.", call. = FALSE)
+    if (anyNA(lag)) {
+      stop(
+        "group_display_meta: NA occurrence lag for ",
+        paste(ids[is.na(lag)], collapse = ", "),
+        call. = FALSE
+      )
+    }
+    if (length(ids) > 26L) {
+      stop("group_display_meta: more than 26 groups.", call. = FALSE)
+    }
     # Longest lead first = ascending lag; ties keep the sidecar order.
     ord <- ids[order(lag, seq_along(ids))]
     letter <- stats::setNames(LETTERS[match(ids, ord)], ids)
-    short <- stats::setNames(sprintf("%s %s", letter, group_lag_signed(lag)), ids)
+    short <- stats::setNames(
+      sprintf("%s %s", letter, group_lag_signed(lag)),
+      ids
+    )
     # Named vectors in DISPLAY order, so a legend or a facet that takes the
     # vector's names as its level order lists A, B, C, ...
-    lab <- stats::setNames(sprintf("Class %s (ENSO %s)", letter, group_lag_text(lag)), ids)
-    out <- list(mode = mode, ids = ids, order = ord, letter = letter[ord], lag = lag[ord],
-                label = lab[ord], short = short[ord], short_fig = short[ord], colour = colour)
+    lab <- stats::setNames(
+      sprintf("Class %s (ENSO %s)", letter, group_lag_text(lag)),
+      ids
+    )
+    out <- list(
+      mode = mode,
+      ids = ids,
+      order = ord,
+      letter = letter[ord],
+      lag = lag[ord],
+      label = lab[ord],
+      short = short[ord],
+      short_fig = short[ord],
+      colour = colour
+    )
   }
   # Stored -> display: ids -> label; the sidecar's stored short / short_fig
   # (the strings 09 writes into region / scope columns) -> display short.
-  src <- c(ids, as.character(meta$short[ids]), as.character((meta$short_fig %||% meta$short)[ids]))
+  src <- c(
+    ids,
+    as.character(meta$short[ids]),
+    as.character((meta$short_fig %||% meta$short)[ids])
+  )
   dst <- c(out$label[ids], out$short[ids], out$short_fig[ids])
   keep <- !duplicated(src)
   clash <- unique(src[duplicated(src) & !duplicated(paste(src, dst))])
-  if (length(clash))
-    stop("group_display_meta: stored group string(s) ", paste(clash, collapse = ", "),
-         " map to more than one display label (an id or short name shared by two groups).", call. = FALSE)
+  if (length(clash)) {
+    stop(
+      "group_display_meta: stored group string(s) ",
+      paste(clash, collapse = ", "),
+      " map to more than one display label (an id or short name shared by two groups).",
+      call. = FALSE
+    )
+  }
   out$map <- stats::setNames(unname(dst[keep]), src[keep])
   out
 }
@@ -230,21 +348,45 @@ group_display_meta <- function(meta, lags = NULL, mode = "registry") {
 #' @param cols columns to map; NULL = every character / factor column
 #' @param rename_cols also map the column NAMES (tables pivoted wide by group)
 relabel_groups <- function(df, disp, cols = NULL, rename_cols = TRUE) {
-  if (is.null(df) || is.null(disp) || identical(disp$mode, "registry")) return(df)
+  if (is.null(df) || is.null(disp) || identical(disp$mode, "registry")) {
+    return(df)
+  }
   map <- disp$map
-  sub1 <- function(x) { hit <- x %in% names(map); x[hit] <- unname(map[x[hit]]); x }
-  if (!is.data.frame(df)) return(if (is.character(df)) sub1(df) else df)
-  cols <- cols %||% names(df)[vapply(df, function(x) is.character(x) || is.factor(x), logical(1))]
+  sub1 <- function(x) {
+    hit <- x %in% names(map)
+    x[hit] <- unname(map[x[hit]])
+    x
+  }
+  if (!is.data.frame(df)) {
+    return(if (is.character(df)) sub1(df) else df)
+  }
+  cols <- cols %||%
+    names(df)[vapply(
+      df,
+      function(x) is.character(x) || is.factor(x),
+      logical(1)
+    )]
   for (cc in intersect(cols, names(df))) {
     x <- df[[cc]]
     if (is.factor(x)) {
       lv <- sub1(levels(x))
-      if (anyDuplicated(lv)) stop("relabel_groups: column ", cc, " maps two levels onto one label.", call. = FALSE)
+      if (anyDuplicated(lv)) {
+        stop(
+          "relabel_groups: column ",
+          cc,
+          " maps two levels onto one label.",
+          call. = FALSE
+        )
+      }
       levels(x) <- lv
-    } else if (is.character(x)) x <- sub1(x)
+    } else if (is.character(x)) {
+      x <- sub1(x)
+    }
     df[[cc]] <- x
   }
-  if (isTRUE(rename_cols)) names(df) <- sub1(names(df))
+  if (isTRUE(rename_cols)) {
+    names(df) <- sub1(names(df))
+  }
   df
 }
 
@@ -264,14 +406,61 @@ relabel_groups <- function(df, disp, cols = NULL, rename_cols = TRUE) {
 # elsewhere display only. AFRO_SUBREGION_ORDER: west to south.
 # ---------------------------------------------------------------------------
 AFRO_SUBREGION <- c(
-  stats::setNames(rep("Eastern Africa", 13L),
-                  c("BDI", "ETH", "KEN", "MDG", "RWA", "SDN", "SSD", "UGA", "TZA", "ERI", "DJI", "SOM", "COM")),
-  stats::setNames(rep("Southern Africa", 9L), c("BWA", "MOZ", "MWI", "NAM", "SWZ", "ZMB", "ZWE", "ZAF", "LSO")),
-  stats::setNames(rep("Central Africa", 9L), c("AGO", "CMR", "CAF", "TCD", "COG", "COD", "GNQ", "GAB", "STP")),
-  stats::setNames(rep("Western Africa", 16L), c("BEN", "BFA", "CIV", "GHA", "GIN", "GNB", "LBR", "MLI", "MRT",
-                                                "NER", "NGA", "SEN", "SLE", "TGO", "GMB", "CPV")))
+  stats::setNames(
+    rep("Eastern Africa", 13L),
+    c(
+      "BDI",
+      "ETH",
+      "KEN",
+      "MDG",
+      "RWA",
+      "SDN",
+      "SSD",
+      "UGA",
+      "TZA",
+      "ERI",
+      "DJI",
+      "SOM",
+      "COM"
+    )
+  ),
+  stats::setNames(
+    rep("Southern Africa", 9L),
+    c("BWA", "MOZ", "MWI", "NAM", "SWZ", "ZMB", "ZWE", "ZAF", "LSO")
+  ),
+  stats::setNames(
+    rep("Central Africa", 9L),
+    c("AGO", "CMR", "CAF", "TCD", "COG", "COD", "GNQ", "GAB", "STP")
+  ),
+  stats::setNames(
+    rep("Western Africa", 16L),
+    c(
+      "BEN",
+      "BFA",
+      "CIV",
+      "GHA",
+      "GIN",
+      "GNB",
+      "LBR",
+      "MLI",
+      "MRT",
+      "NER",
+      "NGA",
+      "SEN",
+      "SLE",
+      "TGO",
+      "GMB",
+      "CPV"
+    )
+  )
+)
 WHO_EMRO_ISO3 <- c("DJI", "SOM", "SDN")
-AFRO_SUBREGION_ORDER <- c("Western Africa", "Central Africa", "Eastern Africa", "Southern Africa")
+AFRO_SUBREGION_ORDER <- c(
+  "Western Africa",
+  "Central Africa",
+  "Eastern Africa",
+  "Southern Africa"
+)
 
 #' afro_subregion_of
 #'
@@ -281,22 +470,32 @@ AFRO_SUBREGION_ORDER <- c("Western Africa", "Central Africa", "Eastern Africa", 
 afro_subregion_of <- function(iso3) {
   x <- toupper(trimws(as.character(iso3)))
   sub <- unname(AFRO_SUBREGION[x])
-  # The synthetic world's fake countries (gid.R::syntheticCountries(), call-time;
+  # The synthetic world's fake countries (gid.R::synthetic_countries(), call-time;
   # a no-op for real codes, which never match its XA? codes).
-  if (anyNA(sub) && exists("syntheticCountries", mode = "function")) {
-    syn <- syntheticCountries()
+  if (anyNA(sub) && exists("synthetic_countries", mode = "function")) {
+    syn <- synthetic_countries()
     hit <- is.na(sub) & x %in% syn$iso3
     sub[hit] <- syn$afro_region[match(x[hit], syn$iso3)]
   }
-  data.frame(afro_subregion = sub,
-             who_region = ifelse(is.na(sub), NA_character_, ifelse(x %in% WHO_EMRO_ISO3, "EMRO", "AFRO")),
-             stringsAsFactors = FALSE)
+  data.frame(
+    afro_subregion = sub,
+    who_region = ifelse(
+      is.na(sub),
+      NA_character_,
+      ifelse(x %in% WHO_EMRO_ISO3, "EMRO", "AFRO")
+    ),
+    stringsAsFactors = FALSE
+  )
 }
 
-METRIC_LABELS <- c(cases = "Suspected cases per month",
-                   onsets = "Outbreak onsets per month")
-METRIC_CUM    <- c(cases = "cumulative suspected cases",
-                   onsets = "cumulative outbreak onsets")
+METRIC_LABELS <- c(
+  cases = "Suspected cases per month",
+  onsets = "Outbreak onsets per month"
+)
+METRIC_CUM <- c(
+  cases = "cumulative suspected cases",
+  onsets = "cumulative outbreak onsets"
+)
 
 # ---------------------------------------------------------------------------
 # Supplementary parameter-plot registries (derive_track_params in 09;
@@ -310,46 +509,80 @@ METRIC_CUM    <- c(cases = "cumulative suspected cases",
 #' (nbr_lag1_*), the population elasticity (log_pop_c) and the monthly
 #' negative-binomial shape.
 SUPP_PARAM_FAMILIES <- list(
-  occurrence = c("intercept", "climate", "spillover", "ttlo", "contagion", "other"),
-  duration   = c("intercept", "climate", "spillover", "seasonal", "month", "other"),
-  monthly    = c("intercept", "climate", "spillover", "seasonal", "month", "other")
+  occurrence = c(
+    "intercept",
+    "climate",
+    "spillover",
+    "ttlo",
+    "contagion",
+    "other"
+  ),
+  duration = c(
+    "intercept",
+    "climate",
+    "spillover",
+    "seasonal",
+    "month",
+    "other"
+  ),
+  monthly = c("intercept", "climate", "spillover", "seasonal", "month", "other")
 )
 
 #' Classify a model term into a parameter family for the supplementary plots.
-#' A thin wrapper over getCovarType() (utils/plots.R, sourced by 09 alongside
-#' results_core) that adds the families getCovarType() lumps as "other": the
+#' A thin wrapper over get_covar_type() (utils/plots.R, sourced by 09 alongside
+#' results_core) that adds the families get_covar_type() lumps as "other": the
 #' baseline intercept, the multi-scale spillover lags (ongoing_outbreak*), the
 #' distance-weighted neighbour contagion (nbr_contagion*), and the seasonal
 #' baseline-hazard vs. month-of-outbreak split. Returns NA for ENSO terms so
 #' the caller can drop them (they are Figures 1/2).
 param_family <- function(term) {
-  if (length(term) != 1L) return(vapply(term, param_family, character(1)))
-  if (is.na(term)) return(NA_character_)
+  if (length(term) != 1L) {
+    return(vapply(term, param_family, character(1)))
+  }
+  if (is.na(term)) {
+    return(NA_character_)
+  }
   t <- as.character(term)
-  if (grepl("enso", t, ignore.case = TRUE))  return(NA_character_)   # ENSO -> Figures 1/2
-  if (grepl("^Intercept", t))                return("intercept")
-  if (grepl("^ongoing_outbreak", t))         return("spillover")
-  if (grepl("nbr_contagion", t))             return("contagion")
-  if (grepl("time_to_last_outbreak", t))     return("ttlo")
-  if (grepl("seas", t))                      return("seasonal")  # t_start_seas / seasms
+  if (grepl("enso", t, ignore.case = TRUE)) {
+    return(NA_character_)
+  } # ENSO -> Figures 1/2
+  if (grepl("^Intercept", t)) {
+    return("intercept")
+  }
+  if (grepl("^ongoing_outbreak", t)) {
+    return("spillover")
+  }
+  if (grepl("nbr_contagion", t)) {
+    return("contagion")
+  }
+  if (grepl("time_to_last_outbreak", t)) {
+    return("ttlo")
+  }
+  if (grepl("seas", t)) {
+    return("seasonal")
+  } # t_start_seas / seasms
   # mso = months since onset (duration "month-of-outbreak" baseline hazard);
   # mso_band / msoms, plus calendar month-of-year (sin_month, factor(month)).
-  if (grepl("mso|month", t, ignore.case = TRUE)) return("month")
-  switch(getCovarType(t),
-         "climate_var"            = "climate",
-         "climate anomaly"        = "climate",
-         "climate mean"           = "climate",
-         "months"                 = "month",
-         "years to last outbreak" = "ttlo",
-         "enso teleconnection"    = NA_character_,
-         "other")
+  if (grepl("mso|month", t, ignore.case = TRUE)) {
+    return("month")
+  }
+  switch(
+    get_covar_type(t),
+    "climate_var" = "climate",
+    "climate anomaly" = "climate",
+    "climate mean" = "climate",
+    "months" = "month",
+    "years to last outbreak" = "ttlo",
+    "enso teleconnection" = NA_character_,
+    "other"
+  )
 }
 
 # ---------------------------------------------------------------------------
 # Artefact schema tokens
 # ---------------------------------------------------------------------------
 
-#' Per-artefact schema tokens, baked into the filename by makeResultsRunFile().
+#' Per-artefact schema tokens, baked into the filename by make_results_run_file().
 #'
 #' Deliberately a CODE constant and not a config key: a token records a change
 #' in the derived table's *columns or estimand* -- i.e. a change in the code --
@@ -390,227 +623,240 @@ param_family <- function(term) {
 # record), `phases` (NOAA ENSO-episode runs on it, extended by the CFSv2
 # ensemble mean) for the ONI strips and phase shading of Figures 1 and 3,
 # and `handoffs` (per arm).
-RESULTS_SCHEMA <- c(enso_relation = "v3", attribution = "v10", smoothing = "v5", oni = "v4",
-                    # Per-gid outbreak-onset rate over surveillance-covered
-                    # months, for Figure 1b's inset map (derive_onset_rate in 09).
-                    onset_rate = "v1",
-                    # Region/country parameter summaries for the supplementary
-                    # caterpillar plots (derive_track_params in 09; plotted by
-                    # build_fig_supp_track_params in 10). Per-track tidy tibble of
-                    # population + country parameter estimates (every term except
-                    # ENSO, which is Figures 1/2).
-                    track_params = "v1",
-                    # Manuscript "key numbers" report artefacts (phase 11 notebook
-                    # reads these; 09 derives them). Each is a bundle of tidy,
-                    # kable-ready tibbles keyed as noted in makeResultsRunFile().
-                    # report_dataset: coverage on OBSERVED sub-ADM1 populations
-                    # (build_adm1_obs_pop, recover_dropped=TRUE), episodes_by_country
-                    # (ENSO group x country x admin level, table S2), cascade
-                    # (processing counts, table S1), raw_counts / raw_table1
-                    # (01's outbreak set, ADM0 excluded, Zheng layout incl. ADM3),
-                    # outbreaks (one row per analysis outbreak with its season-year
-                    # DJF ENSO state, gid and afro_subregion, for 11's gtsummary
-                    # tables), table1_region (the analysis set by admin level incl.
-                    # All, for Africa and each WHO-AFRO subregion; table S2) and
-                    # enso_region / enso_region_p (outbreaks by season-year ENSO
-                    # state per block, outbreaks per cholera year of the state,
-                    # Kruskal-Wallis p; table S3).
-                    # report_effects: effects population on the sub-ADM1 basis;
-                    # effects_region and effects_country keep range_lo / range_hi
-                    # (the group crossbasis's fitted ONI range, from
-                    # enso_relation), so 11 daggers conditions outside it.
-                    report_dataset = "v5", report_effects = "v6",
-                    # report_forecast: horizon_totals with the annualised
-                    # incidence inc_ann_100k and enso_group/region columns,
-                    # scope_pop (simulated-gid population denominators), n_months
-                    # (simulated vs calendar months per window), factual_start /
-                    # arm_starts; the region peak ratio is the max of the
-                    # region's monthly total; Africa rows follow the Africa
-                    # window and pop_grid / pop_shift carry africa_def = "mixed".
-                    report_smoothing = "v1", report_forecast = "v5",
-                    # ENSO exposure by direction / magnitude / certainty
-                    # (derive_report_enso_exposure), incl. direction `either`
-                    # and the grid track `any_credible` (the track-wise union:
-                    # some single track has P >= p).
-                    report_enso_exposure = "v3",
-                    # Population in ADM1s with more ENSO-attributable cases,
-                    # forecast vs counterfactual (derive_report_attrib_exposure):
-                    # Childs ratio-of-means point + paired-bootstrap interval,
-                    # childs_median (ratio of medians) and IPCC robustness
-                    # classes, over `window` (attribution | post_fork) and
-                    # `explosive_guard` axes; sets-keyed. A zero counterfactual
-                    # statistic with a positive forecast counts (ratio = Inf);
-                    # only 0 vs 0 is undefined.
-                    report_attrib_exposure = "v4",
-                    # Attributable number / fraction, probability ratio (+ FAR,
-                    # PS, PNS) for onset_any / cases_ge, and signal-to-noise of
-                    # the paired runs of report_attrib_exposure, same axes, plus
-                    # ipcc_scope, the IPCC class of each scope's (Africa,
-                    # region, country) summed paired totals at every
-                    # thresholds.attrib_magnitudes (Figure 4a's ratio bars).
-                    # Sets-keyed.
-                    report_attrib_metrics = "v3",
-                    # Attribution of past strong ENSO events: the
-                    # report_attrib_metrics families + report_attrib_exposure
-                    # classes per event x factual source (simulation |
-                    # smoothing) x explosive guard, observed totals and the
-                    # observed-anchored AN. Unkeyed (the analog set is the event
-                    # manifest's). + explosive_summary (table S29: what the
-                    # explosive guard drops, per event x factual source x set x
-                    # scope; explosive_cap from the stamped
-                    # results.thresholds.explosive_case_cap) and sub_windows (one
-                    # cell per per-winter sub-window of a schema-3 event
-                    # manifest, enso_events_v2.yml). The probability-ratio tables
-                    # (pr_adm1 / pr_scope / pr_pop and their sub-window versions)
-                    # keep their outbreak event as `pr_event`.
-                    report_event_attrib = "v4",
-                    # Its analytic cross-check: crossbasis-only AF / AN of the
-                    # same events on the observed panel, with sub_windows.
-                    report_event_af_model = "v2",
-                    # Posterior interval of the attributable fraction / number
-                    # from fixed-draw runs: per-draw AF / AN with a
-                    # delta-method noise adjustment. af_posterior (forecast,
-                    # sets-keyed; cells attribution / post_fork) and
-                    # event_af_posterior (events, unkeyed; explosive modes / cap
-                    # from the results config, + sub_windows). Africa per draw
-                    # is the replicate-level sum of every unit (no AF_MC
-                    # combinations, n_mc NA), the explosive guard drops a
-                    # replicate from its whole unit (derivation.af_guard_scope),
-                    # and a scope / ADM1 whose noise share reaches
-                    # thresholds.af_noise_share_max is flagged unidentified
-                    # (adjusted interval NA; Childs population: variants
-                    # unidentified / unidentified_pass).
-                    af_posterior = "v3", event_af_posterior = "v4",
-                    # Posterior interval of the Childs population: the Childs
-                    # rule per draw on the noise-adjusted ADM1 AF (variant adj)
-                    # and on the raw per-draw means (raw), from the same
-                    # fixed-draw runs. Sets-keyed.
-                    attrib_exposure_posterior = "v3",
-                    # Information component of the forecast attribution:
-                    # displayed (stitched) factual vs attribution factual vs
-                    # counterfactual, per draw; AN_total = AN_information
-                    # + AN_enso. Sets-keyed.
-                    report_attrib_information = "v2",
-                    # Window totals and annualised incidence of the paired
-                    # forecast / counterfactual runs: Africa, groups and
-                    # countries per attribution cell. Sets-keyed.
-                    report_attrib_incidence = "v1",
-                    # Hindcast forecast skill: derived by 09 from the
-                    # hindcast manifest + each run's validation/metrics and
-                    # merged/monthly_summary through utils/hindcast_skill.R; read
-                    # by 10 (figure H), notebooks/hindcast_skill.qmd and 11.
-                    # A reference score that sums to zero up to round-off leaves
-                    # the CRPSS undefined (NA).
-                    hindcast_runs = "v1", hindcast_occ = "v2", hindcast_cases = "v2",
-                    report_hindcast = "v1",
-                    # Supplementary tables: MCMC convergence of the
-                    # deployed fits (convergence, track-keyed; report_convergence,
-                    # table S8 / fig. S5, with each fit's deploy-gate verdict --
-                    # gate_verdict pass | allowed | fail, gate_reasons, ... -- and
-                    # the deploy's convergence block `gate`), selected lags + firm
-                    # horizons and the LOO lag rankings (report_lags, S9 / S10 /
-                    # fig. S6), the baseline-rate anchoring tables (report_anchor,
-                    # S7), software versions (report_software, S13), and the
-                    # brms_kl class-sweep comparison (report_kl_sweep).
-                    convergence = "v1", report_convergence = "v2",
-                    # report_lags: selected floor_lag, bound_active / bound_cost
-                    # (+ SE: the paired elpd cost of the deploy floor when it
-                    # binds), rank2_lag and best_nonneg_lag with their elpd
-                    # difference to rank 1, the deployed lag's Pareto-k counts;
-                    # the ranking carries Pareto-k columns (NA when the 05
-                    # ranking predates them); loo_summary (table T2,
-                    # report_lags_loo_summary(), at rule$se_mult).
-                    report_lags = "v3",
-                    # Fit-level model specification of the deployed fits:
-                    # formula terms, RE groups,
-                    # family, coefficients and priors per fit, checked against
-                    # analysis/model_terms_deployed.yml (table S34). Track-keyed;
-                    # written by the convergence step from its fit load.
-                    report_model_spec = "v1",
-                    report_anchor = "v1", report_software = "v1", report_kl_sweep = "v1",
-                    # Figure 1d: rainfall anomaly-ONI correlation per
-                    # ENSO group x centre month x lag, with within-group agreement,
-                    # and the groups' main rainy seasons; from 03_prepare_rain_adm1.R's
-                    # ADM1 series. + group_lags (table T1b's rainfall columns per
-                    # weighting x group, rain_enso_lag_summary()) and mechanisms
-                    # (table T1a, a copy of the curated
-                    # results.inputs.enso_rain_mechanisms; NULL when "").
-                    rain_enso = "v2",
-                    # Group display lags + per-country season ends: each group's
-                    # deployed occ / dur / mon lag
-                    # read from the fits (style.group_labels "lag" builds the
-                    # class letters from it in 10 / 11), members, counts, and
-                    # table S30 (season_ends, season_windows). Ids only.
-                    group_labels = "v1",
-                    # Lag averaging: per track and
-                    # group, Pareto-k and k-robust elpd differences per lag,
-                    # stacking / pseudo-BMA+ weights on the `all` and `eligible`
-                    # lag sets, per-lag and mixture population ERFs on a common
-                    # grid and the IRR at enso_conds. Track-keyed.
-                    lag_averaging = "v1",
-                    # Membership uncertainty of the deployed classes: per
-                    # country p_max and the
-                    # responsibility row of the deployed sweep cell, group
-                    # summary, partition stability, sensitivity to the sweep
-                    # cell and chain set (descriptive elpd), and the
-                    # membership-weighted effects M1 (kl model) and M2 (deployed
-                    # ERFs at each group's lag, from the 05 lag sidecars).
-                    report_membership = "v1",
-                    # Per-country WHO term scale of the smoothing (table D30):
-                    # the estimated table 08a
-                    # wrote, or (legacy preview, a fixed-scale smoothing) the
-                    # implied WHO/DB ratios recomputed from the run's frame;
-                    # + national_monthly, the WHO national monthly series
-                    # (03_prepare_who_monthly.R, table D36).
-                    report_who_scale = "v2",
-                    # Counterfactual analog sets:
-                    # per arm (forecast / event) x set, size, model shares,
-                    # seam error, per-winter means and the min_set_size flag
-                    # (table D29), from the Lenssen caches the runs read;
-                    # + run_design (table D34:
-                    # replicates, draws, draw mode, handoff, analog pool and
-                    # clamp margin per simulation arm, from the run configs).
-                    report_analog_sets = "v2",
-                    # Occurrence-panel tables: the national-zero audit (D32),
-                    # each on only when the panel's sidecar exists.
-                    report_national_zero_audit = "v1",
-                    # ... and the occurrence-panel exclusions per country (D31).
-                    report_occ_panel_exclusions = "v1",
-                    # ... and the contagion term's surveillance coverage (D33).
-                    report_contagion_coverage = "v1",
-                    # Supplement maps MU / GM / KC: modelled units by level and
-                    # status, the ADM1s
-                    # of the modelled countries without a recorded episode, and
-                    # the fit registry's membership (derive_modelled_units).
-                    modelled_units = "v1",
-                    # Figure 1c's onset-season column: the deployed occurrence
-                    # fits' seasonal
-                    # spline per ENSO group and calendar month, relative to the
-                    # annual mean (derive_occ_seasonality), so 10 only reads;
-                    # `draws`, the per-draw calendar curves, for seasonality's band.
-                    occ_seasonality = "v2",
-                    # Supplement fig. SE: per
-                    # ENSO group and calendar month, the rainfall climatology
-                    # and rainy season (rain_enso) against the observed onset,
-                    # cessation and case rates, with the occurrence and monthly
-                    # models' fitted seasonality and each track's peak month
-                    # (derive_seasonality), so 10 / 11 only read; the
-                    # occurrence band (lo / hi at `interval`, from
-                    # occ_seasonality's draws).
-                    seasonality = "v2",
-                    # Figure 1c's top row:
-                    # the composite El Nino / La Nina ONI cycle over Y, Y+1
-                    # (derive_oni_composite), so 10 only reads.
-                    oni_composite = "v1",
-                    # Supplement fig. WR: observed WHO ratio of
-                    # the target year to the ENSO-neutral years against the
-                    # smoothing / ENSO-counterfactual ratio of means over their
-                    # common months (derive_report_who_enso_ratio).
-                    report_who_enso_ratio = "v1",
-                    # Supplementary table: ENSO contrasts of the
-                    # three tracks, all outbreaks vs the subset with a confirmed
-                    # case, from 01's outbreak table (confirmed_agreement_table).
-                    report_confirmed_agreement = "v2")
+RESULTS_SCHEMA <- c(
+  enso_relation = "v3",
+  attribution = "v10",
+  smoothing = "v5",
+  oni = "v4",
+  # Per-gid outbreak-onset rate over surveillance-covered
+  # months, for Figure 1b's inset map (derive_onset_rate in 09).
+  onset_rate = "v1",
+  # Region/country parameter summaries for the supplementary
+  # caterpillar plots (derive_track_params in 09; plotted by
+  # build_fig_supp_track_params in 10). Per-track tidy tibble of
+  # population + country parameter estimates (every term except
+  # ENSO, which is Figures 1/2).
+  track_params = "v1",
+  # Manuscript "key numbers" report artefacts (phase 11 notebook
+  # reads these; 09 derives them). Each is a bundle of tidy,
+  # kable-ready tibbles keyed as noted in make_results_run_file().
+  # report_dataset: coverage on OBSERVED sub-ADM1 populations
+  # (build_adm1_obs_pop, recover_dropped=TRUE), episodes_by_country
+  # (ENSO group x country x admin level, table S2), cascade
+  # (processing counts, table S1), raw_counts / raw_table1
+  # (01's outbreak set, ADM0 excluded, Zheng layout incl. ADM3),
+  # outbreaks (one row per analysis outbreak with its season-year
+  # DJF ENSO state, gid and afro_subregion, for 11's gtsummary
+  # tables), table1_region (the analysis set by admin level incl.
+  # All, for Africa and each WHO-AFRO subregion; table S2) and
+  # enso_region / enso_region_p (outbreaks by season-year ENSO
+  # state per block, outbreaks per cholera year of the state,
+  # Kruskal-Wallis p; table S3).
+  # report_effects: effects population on the sub-ADM1 basis;
+  # effects_region and effects_country keep range_lo / range_hi
+  # (the group crossbasis's fitted ONI range, from
+  # enso_relation), so 11 daggers conditions outside it.
+  report_dataset = "v5",
+  report_effects = "v6",
+  # report_forecast: horizon_totals with the annualised
+  # incidence inc_ann_100k and enso_group/region columns,
+  # scope_pop (simulated-gid population denominators), n_months
+  # (simulated vs calendar months per window), factual_start /
+  # arm_starts; the region peak ratio is the max of the
+  # region's monthly total; Africa rows follow the Africa
+  # window and pop_grid / pop_shift carry africa_def = "mixed".
+  report_smoothing = "v1",
+  report_forecast = "v5",
+  # ENSO exposure by direction / magnitude / certainty
+  # (derive_report_enso_exposure), incl. direction `either`
+  # and the grid track `any_credible` (the track-wise union:
+  # some single track has P >= p).
+  report_enso_exposure = "v3",
+  # Population in ADM1s with more ENSO-attributable cases,
+  # forecast vs counterfactual (derive_report_attrib_exposure):
+  # Childs ratio-of-means point + paired-bootstrap interval,
+  # childs_median (ratio of medians) and IPCC robustness
+  # classes, over `window` (attribution | post_fork) and
+  # `explosive_guard` axes; sets-keyed. A zero counterfactual
+  # statistic with a positive forecast counts (ratio = Inf);
+  # only 0 vs 0 is undefined.
+  report_attrib_exposure = "v4",
+  # Attributable number / fraction, probability ratio (+ FAR,
+  # PS, PNS) for onset_any / cases_ge, and signal-to-noise of
+  # the paired runs of report_attrib_exposure, same axes, plus
+  # ipcc_scope, the IPCC class of each scope's (Africa,
+  # region, country) summed paired totals at every
+  # thresholds.attrib_magnitudes (Figure 4a's ratio bars).
+  # Sets-keyed.
+  report_attrib_metrics = "v3",
+  # Attribution of past strong ENSO events: the
+  # report_attrib_metrics families + report_attrib_exposure
+  # classes per event x factual source (simulation |
+  # smoothing) x explosive guard, observed totals and the
+  # observed-anchored AN. Unkeyed (the analog set is the event
+  # manifest's). + explosive_summary (table S29: what the
+  # explosive guard drops, per event x factual source x set x
+  # scope; explosive_cap from the stamped
+  # results.thresholds.explosive_case_cap) and sub_windows (one
+  # cell per per-winter sub-window of a schema-3 event
+  # manifest, enso_events_v2.yml). The probability-ratio tables
+  # (pr_adm1 / pr_scope / pr_pop and their sub-window versions)
+  # keep their outbreak event as `pr_event`.
+  report_event_attrib = "v4",
+  # Its analytic cross-check: crossbasis-only AF / AN of the
+  # same events on the observed panel, with sub_windows.
+  report_event_af_model = "v2",
+  # Posterior interval of the attributable fraction / number
+  # from fixed-draw runs: per-draw AF / AN with a
+  # delta-method noise adjustment. af_posterior (forecast,
+  # sets-keyed; cells attribution / post_fork) and
+  # event_af_posterior (events, unkeyed; explosive modes / cap
+  # from the results config, + sub_windows). Africa per draw
+  # is the replicate-level sum of every unit (no AF_MC
+  # combinations, n_mc NA), the explosive guard drops a
+  # replicate from its whole unit (derivation.af_guard_scope),
+  # and a scope / ADM1 whose noise share reaches
+  # thresholds.af_noise_share_max is flagged unidentified
+  # (adjusted interval NA; Childs population: variants
+  # unidentified / unidentified_pass).
+  af_posterior = "v3",
+  event_af_posterior = "v4",
+  # Posterior interval of the Childs population: the Childs
+  # rule per draw on the noise-adjusted ADM1 AF (variant adj)
+  # and on the raw per-draw means (raw), from the same
+  # fixed-draw runs. Sets-keyed.
+  attrib_exposure_posterior = "v3",
+  # Information component of the forecast attribution:
+  # displayed (stitched) factual vs attribution factual vs
+  # counterfactual, per draw; AN_total = AN_information
+  # + AN_enso. Sets-keyed.
+  report_attrib_information = "v2",
+  # Window totals and annualised incidence of the paired
+  # forecast / counterfactual runs: Africa, groups and
+  # countries per attribution cell. Sets-keyed.
+  report_attrib_incidence = "v1",
+  # Hindcast forecast skill: derived by 09 from the
+  # hindcast manifest + each run's validation/metrics and
+  # merged/monthly_summary through utils/hindcast_skill.R; read
+  # by 10 (figure H), notebooks/hindcast_skill.qmd and 11.
+  # A reference score that sums to zero up to round-off leaves
+  # the CRPSS undefined (NA).
+  hindcast_runs = "v1",
+  hindcast_occ = "v2",
+  hindcast_cases = "v2",
+  report_hindcast = "v1",
+  # Supplementary tables: MCMC convergence of the
+  # deployed fits (convergence, track-keyed; report_convergence,
+  # table S8 / fig. S5, with each fit's deploy-gate verdict --
+  # gate_verdict pass | allowed | fail, gate_reasons, ... -- and
+  # the deploy's convergence block `gate`), selected lags + firm
+  # horizons and the LOO lag rankings (report_lags, S9 / S10 /
+  # fig. S6), the baseline-rate anchoring tables (report_anchor,
+  # S7), software versions (report_software, S13), and the
+  # brms_kl class-sweep comparison (report_kl_sweep).
+  convergence = "v1",
+  report_convergence = "v2",
+  # report_lags: selected floor_lag, bound_active / bound_cost
+  # (+ SE: the paired elpd cost of the deploy floor when it
+  # binds), rank2_lag and best_nonneg_lag with their elpd
+  # difference to rank 1, the deployed lag's Pareto-k counts;
+  # the ranking carries Pareto-k columns (NA when the 05
+  # ranking predates them); loo_summary (table T2,
+  # report_lags_loo_summary(), at rule$se_mult).
+  report_lags = "v3",
+  # Fit-level model specification of the deployed fits:
+  # formula terms, RE groups,
+  # family, coefficients and priors per fit, checked against
+  # analysis/model_terms_deployed.yml (table S34). Track-keyed;
+  # written by the convergence step from its fit load.
+  report_model_spec = "v1",
+  report_anchor = "v1",
+  report_software = "v1",
+  report_kl_sweep = "v1",
+  # Figure 1d: rainfall anomaly-ONI correlation per
+  # ENSO group x centre month x lag, with within-group agreement,
+  # and the groups' main rainy seasons; from 03_prepare_rain_adm1.R's
+  # ADM1 series. + group_lags (table T1b's rainfall columns per
+  # weighting x group, rain_enso_lag_summary()) and mechanisms
+  # (table T1a, a copy of the curated
+  # results.inputs.enso_rain_mechanisms; NULL when "").
+  rain_enso = "v2",
+  # Group display lags + per-country season ends: each group's
+  # deployed occ / dur / mon lag
+  # read from the fits (style.group_labels "lag" builds the
+  # class letters from it in 10 / 11), members, counts, and
+  # table S30 (season_ends, season_windows). Ids only.
+  group_labels = "v1",
+  # Lag averaging: per track and
+  # group, Pareto-k and k-robust elpd differences per lag,
+  # stacking / pseudo-BMA+ weights on the `all` and `eligible`
+  # lag sets, per-lag and mixture population ERFs on a common
+  # grid and the IRR at enso_conds. Track-keyed.
+  lag_averaging = "v1",
+  # Membership uncertainty of the deployed classes: per
+  # country p_max and the
+  # responsibility row of the deployed sweep cell, group
+  # summary, partition stability, sensitivity to the sweep
+  # cell and chain set (descriptive elpd), and the
+  # membership-weighted effects M1 (kl model) and M2 (deployed
+  # ERFs at each group's lag, from the 05 lag sidecars).
+  report_membership = "v1",
+  # Per-country WHO term scale of the smoothing (table D30):
+  # the estimated table 08a
+  # wrote, or (legacy preview, a fixed-scale smoothing) the
+  # implied WHO/DB ratios recomputed from the run's frame;
+  # + national_monthly, the WHO national monthly series
+  # (03_prepare_who_monthly.R, table D36).
+  report_who_scale = "v2",
+  # Counterfactual analog sets:
+  # per arm (forecast / event) x set, size, model shares,
+  # seam error, per-winter means and the min_set_size flag
+  # (table D29), from the Lenssen caches the runs read;
+  # + run_design (table D34:
+  # replicates, draws, draw mode, handoff, analog pool and
+  # clamp margin per simulation arm, from the run configs).
+  report_analog_sets = "v2",
+  # Occurrence-panel tables: the national-zero audit (D32),
+  # each on only when the panel's sidecar exists.
+  report_national_zero_audit = "v1",
+  # ... and the occurrence-panel exclusions per country (D31).
+  report_occ_panel_exclusions = "v1",
+  # ... and the contagion term's surveillance coverage (D33).
+  report_contagion_coverage = "v1",
+  # Supplement maps MU / GM / KC: modelled units by level and
+  # status, the ADM1s
+  # of the modelled countries without a recorded episode, and
+  # the fit registry's membership (derive_modelled_units).
+  modelled_units = "v1",
+  # Figure 1c's onset-season column: the deployed occurrence
+  # fits' seasonal
+  # spline per ENSO group and calendar month, relative to the
+  # annual mean (derive_occ_seasonality), so 10 only reads;
+  # `draws`, the per-draw calendar curves, for seasonality's band.
+  occ_seasonality = "v2",
+  # Supplement fig. SE: per
+  # ENSO group and calendar month, the rainfall climatology
+  # and rainy season (rain_enso) against the observed onset,
+  # cessation and case rates, with the occurrence and monthly
+  # models' fitted seasonality and each track's peak month
+  # (derive_seasonality), so 10 / 11 only read; the
+  # occurrence band (lo / hi at `interval`, from
+  # occ_seasonality's draws).
+  seasonality = "v2",
+  # Figure 1c's top row:
+  # the composite El Nino / La Nina ONI cycle over Y, Y+1
+  # (derive_oni_composite), so 10 only reads.
+  oni_composite = "v1",
+  # Supplement fig. WR: observed WHO ratio of
+  # the target year to the ENSO-neutral years against the
+  # smoothing / ENSO-counterfactual ratio of means over their
+  # common months (derive_report_who_enso_ratio).
+  report_who_enso_ratio = "v1",
+  # Supplementary table: ENSO contrasts of the
+  # three tracks, all outbreaks vs the subset with a confirmed
+  # case, from 01's outbreak table (confirmed_agreement_table).
+  report_confirmed_agreement = "v2"
+)
 
 #' Cache key for a set list. An aggregate derived for one list of analog sets
 #' must never be silently reused for another, and the key must not depend on the
@@ -636,28 +882,56 @@ sets_key <- function(sets) paste(sort(sets), collapse = "-")
 #'                 zeroed where undetected (the grid itself must stay complete).
 #' A "detected" request against a run without the column is an error naming the
 #' run, never a silent fall-back to latent.
-results_select_series <- function(tbl, series, what, kind = c("events", "grid")) {
+results_select_series <- function(
+  tbl,
+  series,
+  what,
+  kind = c("events", "grid")
+) {
   kind <- match.arg(kind)
-  if (identical(series %||% "latent", "latent") || is.null(tbl)) return(tbl)
-  if (!identical(series, "detected"))
-    stop("results.series must be 'latent' or 'detected', got '", series, "'.", call. = FALSE)
-  if (!"detected" %in% names(tbl))
-    stop("results.series = 'detected' but ", what, " carries no `detected` column ",
-         "-- it was not simulated with simulator.filter.covariate_feed: detected.",
-         call. = FALSE)
-  if (kind == "events") return(tbl[tbl$detected %in% 1L, , drop = FALSE])
+  if (identical(series %||% "latent", "latent") || is.null(tbl)) {
+    return(tbl)
+  }
+  if (!identical(series, "detected")) {
+    stop(
+      "results.series must be 'latent' or 'detected', got '",
+      series,
+      "'.",
+      call. = FALSE
+    )
+  }
+  if (!"detected" %in% names(tbl)) {
+    stop(
+      "results.series = 'detected' but ",
+      what,
+      " carries no `detected` column ",
+      "-- it was not simulated with simulator.filter.covariate_feed: detected.",
+      call. = FALSE
+    )
+  }
+  if (kind == "events") {
+    return(tbl[tbl$detected %in% 1L, , drop = FALSE])
+  }
   keep <- tbl$detected %in% 1L
-  if ("Y" %in% names(tbl))           tbl$Y[!keep]           <- 0L
-  if ("cases_month" %in% names(tbl)) tbl$cases_month[!keep] <- NA
+  if ("Y" %in% names(tbl)) {
+    tbl$Y[!keep] <- 0L
+  }
+  if ("cases_month" %in% names(tbl)) {
+    tbl$cases_month[!keep] <- NA
+  }
   tbl
 }
 
 results_config_path <- function(argv = commandArgs(TRUE)) {
   p <- .flag_val("-C", argv) %||% .flag_val("--config", argv)
-  if (is.null(p) || !nzchar(p))
-    stop("[results] no -C/--config given: the manuscript phase is config-driven ",
-         "and the config path also names the artefact directory. Run with ",
-         "-C analysis/configs/results/manuscript.yml", call. = FALSE)
+  if (is.null(p) || !nzchar(p)) {
+    stop(
+      "[results] no -C/--config given: the manuscript phase is config-driven ",
+      "and the config path also names the artefact directory. Run with ",
+      "-C analysis/configs/results/manuscript.yml",
+      call. = FALSE
+    )
+  }
   p
 }
 
@@ -667,19 +941,34 @@ resolve_results_sets <- function(res) {
   main <- as.character(res$scope$main_set)
   supp <- if (isTRUE(res$scope$supplementary)) {
     setdiff(trimws(as.character(res$scope$supp_sets %||% character(0))), "")
-  } else character(0)
+  } else {
+    character(0)
+  }
   sets <- ENSO_ANALOG_SETS[ENSO_ANALOG_SETS %in% unique(c(main, supp))]
-  if (!length(sets))
-    stop("[results] no valid analog sets requested (known: ",
-         paste(ENSO_ANALOG_SETS, collapse = ","), ")", call. = FALSE)
+  if (!length(sets)) {
+    stop(
+      "[results] no valid analog sets requested (known: ",
+      paste(ENSO_ANALOG_SETS, collapse = ","),
+      ")",
+      call. = FALSE
+    )
+  }
   sets
 }
 
 #' Existence guard with a phase-tagged message.
 require_input <- function(path, what, phase = "results") {
-  if (is.null(path) || !nzchar(path) || !file.exists(path))
-    stop(sprintf("[%s] missing required input (%s): %s", phase, what,
-                 path %||% "<NULL>"), call. = FALSE)
+  if (is.null(path) || !nzchar(path) || !file.exists(path)) {
+    stop(
+      sprintf(
+        "[%s] missing required input (%s): %s",
+        phase,
+        what,
+        path %||% "<NULL>"
+      ),
+      call. = FALSE
+    )
+  }
   path
 }
 
@@ -692,44 +981,95 @@ require_input <- function(path, what, phase = "results") {
 load_manifest <- function(path) {
   require_input(path, "forecast manifest")
   man <- yaml::read_yaml(path)
-  if (is.null(man$groups) || !length(man$groups))
+  if (is.null(man$groups) || !length(man$groups)) {
     stop("[results] manifest has no groups: ", path, call. = FALSE)
+  }
   man
 }
 
 #' The factual configs of a forecast manifest, sorted (one per unit / group).
-.manifest_factual_configs <- function(man)
-  sort(unname(vapply(manifest_runs(man, "factual"), function(r) as.character(r$config %||% ""), character(1))))
+.manifest_factual_configs <- function(man) {
+  sort(unname(vapply(
+    manifest_runs(man, "factual"),
+    function(r) as.character(r$config %||% ""),
+    character(1)
+  )))
+}
 
 #' TRUE when the attribution manifest names other factual runs than the forecast
 #' manifest (the attribution factual launched at the counterfactual handoff),
 #' FALSE when both name the same runs (launches already aligned, or no
 #' attribution manifest).
-results_attrib_factual_differs <- function(man, man_attrib)
-  !identical(.manifest_factual_configs(man), .manifest_factual_configs(man_attrib))
+results_attrib_factual_differs <- function(man, man_attrib) {
+  !identical(
+    .manifest_factual_configs(man),
+    .manifest_factual_configs(man_attrib)
+  )
+}
 
 #' Refuse an attribution manifest (utils/make_forecast_attrib_configs.R) that was
 #' not generated from the forecast manifest the results read, or whose units and
 #' counterfactual runs differ from it: the attribution pairs its factual with the
 #' SAME counterfactual runs the display reads.
-results_attrib_manifest_check <- function(man, man_attrib, manifest_path, attrib_path) {
+results_attrib_manifest_check <- function(
+  man,
+  man_attrib,
+  manifest_path,
+  attrib_path
+) {
   norm <- function(p) normalizePath(p, mustWork = FALSE)
   src <- as.character(man_attrib$source_manifest %||% "")
-  if (!nzchar(src) || norm(src) != norm(manifest_path))
-    stop(sprintf(paste0("[results] the attribution manifest %s was generated from '%s', not from ",
-                        "results.inputs.manifest %s. Re-run deploy_prod_run.R --stage gen_attrib."),
-                 attrib_path, src, manifest_path), call. = FALSE)
-  ua <- manifest_units(man); ub <- manifest_units(man_attrib)
-  if (!setequal(names(ua), names(ub)))
-    stop(sprintf("[results] the attribution manifest %s has units %s; the forecast manifest has %s.",
-                 attrib_path, paste(sort(names(ub)), collapse = ","), paste(sort(names(ua)), collapse = ",")),
-         call. = FALSE)
-  for (aset in as.character(unlist(man$analog_sets %||% man$primary_analog_set))) {
-    a <- vapply(manifest_runs(man, "counterfactual", aset), function(r) r$config %||% "", character(1))
-    b <- vapply(manifest_runs(man_attrib, "counterfactual", aset), function(r) r$config %||% "", character(1))
-    if (!identical(a[sort(names(a))], b[sort(names(b))]))
-      stop(sprintf("[results] the attribution manifest %s names other counterfactual runs (set %s) than %s.",
-                   attrib_path, aset, manifest_path), call. = FALSE)
+  if (!nzchar(src) || norm(src) != norm(manifest_path)) {
+    stop(
+      sprintf(
+        paste0(
+          "[results] the attribution manifest %s was generated from '%s', not from ",
+          "results.inputs.manifest %s. Re-run deploy_prod_run.R --stage gen_attrib."
+        ),
+        attrib_path,
+        src,
+        manifest_path
+      ),
+      call. = FALSE
+    )
+  }
+  ua <- manifest_units(man)
+  ub <- manifest_units(man_attrib)
+  if (!setequal(names(ua), names(ub))) {
+    stop(
+      sprintf(
+        "[results] the attribution manifest %s has units %s; the forecast manifest has %s.",
+        attrib_path,
+        paste(sort(names(ub)), collapse = ","),
+        paste(sort(names(ua)), collapse = ",")
+      ),
+      call. = FALSE
+    )
+  }
+  for (aset in as.character(unlist(
+    man$analog_sets %||% man$primary_analog_set
+  ))) {
+    a <- vapply(
+      manifest_runs(man, "counterfactual", aset),
+      function(r) r$config %||% "",
+      character(1)
+    )
+    b <- vapply(
+      manifest_runs(man_attrib, "counterfactual", aset),
+      function(r) r$config %||% "",
+      character(1)
+    )
+    if (!identical(a[sort(names(a))], b[sort(names(b))])) {
+      stop(
+        sprintf(
+          "[results] the attribution manifest %s names other counterfactual runs (set %s) than %s.",
+          attrib_path,
+          aset,
+          manifest_path
+        ),
+        call. = FALSE
+      )
+    }
   }
   invisible(TRUE)
 }
@@ -739,8 +1079,10 @@ load_enso_grouping <- function(path) {
   # Same parse/validation as every other registry read (utils/config.R::
   # load_grouping(): trimmed, blank rows dropped, duplicate iso3 refused),
   # returned as a tibble.
-  tibble::as_tibble(load_grouping(sub("\\.csv$", "", basename(path)),
-                                  groupings_dir = dirname(path)))
+  tibble::as_tibble(load_grouping(
+    sub("\\.csv$", "", basename(path)),
+    groupings_dir = dirname(path)
+  ))
 }
 
 # All groups the manifest declares (ENSO exposure-response: every group).
@@ -760,7 +1102,7 @@ manifest_groups_inc <- function(man, exclude = character(0)) {
 # (`offset(log(base_rate_<track>))`, utils/anchor.R) would be dead weight and
 # `build_location_frame(base_rate_table_paths = NULL)` (the default) adds no
 # column at all. If a figure here ever starts scoring mu, thread
-# resolveBaseRatePaths() in exactly as 07b/07c do.
+# resolve_base_rate_paths() in exactly as 07b/07c do.
 
 #' Resolve the run_tag for one group/arm/analog_set from the manifest: the
 #' `manifest` primary-set
@@ -772,10 +1114,23 @@ manifest_groups_inc <- function(man, exclude = character(0)) {
 # it (a group's countries may sit in several units; loaders that need every
 # run use manifest_units() / results_run_configs()).
 .manifest_run_entry <- function(man, g) {
-  if (!length(man$units)) return(man$groups[[g]])
-  u <- names(man$units)[vapply(man$units, function(x) g %in% unlist(x$groups), logical(1))]
-  if (!length(u)) stop(sprintf("[results] fit group '%s' is in no partition unit of the manifest", g),
-                       call. = FALSE)
+  if (!length(man$units)) {
+    return(man$groups[[g]])
+  }
+  u <- names(man$units)[vapply(
+    man$units,
+    function(x) g %in% unlist(x$groups),
+    logical(1)
+  )]
+  if (!length(u)) {
+    stop(
+      sprintf(
+        "[results] fit group '%s' is in no partition unit of the manifest",
+        g
+      ),
+      call. = FALSE
+    )
+  }
   man$units[[u[1L]]]
 }
 
@@ -784,8 +1139,9 @@ manifest_groups_inc <- function(man, exclude = character(0)) {
 #' Every run config behind the included fit groups (forecast + each analog set):
 #' per group in v1 (order unchanged), per partition unit holding any of them in
 #' v2. Used for the freshness input lists.
-results_run_configs <- function(man, groups, sets)
+results_run_configs <- function(man, groups, sets) {
   unlist(unname(results_unit_arm_configs(man, groups, sets)))
+}
 
 #' results_unit_arm_configs
 #'
@@ -794,15 +1150,32 @@ results_run_configs <- function(man, groups, sets)
 #' for each of `sets`) -- the factual one first and unnamed. Named list by unit.
 results_unit_arm_configs <- function(man, groups, sets) {
   keys <- if (length(man$units)) {
-    names(man$units)[vapply(man$units, function(x) any(groups %in% unlist(x$groups)), logical(1))]
-  } else groups
+    names(man$units)[vapply(
+      man$units,
+      function(x) any(groups %in% unlist(x$groups)),
+      logical(1)
+    )]
+  } else {
+    groups
+  }
   ent <- if (length(man$units)) man$units else man$groups
   lapply(stats::setNames(keys, keys), function(k) {
     e <- ent[[k]]
     primary <- as.character(e$primary_analog_set %||% "all")
-    c(e$factual_config, vapply(sets, function(a)
-      if (identical(a, primary)) e$counterfactual_config %||% e$counterfactual_sets[[a]]$config
-      else e$counterfactual_sets[[a]]$config, character(1)))
+    c(
+      e$factual_config,
+      vapply(
+        sets,
+        function(a) {
+          if (identical(a, primary)) {
+            e$counterfactual_config %||% e$counterfactual_sets[[a]]$config
+          } else {
+            e$counterfactual_sets[[a]]$config
+          }
+        },
+        character(1)
+      )
+    )
   })
 }
 
@@ -816,26 +1189,45 @@ group_run_tag <- function(man, g, arm, analog_set = NULL) {
     if (identical(aset, primary)) {
       gi$counterfactual_config
     } else if (is.null(gi$counterfactual_sets)) {
-      stop(sprintf(paste("[results] group '%s': analog_set '%s' requested but the manifest",
-                         "predates analog sets (primary is '%s')."), g, aset, primary))
+      stop(sprintf(
+        paste(
+          "[results] group '%s': analog_set '%s' requested but the manifest",
+          "predates analog sets (primary is '%s')."
+        ),
+        g,
+        aset,
+        primary
+      ))
     } else {
       cs <- gi$counterfactual_sets[[aset]]
-      if (is.null(cs$config))
-        stop(sprintf("[results] group '%s' has no counterfactual config for analog_set '%s'",
-                     g, aset))
+      if (is.null(cs$config)) {
+        stop(sprintf(
+          "[results] group '%s' has no counterfactual config for analog_set '%s'",
+          g,
+          aset
+        ))
+      }
       cs$config
     }
   }
-  if (is.null(cfg_path)) stop(sprintf("[results] group '%s': no %s config in manifest", g, arm))
+  if (is.null(cfg_path)) {
+    stop(sprintf("[results] group '%s': no %s config in manifest", g, arm))
+  }
   yaml::read_yaml(cfg_path)$simulator$run_tag
 }
 
 group_config_path <- function(man, g, arm, analog_set = NULL) {
   gi <- .manifest_run_entry(man, g)
-  if (arm == "forecast") return(gi$factual_config)
+  if (arm == "forecast") {
+    return(gi$factual_config)
+  }
   primary <- as.character(gi$primary_analog_set %||% "all")
   aset <- as.character(analog_set %||% primary)
-  if (identical(aset, primary)) gi$counterfactual_config else gi$counterfactual_sets[[aset]]$config
+  if (identical(aset, primary)) {
+    gi$counterfactual_config
+  } else {
+    gi$counterfactual_sets[[aset]]$config
+  }
 }
 
 #' Attribution window start (Figures 3-4): from each arm's launch
@@ -844,18 +1236,25 @@ group_config_path <- function(man, g, arm, analog_set = NULL) {
 #' groups. `alignment` is results.derivation.arm_alignment: "stitch" = the
 #' earlier launch (the factual series stitched from the smoothing before its
 #' own launch), "common_start" = the later one.
-resolve_attrib_start <- function(man, groups, sets = NULL, alignment = "common_start")
+resolve_attrib_start <- function(
+  man,
+  groups,
+  sets = NULL,
+  alignment = "common_start"
+) {
   manifest_attrib_start(man, groups, sets, alignment = alignment)
+}
 
 #' The factual arm's launch over the included groups.
-resolve_factual_start <- function(man, groups, sets = NULL)
+resolve_factual_start <- function(man, groups, sets = NULL) {
   manifest_factual_start(man, groups, sets)
+}
 
 # ---------------------------------------------------------------------------
 # Artefact freshness + provenance contract
 # ---------------------------------------------------------------------------
 # One predicate, two wrappers. An mtime-only rule would be blind to the
-# decisions that produce the table (see attachResultsProvenance()'s docstring, utils/provenance.R).
+# decisions that produce the table (see attach_results_provenance()'s docstring, utils/provenance.R).
 #
 # The input list is declared by 09 at derivation time and CARRIED ON THE STAMP,
 # rather than recomputed by each reader. That is what lets phase 10 verify
@@ -879,11 +1278,20 @@ resolve_factual_start <- function(man, groups, sets = NULL)
 results_inputs <- function(files = character(0), globs = list()) {
   files <- as.character(files)
   files <- files[!is.na(files) & nzchar(files)]
-  globbed <- unlist(lapply(globs, function(g) {
-    if (!dir.exists(g$dir)) return(character(0))
-    list.files(g$dir, pattern = g$pattern, full.names = TRUE,
-               recursive = isTRUE(g$recursive))
-  }), use.names = FALSE)
+  globbed <- unlist(
+    lapply(globs, function(g) {
+      if (!dir.exists(g$dir)) {
+        return(character(0))
+      }
+      list.files(
+        g$dir,
+        pattern = g$pattern,
+        full.names = TRUE,
+        recursive = isTRUE(g$recursive)
+      )
+    }),
+    use.names = FALSE
+  )
   # The glob specs ride along as an attribute so the stamp can record them
   # (results_write(globs =)) and 10 can detect inputs added since derivation.
   structure(sort(unique(c(files, globbed %||% character(0)))), globs = globs)
@@ -896,12 +1304,17 @@ results_inputs <- function(files = character(0), globs = list()) {
 #'
 #' @return NULL if fresh, else a one-line reason.
 .results_stale_reason <- function(path, inputs = character(0)) {
-  if (!file.exists(path)) return(sprintf("artefact does not exist: %s", path))
+  if (!file.exists(path)) {
+    return(sprintf("artefact does not exist: %s", path))
+  }
   inputs <- inputs[nzchar(inputs) & file.exists(inputs)]
-  if (!length(inputs)) return(NULL)
+  if (!length(inputs)) {
+    return(NULL)
+  }
   newer <- inputs[file.mtime(inputs) > file.mtime(path)]
-  if (length(newer))
+  if (length(newer)) {
     return(sprintf("input newer than artefact: %s", newer[1]))
+  }
   NULL
 }
 
@@ -915,27 +1328,39 @@ results_inputs <- function(files = character(0), globs = list()) {
 #' @return NULL if fresh, else a one-line reason.
 .results_stamp_stale_reason <- function(stamp) {
   rec <- stamp$inputs
-  if (is.null(rec) || !nrow(rec)) return(NULL)
+  if (is.null(rec) || !nrow(rec)) {
+    return(NULL)
+  }
 
   gone <- rec$path[!file.exists(rec$path)]
-  if (length(gone)) return(sprintf("input no longer exists: %s", gone[1]))
+  if (length(gone)) {
+    return(sprintf("input no longer exists: %s", gone[1]))
+  }
 
   now_mtime <- file.mtime(rec$path)
-  now_size  <- file.size(rec$path)
+  now_size <- file.size(rec$path)
   diff <- now_mtime != rec$mtime | now_size != rec$size
   # A simulator monthly summary rewritten in place in the compact format
   # (utils/compact_sim_outputs.R: identical content, mtime kept, smaller) is the
   # input the stamp recorded: its sidecar must name the recorded size and mtime
   # (utils/sim_io.R::sim_monthly_converted_from()).
   sz <- which(diff & now_mtime == rec$mtime)
-  if (length(sz)) diff[sz] <- !sim_monthly_converted_from(rec$path[sz], rec$mtime[sz], rec$size[sz])
+  if (length(sz)) {
+    diff[sz] <- !sim_monthly_converted_from(
+      rec$path[sz],
+      rec$mtime[sz],
+      rec$size[sz]
+    )
+  }
   changed <- rec$path[diff]
-  if (length(changed))
+  if (length(changed)) {
     return(sprintf("input changed since derivation: %s", changed[1]))
+  }
 
   added <- setdiff(results_inputs(globs = stamp$globs %||% list()), rec$path)
-  if (length(added))
+  if (length(added)) {
     return(sprintf("input added since derivation: %s", added[1]))
+  }
 
   NULL
 }
@@ -953,24 +1378,37 @@ results_inputs <- function(files = character(0), globs = list()) {
 #' in the public pipeline): its leaves stay listed so stamps that carry them
 #' are not stale for every other kind.
 .RESULTS_STEP_DECISIONS <- list(
-  clim_compare = c("inputs.clim_compare", "derivation.clim_compare", "thresholds.clim_compare"))
+  clim_compare = c(
+    "inputs.clim_compare",
+    "derivation.clim_compare",
+    "thresholds.clim_compare"
+  )
+)
 
-.results_stamp <- function(res, config_path, schema, inputs = character(0),
-                           globs = list(), kind = NULL) {
+.results_stamp <- function(
+  res,
+  config_path,
+  schema,
+  inputs = character(0),
+  globs = list(),
+  kind = NULL
+) {
   inputs <- inputs[nzchar(inputs)]
   ex <- inputs[file.exists(inputs)]
   list(
-    results     = res[.RESULTS_STAMPED_BLOCKS],
-    kind        = kind,
+    results = res[.RESULTS_STAMPED_BLOCKS],
+    kind = kind,
     config_path = config_path,
-    schema      = schema,
-    derived_at  = Sys.time(),
-    r_version   = R.version.string,
-    globs       = globs,
-    inputs      = data.frame(path  = ex,
-                             mtime = file.mtime(ex),
-                             size  = file.size(ex),
-                             stringsAsFactors = FALSE)
+    schema = schema,
+    derived_at = Sys.time(),
+    r_version = R.version.string,
+    globs = globs,
+    inputs = data.frame(
+      path = ex,
+      mtime = file.mtime(ex),
+      size = file.size(ex),
+      stringsAsFactors = FALSE
+    )
   )
 }
 
@@ -979,15 +1417,19 @@ results_inputs <- function(files = character(0), globs = list()) {
 #' than reporting "the blocks differ".
 .results_leaves <- function(x, prefix = character(0)) {
   if (!is.list(x) || is.null(names(x)) || !length(x)) {
-    out <- list(x); names(out) <- paste(prefix, collapse = ".")
+    out <- list(x)
+    names(out) <- paste(prefix, collapse = ".")
     return(out)
   }
-  do.call(c, lapply(names(x), function(nm) .results_leaves(x[[nm]], c(prefix, nm))))
+  do.call(
+    c,
+    lapply(names(x), function(nm) .results_leaves(x[[nm]], c(prefix, nm)))
+  )
 }
 
 #' Which stamped decisions disagree with the currently-resolved config.
 #' THIS is the check the mtime rule cannot do: it catches "you edited
-#' prob_threshold but did not re-run 09".
+#' prob_threshold but did not re-run phase 09".
 # Stamped keys added after artefacts already existed, with the value that
 # reproduces the earlier behaviour: an artefact stamped before the key existed
 # counts as derived under that value (so adding a key does not invalidate every
@@ -999,130 +1441,153 @@ results_inputs <- function(files = character(0), globs = list()) {
 # only attribution / oni / report_forecast depend on the key (and their
 # RESULTS_SCHEMA tokens re-derive those). A config stating "common_start"
 # re-derives as usual.
-.RESULTS_STAMP_BACKCOMPAT <- list(scope.beyond_firm_horizon = "drop",
-                                  # monthly / season case skill, bootstrap and
-                                  # area summaries: all off.
-                                  scope.hindcast.headline_case_skill_reference = "clim_pooled",
-                                  derivation.hindcast.case_skill_supports = character(0),
-                                  derivation.hindcast.case_month_grains = c("country", "adm1"),
-                                  derivation.hindcast.case_skill_references =
-                                    c("clim_pooled", "clim_launch_state", "persistence_season",
-                                      "persistence_last"),
-                                  derivation.hindcast.case_skill_rules = c("crps_raw", "crps_log1p", "twcrps"),
-                                  derivation.hindcast.case_clim_halfwidth = 1L,
-                                  derivation.hindcast.case_pop_scale = "none",
-                                  derivation.hindcast.case_mask = "none",
-                                  derivation.hindcast.case_tw_threshold_month = 50,
-                                  derivation.hindcast.case_tw_threshold_season = 50,
-                                  derivation.hindcast.case_season_min_ref = 5L,
-                                  derivation.hindcast.bootstrap_n = 0L,
-                                  derivation.hindcast.bootstrap_seed = 20261101L,
-                                  derivation.hindcast.bootstrap_level = 0.95,
-                                  derivation.hindcast.skill_area_summaries = FALSE,
-                                  derivation.arm_alignment = "stitch",
-                                  # national-zero threshold: the exact-zero rule.
-                                  inputs.episode_national_zero_threshold = 0L,
-                                  # national-zero rule: the legacy rule.
-                                  inputs.episode_national_zero_rule = "",
-                                  # at-risk start / ADM1 overlap: the default panel.
-                                  inputs.episode_at_risk_start = "season",
-                                  inputs.episode_adm1_overlap = "drop",
-                                  # report_attrib_exposure thresholds: only that
-                                  # step reads them.
-                                  thresholds.attrib_magnitudes = c(0.25, 0.5, 1),
-                                  thresholds.robust_exceed = 0.66,
-                                  thresholds.robust_agree = 0.8,
-                                  # report_attrib_metrics thresholds: only that
-                                  # step reads them.
-                                  thresholds.pr_case_threshold = 50,
-                                  thresholds.pr_alpha = 0.05,
-                                  thresholds.sn_levels = c(1, 2),
-                                  # bootstrap resamples: B = 500.
-                                  derivation.attrib_boot_b = 500L,
-                                  # attribution factual: the forecast
-                                  # manifest's (stitched) factual.
-                                  inputs.attrib_manifest = "",
-                                  # One Africa window: the legacy windows (no
-                                  # common cell, firm horizons only) and no
-                                  # continuation-skill input.
-                                  scope.africa.window_end = "legacy",
-                                  scope.africa.continuation_max_lead = 0L,
-                                  scope.africa.max_counterfactual_winter = "",
-                                  inputs.enso_continuation_skill = "",
-                                  # T1a's curated table as a results input.
-                                  inputs.enso_rain_mechanisms = "analysis/tables/enso_rain_mechanisms.yml",
-                                  # Explosive guard: the constant cap 2e5 and
-                                  # both modes.
-                                  thresholds.explosive_case_cap = 2e5,
-                                  derivation.explosive_modes = c("drop", "none"),
-                                  # af_posterior guard scope and unidentified
-                                  # threshold: back-filled with the defaults, as
-                                  # arm_alignment: the stamp covers the whole
-                                  # block, so ("group", 1) would mark every
-                                  # artefact stale, although only the four
-                                  # af_posterior-family steps read them, and
-                                  # their schema tokens re-derive those.
-                                  derivation.af_guard_scope = "unit",
-                                  thresholds.af_noise_share_max = 0.8,
-                                  # Per-gid monthly explosive cap: none.
-                                  thresholds.explosive_gid_month_cap = Inf,
-                                  # Figure 1d's rain_enso method: only that step
-                                  # reads it.
-                                  derivation.rain_enso.baseline = "1990_2019",
-                                  derivation.rain_enso.lags = c(-11L, 11L),
-                                  derivation.rain_enso.dry_mm_month = 10,
-                                  derivation.rain_enso.min_n = 30L,
-                                  derivation.rain_enso.season_share = 0.5,
-                                  derivation.rain_enso.season_min_annual_mm = 100,
-                                  derivation.rain_enso.season_pop_year = 2020L,
-                                  # Supplement fig. SE's seasonality method:
-                                  # only that step reads it.
-                                  derivation.seasonality.admin_level = "ADM1-ADM2",
-                                  derivation.seasonality.min_n = 5L,
-                                  derivation.seasonality.interval = 0.95,
-                                  # Supplement fig. WR's method:
-                                  # only report_who_enso_ratio reads it, so every
-                                  # other artefact stays fresh at the defaults.
-                                  derivation.who_enso_ratio.groups = "enso_west",
-                                  derivation.who_enso_ratio.year_definitions =
-                                    c("annual_mean", "lag_occ", "djf_start", "djf_end"),
-                                  derivation.who_enso_ratio.first_year = 2010L,
-                                  derivation.who_enso_ratio.censor_weeks = 8L,
-                                  derivation.who_enso_ratio.pseudo_count = 1,
-                                  derivation.who_enso_ratio.interval = 0.95,
-                                  derivation.who_enso_ratio.n_boot = 2000L,
-                                  derivation.who_enso_ratio.seed = 20261107L,
-                                  # Confirmed-subset agreement table: only
-                                  # report_confirmed_agreement reads it.
-                                  derivation.confirmed_agreement.min_confirmed = 1L,
-                                  derivation.confirmed_agreement.min_neutral = 2L,
-                                  derivation.confirmed_agreement.min_phase = 5L,
-                                  derivation.confirmed_agreement.window = "confirmed",
-                                  derivation.confirmed_agreement.boot_b = 1000L,
-                                  derivation.confirmed_agreement.seed = 20261110L,
-                                  derivation.confirmed_agreement.level = 0.95,
-                                  # Lag averaging: only that step reads it; off.
-                                  derivation.lag_averaging.enable = FALSE,
-                                  derivation.lag_averaging.methods = c("stacking", "pseudobma_plus"),
-                                  derivation.lag_averaging.lag_sets = c("all", "eligible"),
-                                  derivation.lag_averaging.k_threshold = 0.7,
-                                  derivation.lag_averaging.report_min_weight = 0.01,
-                                  # Per-capita rate population: pop_ref_year.
-                                  derivation.rate_pop_year = "ref",
-                                  # ENSO phase rule of report_smoothing: the
-                                  # threshold phase.
-                                  derivation.enso_phase.smoothing = "threshold")
+.RESULTS_STAMP_BACKCOMPAT <- list(
+  scope.beyond_firm_horizon = "drop",
+  # monthly / season case skill, bootstrap and
+  # area summaries: all off.
+  scope.hindcast.headline_case_skill_reference = "clim_pooled",
+  derivation.hindcast.case_skill_supports = character(0),
+  derivation.hindcast.case_month_grains = c("country", "adm1"),
+  derivation.hindcast.case_skill_references = c(
+    "clim_pooled",
+    "clim_launch_state",
+    "persistence_season",
+    "persistence_last"
+  ),
+  derivation.hindcast.case_skill_rules = c("crps_raw", "crps_log1p", "twcrps"),
+  derivation.hindcast.case_clim_halfwidth = 1L,
+  derivation.hindcast.case_pop_scale = "none",
+  derivation.hindcast.case_mask = "none",
+  derivation.hindcast.case_tw_threshold_month = 50,
+  derivation.hindcast.case_tw_threshold_season = 50,
+  derivation.hindcast.case_season_min_ref = 5L,
+  derivation.hindcast.bootstrap_n = 0L,
+  derivation.hindcast.bootstrap_seed = 20261101L,
+  derivation.hindcast.bootstrap_level = 0.95,
+  derivation.hindcast.skill_area_summaries = FALSE,
+  derivation.arm_alignment = "stitch",
+  # national-zero threshold: the exact-zero rule.
+  inputs.episode_national_zero_threshold = 0L,
+  # national-zero rule: the legacy rule.
+  inputs.episode_national_zero_rule = "",
+  # at-risk start / ADM1 overlap: the default panel.
+  inputs.episode_at_risk_start = "season",
+  inputs.episode_adm1_overlap = "drop",
+  # report_attrib_exposure thresholds: only that
+  # step reads them.
+  thresholds.attrib_magnitudes = c(0.25, 0.5, 1),
+  thresholds.robust_exceed = 0.66,
+  thresholds.robust_agree = 0.8,
+  # report_attrib_metrics thresholds: only that
+  # step reads them.
+  thresholds.pr_case_threshold = 50,
+  thresholds.pr_alpha = 0.05,
+  thresholds.sn_levels = c(1, 2),
+  # bootstrap resamples: B = 500.
+  derivation.attrib_boot_b = 500L,
+  # attribution factual: the forecast
+  # manifest's (stitched) factual.
+  inputs.attrib_manifest = "",
+  # One Africa window: the legacy windows (no
+  # common cell, firm horizons only) and no
+  # continuation-skill input.
+  scope.africa.window_end = "legacy",
+  scope.africa.continuation_max_lead = 0L,
+  scope.africa.max_counterfactual_winter = "",
+  inputs.enso_continuation_skill = "",
+  # T1a's curated table as a results input.
+  inputs.enso_rain_mechanisms = "analysis/tables/enso_rain_mechanisms.yml",
+  # Explosive guard: the constant cap 2e5 and
+  # both modes.
+  thresholds.explosive_case_cap = 2e5,
+  derivation.explosive_modes = c("drop", "none"),
+  # af_posterior guard scope and unidentified
+  # threshold: back-filled with the defaults, as
+  # arm_alignment: the stamp covers the whole
+  # block, so ("group", 1) would mark every
+  # artefact stale, although only the four
+  # af_posterior-family steps read them, and
+  # their schema tokens re-derive those.
+  derivation.af_guard_scope = "unit",
+  thresholds.af_noise_share_max = 0.8,
+  # Per-gid monthly explosive cap: none.
+  thresholds.explosive_gid_month_cap = Inf,
+  # Figure 1d's rain_enso method: only that step
+  # reads it.
+  derivation.rain_enso.baseline = "1990_2019",
+  derivation.rain_enso.lags = c(-11L, 11L),
+  derivation.rain_enso.dry_mm_month = 10,
+  derivation.rain_enso.min_n = 30L,
+  derivation.rain_enso.season_share = 0.5,
+  derivation.rain_enso.season_min_annual_mm = 100,
+  derivation.rain_enso.season_pop_year = 2020L,
+  # Supplement fig. SE's seasonality method:
+  # only that step reads it.
+  derivation.seasonality.admin_level = "ADM1-ADM2",
+  derivation.seasonality.min_n = 5L,
+  derivation.seasonality.interval = 0.95,
+  # Supplement fig. WR's method:
+  # only report_who_enso_ratio reads it, so every
+  # other artefact stays fresh at the defaults.
+  derivation.who_enso_ratio.groups = "enso_west",
+  derivation.who_enso_ratio.year_definitions = c(
+    "annual_mean",
+    "lag_occ",
+    "djf_start",
+    "djf_end"
+  ),
+  derivation.who_enso_ratio.first_year = 2010L,
+  derivation.who_enso_ratio.censor_weeks = 8L,
+  derivation.who_enso_ratio.pseudo_count = 1,
+  derivation.who_enso_ratio.interval = 0.95,
+  derivation.who_enso_ratio.n_boot = 2000L,
+  derivation.who_enso_ratio.seed = 20261107L,
+  # Confirmed-subset agreement table: only
+  # report_confirmed_agreement reads it.
+  derivation.confirmed_agreement.min_confirmed = 1L,
+  derivation.confirmed_agreement.min_neutral = 2L,
+  derivation.confirmed_agreement.min_phase = 5L,
+  derivation.confirmed_agreement.window = "confirmed",
+  derivation.confirmed_agreement.boot_b = 1000L,
+  derivation.confirmed_agreement.seed = 20261110L,
+  derivation.confirmed_agreement.level = 0.95,
+  # Lag averaging: only that step reads it; off.
+  derivation.lag_averaging.enable = FALSE,
+  derivation.lag_averaging.methods = c("stacking", "pseudobma_plus"),
+  derivation.lag_averaging.lag_sets = c("all", "eligible"),
+  derivation.lag_averaging.k_threshold = 0.7,
+  derivation.lag_averaging.report_min_weight = 0.01,
+  # Per-capita rate population: pop_ref_year.
+  derivation.rate_pop_year = "ref",
+  # ENSO phase rule of report_smoothing: the
+  # threshold phase.
+  derivation.enso_phase.smoothing = "threshold"
+)
 
 #' Fit groups of a forecast manifest (names(man$groups)), memoised on the
 #' path's mtime; NULL when the manifest cannot be read.
 .results_manifest_groups_memo <- new.env(parent = emptyenv())
 .results_manifest_groups <- function(path) {
   path <- as.character(unlist(path))
-  if (length(path) != 1L || is.na(path) || !nzchar(path) || !file.exists(path)) return(NULL)
-  key <- paste(normalizePath(path, mustWork = FALSE), format(file.mtime(path), "%Y%m%d%H%M%OS6"))
-  if (!is.null(.results_manifest_groups_memo[[key]])) return(.results_manifest_groups_memo[[key]])
-  g <- tryCatch(names(yaml::read_yaml(path)$groups) %||% character(0), error = function(e) NULL)
-  if (!is.null(g)) assign(key, g, envir = .results_manifest_groups_memo)
+  if (
+    length(path) != 1L || is.na(path) || !nzchar(path) || !file.exists(path)
+  ) {
+    return(NULL)
+  }
+  key <- paste(
+    normalizePath(path, mustWork = FALSE),
+    format(file.mtime(path), "%Y%m%d%H%M%OS6")
+  )
+  if (!is.null(.results_manifest_groups_memo[[key]])) {
+    return(.results_manifest_groups_memo[[key]])
+  }
+  g <- tryCatch(
+    names(yaml::read_yaml(path)$groups) %||% character(0),
+    error = function(e) NULL
+  )
+  if (!is.null(g)) {
+    assign(key, g, envir = .results_manifest_groups_memo)
+  }
   g
 }
 
@@ -1145,12 +1610,16 @@ results_inputs <- function(files = character(0), globs = list()) {
 .RESULTS_STAMP_NORMALISE <- list(
   scope.exclude_groups = function(x, res) {
     g <- .results_manifest_groups(res$inputs$manifest)
-    if (is.null(g)) return(NULL)
+    if (is.null(g)) {
+      return(NULL)
+    }
     sort(intersect(as.character(unlist(x)), g))
   },
   inputs.episode_national_zero_threshold = function(x, res) as.integer(x),
   # YAML [] reads as list(), the default is character(0): both mean "off"
-  derivation.hindcast.case_skill_supports = function(x, res) as.character(unlist(x))
+  derivation.hindcast.case_skill_supports = function(x, res) {
+    as.character(unlist(x))
+  }
 )
 
 #' Apply .RESULTS_STAMP_NORMALISE to the leaves `have` (stamp record
@@ -1161,53 +1630,97 @@ results_inputs <- function(files = character(0), globs = list()) {
     f <- .RESULTS_STAMP_NORMALISE[[k]]
     nh <- tryCatch(f(have[[k]], res_have), error = function(e) NULL)
     nw <- tryCatch(f(want[[k]], res_want), error = function(e) NULL)
-    if (is.null(nh) || is.null(nw)) next
-    have[k] <- list(nh); want[k] <- list(nw)
+    if (is.null(nh) || is.null(nw)) {
+      next
+    }
+    have[k] <- list(nh)
+    want[k] <- list(nw)
   }
   list(have = have, want = want)
 }
 
 .results_decision_diff <- function(stamp, res) {
-  if (is.null(stamp)) return("<unstamped artefact: derived before the provenance contract>")
+  if (is.null(stamp)) {
+    return("<unstamped artefact: derived before the provenance contract>")
+  }
   have <- .results_leaves(stamp$results %||% list())
   want <- .results_leaves(res[.RESULTS_STAMPED_BLOCKS])
   # Back-fill only keys the current config states (it always does, through the
   # defaults): a back-filled key the config lacks would be a spurious diff.
-  for (k in names(.RESULTS_STAMP_BACKCOMPAT))
-    if (is.null(have[[k]]) && !is.null(want[[k]])) have[[k]] <- .RESULTS_STAMP_BACKCOMPAT[[k]]
+  for (k in names(.RESULTS_STAMP_BACKCOMPAT)) {
+    if (is.null(have[[k]]) && !is.null(want[[k]])) {
+      have[[k]] <- .RESULTS_STAMP_BACKCOMPAT[[k]]
+    }
+  }
   nl <- .results_normalise_leaves(have, want, stamp$results %||% list(), res)
-  have <- nl$have; want <- nl$want
+  have <- nl$have
+  want <- nl$want
   keys <- union(names(have), names(want))
   # Step-scoped leaves of other kinds are not this artefact's decisions (an
   # artefact stamped before `kind` existed is no step-scoped kind).
-  other <- unlist(.RESULTS_STEP_DECISIONS[setdiff(names(.RESULTS_STEP_DECISIONS), stamp$kind %||% "")])
-  if (length(other))
-    keys <- keys[!vapply(keys, function(k) any(k == other | startsWith(k, paste0(other, "."))), logical(1))]
-  differing <- Filter(function(k) !isTRUE(all.equal(have[[k]], want[[k]])), keys)
-  if (!length(differing)) return(character(0))
-  vapply(differing, function(k)
-    sprintf("%s (artefact: %s | config: %s)", k,
-            paste(format(have[[k]] %||% "<absent>"), collapse = ","),
-            paste(format(want[[k]] %||% "<absent>"), collapse = ",")),
-    character(1), USE.NAMES = FALSE)
+  other <- unlist(.RESULTS_STEP_DECISIONS[setdiff(
+    names(.RESULTS_STEP_DECISIONS),
+    stamp$kind %||% ""
+  )])
+  if (length(other)) {
+    keys <- keys[
+      !vapply(
+        keys,
+        function(k) any(k == other | startsWith(k, paste0(other, "."))),
+        logical(1)
+      )
+    ]
+  }
+  differing <- Filter(
+    function(k) !isTRUE(all.equal(have[[k]], want[[k]])),
+    keys
+  )
+  if (!length(differing)) {
+    return(character(0))
+  }
+  vapply(
+    differing,
+    function(k) {
+      sprintf(
+        "%s (artefact: %s | config: %s)",
+        k,
+        paste(format(have[[k]] %||% "<absent>"), collapse = ","),
+        paste(format(want[[k]] %||% "<absent>"), collapse = ",")
+      )
+    },
+    character(1),
+    USE.NAMES = FALSE
+  )
 }
 
 #' 09 side: return the cached table if it is fresh AND was derived under the
 #' current decisions, else NULL so the caller re-derives.
-results_read_if_fresh <- function(path, inputs = character(0), res = NULL,
-                                  redo = FALSE) {
-  if (isTRUE(redo)) return(NULL)
+results_read_if_fresh <- function(
+  path,
+  inputs = character(0),
+  res = NULL,
+  redo = FALSE
+) {
+  if (isTRUE(redo)) {
+    return(NULL)
+  }
   reason <- .results_stale_reason(path, inputs)
   if (!is.null(reason)) {
-    if (file.exists(path)) message("[09] re-deriving (", reason, "): ", path)
+    if (file.exists(path)) {
+      message("[09] re-deriving (", reason, "): ", path)
+    }
     return(NULL)
   }
   obj <- qs2::qs_read(path)
   if (!is.null(res)) {
-    diff <- .results_decision_diff(getResultsProvenance(obj), res)
+    diff <- .results_decision_diff(get_results_provenance(obj), res)
     if (length(diff)) {
-      message("[09] re-deriving (decisions changed: ",
-              paste(diff, collapse = "; "), "): ", path)
+      message(
+        "[09] re-deriving (decisions changed: ",
+        paste(diff, collapse = "; "),
+        "): ",
+        path
+      )
       return(NULL)
     }
   }
@@ -1219,11 +1732,21 @@ results_read_if_fresh <- function(path, inputs = character(0), res = NULL,
 #' config it came from, its schema token, a path/mtime/size row per input, and
 #' the glob specs those inputs were enumerated with (so phase 10 can re-check
 #' all of it without knowing what any input file is).
-results_write <- function(obj, path, res, config_path, schema,
-                          inputs = character(0), globs = list(), kind = NULL) {
+results_write <- function(
+  obj,
+  path,
+  res,
+  config_path,
+  schema,
+  inputs = character(0),
+  globs = list(),
+  kind = NULL
+) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  obj <- attachResultsProvenance(
-    obj, .results_stamp(res, config_path, schema, inputs, globs, kind = kind))
+  obj <- attach_results_provenance(
+    obj,
+    .results_stamp(res, config_path, schema, inputs, globs, kind = kind)
+  )
   qs2::qs_save(obj, path)
   message("[09] wrote results artefact -> ", path)
   obj
@@ -1244,40 +1767,81 @@ results_write <- function(obj, path, res, config_path, schema,
 #' or artefacts pulled from the cluster without the simulator partitions).
 #' The stamp, schema and decision checks still stop. Opt-in per run (10's stage
 #' driver: --allow-stale-inputs); 09's freshness rule is unaffected.
-results_allow_stale_inputs <- function()
+results_allow_stale_inputs <- function() {
   isTRUE(as.logical(Sys.getenv("RESULTS_ALLOW_STALE_INPUTS", "false")))
+}
 
 results_require <- function(path, config_path, res = NULL) {
-  rerun <- sprintf("  run: Rscript analysis/09b_postprocess_results.R -C %s", config_path)
+  rerun <- sprintf(
+    "  run: Rscript analysis/09b_postprocess_results.R -C %s",
+    config_path
+  )
 
-  if (!file.exists(path))
-    stop(sprintf("[10] missing results artefact: %s\n%s", path, rerun), call. = FALSE)
+  if (!file.exists(path)) {
+    stop(
+      sprintf("[10] missing results artefact: %s\n%s", path, rerun),
+      call. = FALSE
+    )
+  }
 
-  obj   <- qs2::qs_read(path)
-  stamp <- getResultsProvenance(obj)
+  obj <- qs2::qs_read(path)
+  stamp <- get_results_provenance(obj)
 
-  if (is.null(stamp))
-    stop(sprintf(paste0("[10] results artefact carries no provenance stamp: %s\n",
-                        "     (derived before the provenance contract, or written ",
-                        "by something other than results_write())\n%s"),
-                 path, rerun), call. = FALSE)
+  if (is.null(stamp)) {
+    stop(
+      sprintf(
+        paste0(
+          "[10] results artefact carries no provenance stamp: %s\n",
+          "     (derived before the provenance contract, or written ",
+          "by something other than results_write())\n%s"
+        ),
+        path,
+        rerun
+      ),
+      call. = FALSE
+    )
+  }
 
   reason <- .results_stamp_stale_reason(stamp)
   if (!is.null(reason)) {
-    if (!results_allow_stale_inputs())
-      stop(sprintf("[10] stale results artefact: %s\n     (%s)\n%s",
-                   path, reason, rerun), call. = FALSE)
-    warning(sprintf("[10] RESULTS_ALLOW_STALE_INPUTS: using results artefact despite stale inputs: %s\n     (%s)",
-                    path, reason), call. = FALSE, immediate. = TRUE)
+    if (!results_allow_stale_inputs()) {
+      stop(
+        sprintf(
+          "[10] stale results artefact: %s\n     (%s)\n%s",
+          path,
+          reason,
+          rerun
+        ),
+        call. = FALSE
+      )
+    }
+    warning(
+      sprintf(
+        "[10] RESULTS_ALLOW_STALE_INPUTS: using results artefact despite stale inputs: %s\n     (%s)",
+        path,
+        reason
+      ),
+      call. = FALSE,
+      immediate. = TRUE
+    )
   }
 
   if (!is.null(res)) {
     diff <- .results_decision_diff(stamp, res)
-    if (length(diff))
-      stop(sprintf(paste0("[10] results artefact was derived under different decisions: %s\n",
-                          "     differing: %s\n%s"),
-                   path, paste(diff, collapse = "\n                "), rerun),
-           call. = FALSE)
+    if (length(diff)) {
+      stop(
+        sprintf(
+          paste0(
+            "[10] results artefact was derived under different decisions: %s\n",
+            "     differing: %s\n%s"
+          ),
+          path,
+          paste(diff, collapse = "\n                "),
+          rerun
+        ),
+        call. = FALSE
+      )
+    }
   }
   message("[10] loading results artefact -> ", path)
   obj
@@ -1295,9 +1859,11 @@ results_require <- function(path, config_path, res = NULL) {
 #' keyed by (track, group, kind). The directory rides along as an attribute so
 #' track_fit_files() needs no extra argument.
 load_best_lag_manifest <- function(best_lag_dir) {
-  mnf <- readr::read_csv(file.path(best_lag_dir, "MANIFEST.csv"),
-                         col_types = readr::cols(.default = "c"),
-                         show_col_types = FALSE) %>%
+  mnf <- readr::read_csv(
+    file.path(best_lag_dir, "MANIFEST.csv"),
+    col_types = readr::cols(.default = "c"),
+    show_col_types = FALSE
+  ) %>%
     dplyr::mutate(lag = as.integer(lag))
   attr(mnf, "best_lag_dir") <- best_lag_dir
   mnf
@@ -1306,19 +1872,41 @@ load_best_lag_manifest <- function(best_lag_dir) {
 #' Resolve one track/group's deployed fit + cb_meta path from the archive.
 #' `g` is an enso_grouping-style group name ("enso_east"); the archive's
 #' `group` column drops the underscore ("ensoeast").
-track_fit_files <- function(mnf, track, g, best_lag_dir = attr(mnf, "best_lag_dir")) {
+track_fit_files <- function(
+  mnf,
+  track,
+  g,
+  best_lag_dir = attr(mnf, "best_lag_dir")
+) {
   want_track <- unname(TRACK_CODE[[track]])
   want_group <- gsub("_", "", g)
-  want_fit_kind  <- paste0(TRACK_KIND_PREFIX[[track]], "fit")
+  want_fit_kind <- paste0(TRACK_KIND_PREFIX[[track]], "fit")
   want_meta_kind <- paste0(TRACK_KIND_PREFIX[[track]], "cb_meta")
-  row_fit  <- dplyr::filter(mnf, track == want_track, group == want_group, kind == want_fit_kind)
-  row_meta <- dplyr::filter(mnf, track == want_track, group == want_group, kind == want_meta_kind)
-  if (!nrow(row_fit) || !nrow(row_meta))
-    stop(sprintf("[results] ENSO exposure-response (%s): no deployed fit/meta in %s for group %s",
-                 track, file.path(best_lag_dir, "MANIFEST.csv"), g))
-  list(fit = file.path(best_lag_dir, row_fit$file[1]),
-       meta = file.path(best_lag_dir, row_meta$file[1]),
-       lag = row_fit$lag[1])
+  row_fit <- dplyr::filter(
+    mnf,
+    track == want_track,
+    group == want_group,
+    kind == want_fit_kind
+  )
+  row_meta <- dplyr::filter(
+    mnf,
+    track == want_track,
+    group == want_group,
+    kind == want_meta_kind
+  )
+  if (!nrow(row_fit) || !nrow(row_meta)) {
+    stop(sprintf(
+      "[results] ENSO exposure-response (%s): no deployed fit/meta in %s for group %s",
+      track,
+      file.path(best_lag_dir, "MANIFEST.csv"),
+      g
+    ))
+  }
+  list(
+    fit = file.path(best_lag_dir, row_fit$file[1]),
+    meta = file.path(best_lag_dir, row_meta$file[1]),
+    lag = row_fit$lag[1]
+  )
 }
 
 #' Sums (or maxima) of `sums` (named: output name = input column) per
@@ -1335,16 +1923,27 @@ track_fit_files <- function(mnf, track, g, best_lag_dir = attr(mnf, "best_lag_di
   op <- match.arg(op)
   if (!nrow(df)) {
     f <- if (op == "sum") quote(sum) else quote(max)
-    return(df %>% dplyr::group_by(dplyr::across(dplyr::all_of(keys))) %>%
-             dplyr::summarise(!!!lapply(sums, function(v) rlang::call2(f, rlang::sym(v))), .groups = "drop"))
+    return(
+      df %>%
+        dplyr::group_by(dplyr::across(dplyr::all_of(keys))) %>%
+        dplyr::summarise(
+          !!!lapply(sums, function(v) rlang::call2(f, rlang::sym(v))),
+          .groups = "drop"
+        )
+    )
   }
   dt <- data.table::as.data.table(df[, c(keys, unname(sums)), drop = FALSE])
-  out <- if (op == "sum") dt[, lapply(.SD, sum), keyby = keys, .SDcols = unname(sums)]
-         else             dt[, lapply(.SD, max), keyby = keys, .SDcols = unname(sums)]
+  out <- if (op == "sum") {
+    dt[, lapply(.SD, sum), keyby = keys, .SDcols = unname(sums)]
+  } else {
+    dt[, lapply(.SD, max), keyby = keys, .SDcols = unname(sums)]
+  }
   data.table::setnames(out, unname(sums), names(sums))
   data.table::setkey(out, NULL)
   # keyby puts missing keys first; dplyr puts them last.
-  if (anyNA(out[, keys, with = FALSE])) data.table::setorderv(out, keys, na.last = TRUE)
+  if (anyNA(out[, keys, with = FALSE])) {
+    data.table::setorderv(out, keys, na.last = TRUE)
+  }
   tibble::as_tibble(as.data.frame(out))
 }
 
@@ -1353,8 +1952,8 @@ track_fit_files <- function(mnf, track, g, best_lag_dir = attr(mnf, "best_lag_di
 #' load_sim_run_monthly()'s keep_gids for utils/sim_io.R::sim_monthly_cells().
 adm1_rep_gids <- function(gids) {
   gids <- as.character(gids)
-  a1 <- gidAdm1(gids, strict = FALSE)
-  iso <- stringr::str_extract(flattenGid(gids), "^[A-Z]{3}")
+  a1 <- gid_to_adm1(gids, strict = FALSE)
+  iso <- stringr::str_extract(flatten_gid(gids), "^[A-Z]{3}")
   gids[is.na(a1) | is.na(iso) | !duplicated(a1)]
 }
 
@@ -1378,41 +1977,72 @@ adm1_rep_gids <- function(gids) {
 #'   country, max_gid_cases (the largest gid's cases), run), adm1_month = (replicate_id, adm1_unit, month, cases,
 #'   outbreaks, run), gids = (gid, country, run): the distinct simulated gids,
 #'   the only gid-level information kept, for population denominators).
-load_sim_run_monthly <- function(sim_root, run_tag, window_start, window_end,
-                                 series = "latent", tag = "[results]",
-                                 horizon_by_country = NULL, keep_beyond = FALSE,
-                                 prefix = NULL) {
+load_sim_run_monthly <- function(
+  sim_root,
+  run_tag,
+  window_start,
+  window_end,
+  series = "latent",
+  tag = "[results]",
+  horizon_by_country = NULL,
+  keep_beyond = FALSE,
+  prefix = NULL
+) {
   parts_dir <- file.path(sim_root, run_tag, "parts")
-  if (!dir.exists(parts_dir)) stop(tag, " parts dir not found for run '", run_tag, "': ", parts_dir)
-  part_dirs <- dirname(partitionSentinels(parts_dir))   # utils/paths.R
-  if (length(part_dirs) == 0L) stop(tag, " no successful TU partitions under ", parts_dir)
+  if (!dir.exists(parts_dir)) {
+    stop(tag, " parts dir not found for run '", run_tag, "': ", parts_dir)
+  }
+  part_dirs <- dirname(partition_sentinels(parts_dir)) # utils/paths.R
+  if (length(part_dirs) == 0L) {
+    stop(tag, " no successful TU partitions under ", parts_dir)
+  }
   out_country_month <- vector("list", length(part_dirs))
-  out_adm1_month    <- vector("list", length(part_dirs))
-  out_gids          <- vector("list", length(part_dirs))
-  out_stitch        <- vector("list", length(part_dirs))
+  out_adm1_month <- vector("list", length(part_dirs))
+  out_gids <- vector("list", length(part_dirs))
+  out_stitch <- vector("list", length(part_dirs))
   for (i in seq_along(part_dirs)) {
-    tu_dir  <- part_dirs[i]
+    tu_dir <- part_dirs[i]
     # Only the cells a sum can see (utils/sim_io.R::sim_monthly_cells()): a
     # cell with an onset or a case draw, plus every cell of one gid per ADM1
     # (adm1_rep_gids()), which keeps every (replicate, country / ADM1, month)
     # group of the full grid. A row subset of the long table in its order, so
     # the sums, maxima and key sets below are those of the full table. Format-2
     # files are read without expanding the grid (~94% inactive cells).
-    cells <- sim_monthly_cells(qs2::qs_read(file.path(tu_dir, "monthly_summary.qs")),
-                               value_cols = c("Y", "cases_month"), keep_gids = adm1_rep_gids)
+    cells <- sim_monthly_cells(
+      qs2::qs_read(file.path(tu_dir, "monthly_summary.qs")),
+      value_cols = c("Y", "cases_month"),
+      keep_gids = adm1_rep_gids
+    )
     ms_raw <- cells$rows %>%
-      results_select_series(series, paste0("monthly_summary.qs under ", tu_dir), kind = "grid")
-    if (!"cases_month" %in% names(ms_raw))
-      stop(tag, " monthly_summary.qs under ", tu_dir, " has no cases_month column",
-           " -- run '", run_tag, "' was not configured with grouping.monthly_enable: true.")
+      results_select_series(
+        series,
+        paste0("monthly_summary.qs under ", tu_dir),
+        kind = "grid"
+      )
+    if (!"cases_month" %in% names(ms_raw)) {
+      stop(
+        tag,
+        " monthly_summary.qs under ",
+        tu_dir,
+        " has no cases_month column",
+        " -- run '",
+        run_tag,
+        "' was not configured with grouping.monthly_enable: true."
+      )
+    }
     # `month` arrives as a character column with a handful of distinct values
     # repeated across millions of rows; parse each distinct string once.
     ms <- ms_raw %>%
       dplyr::transmute(
-        replicate_id = as.integer(replicate_id), gid = as.character(gid),
-        month = local({ u <- unique(month); as.Date(u, format = "%Y-%m-%d")[match(month, u)] }),
+        replicate_id = as.integer(replicate_id),
+        gid = as.character(gid),
+        month = local({
+          u <- unique(month)
+          as.Date(u, format = "%Y-%m-%d")[match(month, u)]
+        }),
         Y = as.integer(Y),
-        cases = ifelse(is.na(cases_month), 0, as.numeric(cases_month)))
+        cases = ifelse(is.na(cases_month), 0, as.numeric(cases_month))
+      )
     # The full grid's distinct gids / replicates / months (first-seen order):
     # `ms` holds only some of its rows.
     ms_gids <- as.character(cells$gids)
@@ -1422,15 +2052,31 @@ load_sim_run_monthly <- function(sim_root, run_tag, window_start, window_end,
       if (isTRUE(prefix$replace)) {
         # Smoothing-as-factual: the smoothing covers the partition's own months.
         pm <- sort(unique(ms_months))
-        prefix$start <- min(pm); prefix$months <- pm
+        prefix$start <- min(pm)
+        prefix$months <- pm
         prefix$end_excl <- seq(max(pm), by = "month", length.out = 2L)[2L]
       }
-      pre <- .smoothing_prefix_rows(prefix, tu_dir, ms_gids, as.integer(cells$replicate_ids), tag)
+      pre <- .smoothing_prefix_rows(
+        prefix,
+        tu_dir,
+        ms_gids,
+        as.integer(cells$replicate_ids),
+        tag
+      )
       if (isTRUE(prefix$replace)) {
-        ms <- ms[0L, , drop = FALSE]; ms_gids <- character(0)
-      } else if (any(ms_months < prefix$end_excl))
-        stop(tag, " ", tu_dir, " simulates months before ", format(prefix$end_excl),
-             ", the start of its own forecast: the smoothing prefix would overlap it.", call. = FALSE)
+        ms <- ms[0L, , drop = FALSE]
+        ms_gids <- character(0)
+      } else if (any(ms_months < prefix$end_excl)) {
+        stop(
+          tag,
+          " ",
+          tu_dir,
+          " simulates months before ",
+          format(prefix$end_excl),
+          ", the start of its own forecast: the smoothing prefix would overlap it.",
+          call. = FALSE
+        )
+      }
       out_stitch[[i]] <- pre$info
       if (isTRUE(prefix$replace)) out_stitch[[i]]$months <- list(pm)
     }
@@ -1440,25 +2086,38 @@ load_sim_run_monthly <- function(sim_root, run_tag, window_start, window_end,
     # Parsed once per distinct gid (~10^3), not per row (~10^8 at 10^4 replicates).
     # The smoothing prefix's gids (the partition's own, in its order) first.
     u_gid <- unique(c(if (!is.null(pre)) unique(pre$rows$gid), ms_gids))
-    u_country <- stringr::str_extract(flattenGid(u_gid), "^[A-Z]{3}")
-    if (anyNA(u_country))
-      stop(tag, " monthly_summary.qs under ", tu_dir, " has gid(s) with no ISO3 prefix: ",
-           paste(head(u_gid[is.na(u_country)], 5L), collapse = ", "))
+    u_country <- stringr::str_extract(flatten_gid(u_gid), "^[A-Z]{3}")
+    if (anyNA(u_country)) {
+      stop(
+        tag,
+        " monthly_summary.qs under ",
+        tu_dir,
+        " has gid(s) with no ISO3 prefix: ",
+        paste(head(u_gid[is.na(u_country)], 5L), collapse = ", ")
+      )
+    }
     # country is a function of gid: the distinct gids in first-seen order, not a
     # unique() over every row's (gid, country) pair (~13 min at 10^4 replicates).
     out_gids[[i]] <- tibble::tibble(gid = u_gid, country = u_country)
     # Partition units mixing fit groups (v2 manifests): each country stops at
     # its own firm horizon (utils/sim_io.R::censor_sim_by_country()); with
     # keep_beyond the later rows are kept, flagged `beyond_firm_horizon`.
-    flag_cols <- if (!is.null(horizon_by_country) && isTRUE(keep_beyond)) "beyond_firm_horizon" else character(0)
+    flag_cols <- if (!is.null(horizon_by_country) && isTRUE(keep_beyond)) {
+      "beyond_firm_horizon"
+    } else {
+      character(0)
+    }
     cm_keys <- c("replicate_id", "month", "country", flag_cols)
     am_keys <- c("replicate_id", "adm1_unit", "month", flag_cols)
     aggregate_rows <- function(ms) {
       country_of <- u_country[match(ms$gid, u_gid)]
       if (!is.null(horizon_by_country)) {
-        ms <- censor_sim_by_country(ms %>% dplyr::mutate(country = country_of),
-                                    horizon_by_country, keep_beyond = keep_beyond,
-                                    country_col = "country")
+        ms <- censor_sim_by_country(
+          ms %>% dplyr::mutate(country = country_of),
+          horizon_by_country,
+          keep_beyond = keep_beyond,
+          country_col = "country"
+        )
         country_of <- ms$country
       }
       ms$country <- country_of
@@ -1466,42 +2125,81 @@ load_sim_run_monthly <- function(sim_root, run_tag, window_start, window_end,
       # The largest single gid's cases in the country-month: the per-gid monthly
       # explosive cap (results.thresholds.explosive_gid_month_cap) reads it.
       # Same keys, same sort, so the rows line up.
-      cm_i$max_gid_cases <- .sum_by_keys(ms, cm_keys, c(max_gid_cases = "cases"), op = "max")$max_gid_cases
+      cm_i$max_gid_cases <- .sum_by_keys(
+        ms,
+        cm_keys,
+        c(max_gid_cases = "cases"),
+        op = "max"
+      )$max_gid_cases
       ma <- dplyr::filter(ms, month >= window_start, month <= window_end)
       ug <- unique(ma$gid)
-      ma$adm1_unit <- gidAdm1(ug, "load_sim_run_monthly")[match(ma$gid, ug)]
-      list(cm = dplyr::relocate(cm_i, country, .after = n_outbreaks),   # same column order as before
-           am = .sum_by_keys(ma, am_keys, c(cases = "cases", outbreaks = "Y")))
+      ma$adm1_unit <- gid_to_adm1(ug, "load_sim_run_monthly")[match(ma$gid, ug)]
+      list(
+        cm = dplyr::relocate(cm_i, country, .after = n_outbreaks), # same column order as before
+        am = .sum_by_keys(ma, am_keys, c(cases = "cases", outbreaks = "Y"))
+      )
     }
     parts <- list()
-    if (nrow(ms) || is.null(pre)) parts$sim <- aggregate_rows(ms)
+    if (nrow(ms) || is.null(pre)) {
+      parts$sim <- aggregate_rows(ms)
+    }
     if (!is.null(pre)) {
       # The prefix aggregated per smoothing replicate, then handed to every
       # forecast replicate paired with it: its months are disjoint from the
       # forecast's, so no (replicate, key, month) mixes the two.
       a <- aggregate_rows(pre$rows)
-      parts$pre <- list(cm = .to_forecast_reps(a$cm, pre$map), am = .to_forecast_reps(a$am, pre$map))
+      parts$pre <- list(
+        cm = .to_forecast_reps(a$cm, pre$map),
+        am = .to_forecast_reps(a$am, pre$map)
+      )
     }
     bind_sorted <- function(k, keys) {
-      if (length(parts) == 1L) return(parts[[1L]][[k]])
+      if (length(parts) == 1L) {
+        return(parts[[1L]][[k]])
+      }
       x <- dplyr::bind_rows(parts$pre[[k]], parts$sim[[k]])
-      x[do.call(order, c(unname(as.list(x[keys])), na.last = TRUE, method = "radix")), , drop = FALSE]
+      x[
+        do.call(
+          order,
+          c(unname(as.list(x[keys])), na.last = TRUE, method = "radix")
+        ),
+        ,
+        drop = FALSE
+      ]
     }
     out_country_month[[i]] <- bind_sorted("cm", cm_keys)
-    out_adm1_month[[i]]    <- bind_sorted("am", am_keys)
+    out_adm1_month[[i]] <- bind_sorted("am", am_keys)
   }
-  out <- list(country_month = dplyr::bind_rows(out_country_month) %>% dplyr::mutate(run = run_tag),
-              adm1_month    = dplyr::bind_rows(out_adm1_month)    %>% dplyr::mutate(run = run_tag),
-              gids          = dplyr::distinct(dplyr::bind_rows(out_gids)) %>% dplyr::mutate(run = run_tag))
+  out <- list(
+    country_month = dplyr::bind_rows(out_country_month) %>%
+      dplyr::mutate(run = run_tag),
+    adm1_month = dplyr::bind_rows(out_adm1_month) %>%
+      dplyr::mutate(run = run_tag),
+    gids = dplyr::distinct(dplyr::bind_rows(out_gids)) %>%
+      dplyr::mutate(run = run_tag)
+  )
   if (!is.null(prefix)) {
     info <- dplyr::bind_rows(out_stitch)
     out$stitch <- if (isTRUE(prefix$replace)) {
       pm <- sort(unique(as.Date(unlist(info$months), origin = "1970-01-01")))
-      message(sprintf("%s %s: factual series = the smoothing over %s..%s (%d month(s), %d replicate(s) paired with %d smoothing replicate(s))",
-                      tag, run_tag, format(min(pm)), format(max(pm)), length(pm),
-                      sum(info$n_replicates), sum(info$n_smoothing_reps)))
-      list(months = pm, parts = info[, setdiff(names(info), "months"), drop = FALSE], replace = TRUE)
-    } else .stitch_summary(info, prefix, tag, run_tag, out)
+      message(sprintf(
+        "%s %s: factual series = the smoothing over %s..%s (%d month(s), %d replicate(s) paired with %d smoothing replicate(s))",
+        tag,
+        run_tag,
+        format(min(pm)),
+        format(max(pm)),
+        length(pm),
+        sum(info$n_replicates),
+        sum(info$n_smoothing_reps)
+      ))
+      list(
+        months = pm,
+        parts = info[, setdiff(names(info), "months"), drop = FALSE],
+        replace = TRUE
+      )
+    } else {
+      .stitch_summary(info, prefix, tag, run_tag, out)
+    }
   }
   out
 }
@@ -1525,33 +2223,61 @@ load_sim_run_monthly <- function(sim_root, run_tag, window_start, window_end,
 #' `cases_month` (cases metric). Rows before `filt_start` are dropped and
 #' `series` is applied with results_select_series(kind = "events").
 #' $rep_ids: every smoothing replicate present before any filter.
-read_smoothing_parts_events <- function(parts_dir, filt_start, series = "latent", tag = "[results]") {
-  if (!dir.exists(parts_dir)) stop(tag, " smoothing parts dir not found: ", parts_dir)
-  sentinels <- partitionSentinels(parts_dir)   # utils/paths.R
-  if (!length(sentinels))
-    stop(tag, " no _SUCCESS sentinels under ", parts_dir, " -- run 08b_smoothing_spatpomp.R first.")
+read_smoothing_parts_events <- function(
+  parts_dir,
+  filt_start,
+  series = "latent",
+  tag = "[results]"
+) {
+  if (!dir.exists(parts_dir)) {
+    stop(tag, " smoothing parts dir not found: ", parts_dir)
+  }
+  sentinels <- partition_sentinels(parts_dir) # utils/paths.R
+  if (!length(sentinels)) {
+    stop(
+      tag,
+      " no _SUCCESS sentinels under ",
+      parts_dir,
+      " -- run 08b_smoothing_spatpomp.R first."
+    )
+  }
   parts <- lapply(sentinels, function(s) {
     p <- file.path(dirname(s), "part.qs")
-    if (!file.exists(p)) { warning(tag, " missing part.qs next to ", s); return(NULL) }
+    if (!file.exists(p)) {
+      warning(tag, " missing part.qs next to ", s)
+      return(NULL)
+    }
     qs2::qs_read(p)
   })
   parts <- Filter(Negate(is.null), parts)
   events_raw <- dplyr::bind_rows(lapply(parts, function(p) p$events))
-  if (is.null(events_raw) || !nrow(events_raw)) stop(tag, " no Yout=1 events under ", parts_dir)
+  if (is.null(events_raw) || !nrow(events_raw)) {
+    stop(tag, " no Yout=1 events under ", parts_dir)
+  }
   events_mon_raw <- dplyr::bind_rows(lapply(parts, function(p) p$events_mon))
-  if (is.null(events_mon_raw) || !nrow(events_mon_raw))
-    stop(tag, " no events_mon rows under ", parts_dir, " -- the smoothing run was not ",
-         "configured with grouping.monthly_enable: true, so the mon-track cases ",
-         "metric cannot be built.")
+  if (is.null(events_mon_raw) || !nrow(events_mon_raw)) {
+    stop(
+      tag,
+      " no events_mon rows under ",
+      parts_dir,
+      " -- the smoothing run was not ",
+      "configured with grouping.monthly_enable: true, so the mon-track cases ",
+      "metric cannot be built."
+    )
+  }
   list(
-    events     = dplyr::mutate(events_raw, gid = as.character(gid)) %>%
-                   dplyr::filter(t_start >= filt_start) %>%
-                   results_select_series(series, paste("smoothing events under", parts_dir)),
+    events = dplyr::mutate(events_raw, gid = as.character(gid)) %>%
+      dplyr::filter(t_start >= filt_start) %>%
+      results_select_series(series, paste("smoothing events under", parts_dir)),
     events_mon = dplyr::mutate(events_mon_raw, gid = as.character(gid)) %>%
-                   dplyr::filter(t_start >= filt_start) %>%
-                   results_select_series(series, paste("smoothing mon events under", parts_dir)),
-    rep_ids    = sort(unique(c(events_raw$rep_id, events_mon_raw$rep_id))),
-    parts_dir  = parts_dir)
+      dplyr::filter(t_start >= filt_start) %>%
+      results_select_series(
+        series,
+        paste("smoothing mon events under", parts_dir)
+      ),
+    rep_ids = sort(unique(c(events_raw$rep_id, events_mon_raw$rep_id))),
+    parts_dir = parts_dir
+  )
 }
 
 #' read_handoff_map
@@ -1560,10 +2286,12 @@ read_smoothing_parts_events <- function(parts_dir, filt_start, series = "latent"
 #' each successful partition (handoff_map.csv): one row per (tu, replicate_id).
 #' NULL when no partition of the run carries one.
 read_handoff_map <- function(sim_root, run_tag) {
-  dirs <- dirname(partitionSentinels(file.path(sim_root, run_tag, "parts")))
+  dirs <- dirname(partition_sentinels(file.path(sim_root, run_tag, "parts")))
   fs <- file.path(dirs, "handoff_map.csv")
   fs <- fs[file.exists(fs)]
-  if (!length(fs)) return(NULL)
+  if (!length(fs)) {
+    return(NULL)
+  }
   dplyr::bind_rows(lapply(fs, utils::read.csv, stringsAsFactors = FALSE))
 }
 
@@ -1574,14 +2302,26 @@ read_handoff_map <- function(sim_root, run_tag) {
 #' then taken from the partition's own month grid), so the factual series is
 #' the smoothing replicate each forecast replicate was handed off from, over
 #' the run's whole window.
-smoothing_prefix_spec <- function(smoothing_events, start, end_excl, replace = FALSE) {
-  start <- as.Date(start); end_excl <- as.Date(end_excl)
+smoothing_prefix_spec <- function(
+  smoothing_events,
+  start,
+  end_excl,
+  replace = FALSE
+) {
+  start <- as.Date(start)
+  end_excl <- as.Date(end_excl)
   stopifnot(start < end_excl)
   months <- seq(start, end_excl, by = "month")
-  list(events = smoothing_events$events, events_mon = smoothing_events$events_mon,
-       rep_ids = smoothing_events$rep_ids, parts_dir = smoothing_events$parts_dir,
-       start = start, end_excl = end_excl, months = months[months < end_excl],
-       replace = isTRUE(replace))
+  list(
+    events = smoothing_events$events,
+    events_mon = smoothing_events$events_mon,
+    rep_ids = smoothing_events$rep_ids,
+    parts_dir = smoothing_events$parts_dir,
+    start = start,
+    end_excl = end_excl,
+    months = months[months < end_excl],
+    replace = isTRUE(replace)
+  )
 }
 
 #' One forecast partition's smoothing prefix as monthly_summary-grid rows
@@ -1597,41 +2337,105 @@ smoothing_prefix_spec <- function(smoothing_events, start, end_excl, replace = F
 #' larger at 5000 forecast per 100 smoothing replicates).
 .smoothing_prefix_rows <- function(prefix, tu_dir, gids, replicate_ids, tag) {
   mp <- file.path(tu_dir, "handoff_map.csv")
-  if (!file.exists(mp))
-    stop(tag, " ", tu_dir, " has no handoff_map.csv: the run predates the per-arm handoff ",
-         "(2026-10-20) and its replicates cannot be paired with the smoothing replicates. ",
-         "Re-run it, or use results.derivation.arm_alignment: common_start.", call. = FALSE)
+  if (!file.exists(mp)) {
+    stop(
+      tag,
+      " ",
+      tu_dir,
+      " has no handoff_map.csv: the run predates the per-arm handoff ",
+      "(2026-10-20) and its replicates cannot be paired with the smoothing replicates. ",
+      "Re-run it, or use results.derivation.arm_alignment: common_start.",
+      call. = FALSE
+    )
+  }
   hm <- utils::read.csv(mp, stringsAsFactors = FALSE)
-  hm <- hm[hm$replicate_id %in% replicate_ids, c("replicate_id", "smoothing_rep_id"), drop = FALSE]
+  hm <- hm[
+    hm$replicate_id %in% replicate_ids,
+    c("replicate_id", "smoothing_rep_id"),
+    drop = FALSE
+  ]
   miss_rep <- setdiff(replicate_ids, hm$replicate_id)
-  if (length(miss_rep))
-    stop(tag, " ", mp, " pairs no smoothing replicate with ", length(miss_rep),
-         " forecast replicate(s) (e.g. ", paste(head(miss_rep, 5L), collapse = ", "), ").", call. = FALSE)
-  if (anyDuplicated(hm$replicate_id))
-    stop(tag, " ", mp, " pairs forecast replicate(s) ",
-         paste(head(unique(hm$replicate_id[duplicated(hm$replicate_id)]), 5L), collapse = ", "),
-         " with more than one smoothing replicate.", call. = FALSE)
+  if (length(miss_rep)) {
+    stop(
+      tag,
+      " ",
+      mp,
+      " pairs no smoothing replicate with ",
+      length(miss_rep),
+      " forecast replicate(s) (e.g. ",
+      paste(head(miss_rep, 5L), collapse = ", "),
+      ").",
+      call. = FALSE
+    )
+  }
+  if (anyDuplicated(hm$replicate_id)) {
+    stop(
+      tag,
+      " ",
+      mp,
+      " pairs forecast replicate(s) ",
+      paste(
+        head(unique(hm$replicate_id[duplicated(hm$replicate_id)]), 5L),
+        collapse = ", "
+      ),
+      " with more than one smoothing replicate.",
+      call. = FALSE
+    )
+  }
   foreign <- setdiff(unique(hm$smoothing_rep_id), prefix$rep_ids)
-  if (length(foreign))
-    stop(tag, " ", mp, " names smoothing replicate(s) ", paste(head(foreign, 5L), collapse = ", "),
-         " absent from ", prefix$parts_dir, ": the forecast was handed off from another ",
-         "smoothing run.", call. = FALSE)
-  in_win <- function(ev) ev[ev$gid %in% gids & ev$t_start >= prefix$start & ev$t_start < prefix$end_excl, , drop = FALSE]
-  on  <- in_win(prefix$events) %>%
+  if (length(foreign)) {
+    stop(
+      tag,
+      " ",
+      mp,
+      " names smoothing replicate(s) ",
+      paste(head(foreign, 5L), collapse = ", "),
+      " absent from ",
+      prefix$parts_dir,
+      ": the forecast was handed off from another ",
+      "smoothing run.",
+      call. = FALSE
+    )
+  }
+  in_win <- function(ev) {
+    ev[
+      ev$gid %in%
+        gids &
+        ev$t_start >= prefix$start &
+        ev$t_start < prefix$end_excl,
+      ,
+      drop = FALSE
+    ]
+  }
+  on <- in_win(prefix$events) %>%
     dplyr::count(rep_id, gid, month = t_start, name = "Y")
-  cs  <- in_win(prefix$events_mon) %>%
+  cs <- in_win(prefix$events_mon) %>%
     dplyr::group_by(rep_id, gid, month = t_start) %>%
     dplyr::summarise(cases = sum(cases_month, na.rm = TRUE), .groups = "drop")
-  grid <- tidyr::expand_grid(rep_id = sort(unique(hm$smoothing_rep_id)), gid = as.character(gids),
-                             month = prefix$months)
+  grid <- tidyr::expand_grid(
+    rep_id = sort(unique(hm$smoothing_rep_id)),
+    gid = as.character(gids),
+    month = prefix$months
+  )
   rows <- grid %>%
     dplyr::left_join(on, by = c("rep_id", "gid", "month")) %>%
     dplyr::left_join(cs, by = c("rep_id", "gid", "month")) %>%
-    dplyr::transmute(replicate_id = as.integer(rep_id), gid, month,
-                     Y = as.integer(dplyr::coalesce(Y, 0L)), cases = dplyr::coalesce(cases, 0))
-  list(rows = rows, map = hm,
-       info = tibble::tibble(part = tu_dir, n_replicates = length(replicate_ids),
-                             n_smoothing_reps = length(unique(hm$smoothing_rep_id))))
+    dplyr::transmute(
+      replicate_id = as.integer(rep_id),
+      gid,
+      month,
+      Y = as.integer(dplyr::coalesce(Y, 0L)),
+      cases = dplyr::coalesce(cases, 0)
+    )
+  list(
+    rows = rows,
+    map = hm,
+    info = tibble::tibble(
+      part = tu_dir,
+      n_replicates = length(replicate_ids),
+      n_smoothing_reps = length(unique(hm$smoothing_rep_id))
+    )
+  )
 }
 
 #' .to_forecast_reps -- rows of `df` keyed by smoothing replicate (replicate_id)
@@ -1655,14 +2459,24 @@ smoothing_prefix_spec <- function(smoothing_events, start, end_excl, replace = F
   first_fc <- prefix$end_excl
   med <- function(m) {
     x <- cm[cm$month == m, , drop = FALSE]
-    if (!nrow(x)) return(NA_real_)
+    if (!nrow(x)) {
+      return(NA_real_)
+    }
     stats::median(tapply(x$n_cases, x$replicate_id, sum))
   }
   seam <- c(prefix = med(last_pre), forecast = med(first_fc))
-  message(sprintf("%s %s: factual series stitched from the smoothing over %s..%s (%d month(s), %d replicate(s) paired with %d smoothing replicate(s)); seam median cases %s -> %s",
-                  tag, run_tag, format(min(prefix$months)), format(last_pre), length(prefix$months),
-                  sum(info$n_replicates), sum(info$n_smoothing_reps),
-                  format(round(seam[["prefix"]])), format(round(seam[["forecast"]]))))
+  message(sprintf(
+    "%s %s: factual series stitched from the smoothing over %s..%s (%d month(s), %d replicate(s) paired with %d smoothing replicate(s)); seam median cases %s -> %s",
+    tag,
+    run_tag,
+    format(min(prefix$months)),
+    format(last_pre),
+    length(prefix$months),
+    sum(info$n_replicates),
+    sum(info$n_smoothing_reps),
+    format(round(seam[["prefix"]])),
+    format(round(seam[["forecast"]]))
+  ))
   list(months = prefix$months, parts = info, seam = seam)
 }
 
@@ -1675,17 +2489,51 @@ smoothing_prefix_spec <- function(smoothing_events, start, end_excl, replace = F
 #' through the run's handoff_map.csv; a run without the map is refused, never
 #' silently unpaired. With window_start >= factual_start the call is exactly
 #' load_sim_run_monthly() (no map read, no `stitch` element).
-load_sim_run_stitched <- function(sim_root, run_tag, window_start, window_end, factual_start,
-                                  smoothing_events = NULL, ...) {
-  window_start <- as.Date(window_start); factual_start <- as.Date(factual_start)
-  if (window_start >= factual_start)
-    return(load_sim_run_monthly(sim_root, run_tag, window_start, window_end, ...))
-  if (is.null(smoothing_events))
-    stop("load_sim_run_stitched: run '", run_tag, "' launches at ", format(factual_start),
-         ", after the window start ", format(window_start), ", and no smoothing events were ",
-         "given to stitch the months between.", call. = FALSE)
-  load_sim_run_monthly(sim_root, run_tag, window_start, window_end, ...,
-                       prefix = smoothing_prefix_spec(smoothing_events, window_start, factual_start))
+load_sim_run_stitched <- function(
+  sim_root,
+  run_tag,
+  window_start,
+  window_end,
+  factual_start,
+  smoothing_events = NULL,
+  ...
+) {
+  window_start <- as.Date(window_start)
+  factual_start <- as.Date(factual_start)
+  if (window_start >= factual_start) {
+    return(load_sim_run_monthly(
+      sim_root,
+      run_tag,
+      window_start,
+      window_end,
+      ...
+    ))
+  }
+  if (is.null(smoothing_events)) {
+    stop(
+      "load_sim_run_stitched: run '",
+      run_tag,
+      "' launches at ",
+      format(factual_start),
+      ", after the window start ",
+      format(window_start),
+      ", and no smoothing events were ",
+      "given to stitch the months between.",
+      call. = FALSE
+    )
+  }
+  load_sim_run_monthly(
+    sim_root,
+    run_tag,
+    window_start,
+    window_end,
+    ...,
+    prefix = smoothing_prefix_spec(
+      smoothing_events,
+      window_start,
+      factual_start
+    )
+  )
 }
 
 #' load_arm_run
@@ -1696,36 +2544,81 @@ load_sim_run_stitched <- function(sim_root, run_tag, window_start, window_end, f
 #' counterfactual pair (09's two loaders, 07d's two loops) calls this.
 #' `arm_starts`: list(factual, counterfactual) launches
 #' (utils/sim_io.R::manifest_arm_starts()), or NULL for a plain read.
-load_arm_run <- function(sim_root, run_tag, arm, window_start, window_end,
-                         arm_starts = NULL, smoothing_events = NULL,
-                         factual_source = "simulation", ...) {
+load_arm_run <- function(
+  sim_root,
+  run_tag,
+  arm,
+  window_start,
+  window_end,
+  arm_starts = NULL,
+  smoothing_events = NULL,
+  factual_source = "simulation",
+  ...
+) {
   arm <- match.arg(arm, c("forecast", "counterfactual"))
   factual_source <- match.arg(factual_source, c("simulation", "smoothing"))
   if (identical(arm, "forecast") && identical(factual_source, "smoothing")) {
     # Smoothing-as-factual (event attribution): every month of the
     # factual run read from the smoothing replicate it was handed off from.
-    if (is.null(smoothing_events))
-      stop("load_arm_run: factual_source = 'smoothing' needs the smoothing events.", call. = FALSE)
-    return(load_sim_run_monthly(sim_root, run_tag, window_start, window_end, ...,
-                                prefix = smoothing_prefix_spec(smoothing_events, window_start,
-                                                               seq(as.Date(window_end), by = "month",
-                                                                   length.out = 2L)[2L],
-                                                               replace = TRUE)))
+    if (is.null(smoothing_events)) {
+      stop(
+        "load_arm_run: factual_source = 'smoothing' needs the smoothing events.",
+        call. = FALSE
+      )
+    }
+    return(load_sim_run_monthly(
+      sim_root,
+      run_tag,
+      window_start,
+      window_end,
+      ...,
+      prefix = smoothing_prefix_spec(
+        smoothing_events,
+        window_start,
+        seq(as.Date(window_end), by = "month", length.out = 2L)[2L],
+        replace = TRUE
+      )
+    ))
   }
-  if (is.null(arm_starts) || identical(arm, "counterfactual"))
-    return(load_sim_run_monthly(sim_root, run_tag, window_start, window_end, ...))
-  load_sim_run_stitched(sim_root, run_tag, window_start, window_end, arm_starts$factual,
-                        smoothing_events = smoothing_events, ...)
+  if (is.null(arm_starts) || identical(arm, "counterfactual")) {
+    return(load_sim_run_monthly(
+      sim_root,
+      run_tag,
+      window_start,
+      window_end,
+      ...
+    ))
+  }
+  load_sim_run_stitched(
+    sim_root,
+    run_tag,
+    window_start,
+    window_end,
+    arm_starts$factual,
+    smoothing_events = smoothing_events,
+    ...
+  )
 }
 
 #' Quantile ribbon (q10/q25/q50/q75/q90) across replicates, unweighted.
-summarise_reps <- function(df, group_cols, value_cols = c("n_cases", "n_outbreaks")) {
-  fns <- lapply(c(q10 = 0.10, q25 = 0.25, q50 = 0.50, q75 = 0.75, q90 = 0.90),
-                function(p) { force(p); function(x) stats::quantile(x, p, names = FALSE) })
+summarise_reps <- function(
+  df,
+  group_cols,
+  value_cols = c("n_cases", "n_outbreaks")
+) {
+  fns <- lapply(
+    c(q10 = 0.10, q25 = 0.25, q50 = 0.50, q75 = 0.75, q90 = 0.90),
+    function(p) {
+      force(p)
+      function(x) stats::quantile(x, p, names = FALSE)
+    }
+  )
   df %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) %>%
-    dplyr::summarise(dplyr::across(dplyr::all_of(value_cols), fns, .names = "{.col}_{.fn}"),
-                     .groups = "drop")
+    dplyr::summarise(
+      dplyr::across(dplyr::all_of(value_cols), fns, .names = "{.col}_{.fn}"),
+      .groups = "drop"
+    )
 }
 
 #' Paired forecast-vs-counterfactual difference per ADM1 unit. `df` has
@@ -1737,38 +2630,53 @@ paired_adm1_stats <- function(df, value_col, ci_level = 0.50) {
   df %>%
     dplyr::group_by(run, adm1_unit, replicate_id) %>%
     dplyr::summarise(value = sum(.data[[value_col]]), .groups = "drop") %>%
-    tidyr::pivot_wider(names_from = run, values_from = value, values_fill = 0) %>%
+    tidyr::pivot_wider(
+      names_from = run,
+      values_from = value,
+      values_fill = 0
+    ) %>%
     dplyr::mutate(diff = forecast - counterfactual) %>%
     dplyr::group_by(adm1_unit) %>%
     dplyr::summarise(
-      forecast             = mean(forecast),
-      counterfactual       = mean(counterfactual),
-      mean_diff            = mean(diff),
-      diff_ci_low          = stats::quantile(diff, ci_alpha, names = FALSE),
-      diff_ci_high         = stats::quantile(diff, 1 - ci_alpha, names = FALSE),
+      forecast = mean(forecast),
+      counterfactual = mean(counterfactual),
+      mean_diff = mean(diff),
+      diff_ci_low = stats::quantile(diff, ci_alpha, names = FALSE),
+      diff_ci_high = stats::quantile(diff, 1 - ci_alpha, names = FALSE),
       prob_forecast_higher = mean(diff > 0),
-      n_replicates         = dplyr::n(),
-      .groups = "drop")
+      n_replicates = dplyr::n(),
+      .groups = "drop"
+    )
 }
 
 #' Ratio / significance / crosswalk columns for a paired_adm1_stats() table.
 #' Significance (paired CI excludes zero) is never trusted where both arms are
 #' low-signal. `adm1_pop` (adm1_unit, pop_adm1) non-NULL adds per-1e5 incidence.
-finish_adm1_ratio <- function(stats_df, low_signal_thresh, country_region,
-                              adm1_group_horizon, adm1_pop = NULL, ratio_eps = 0.25) {
+finish_adm1_ratio <- function(
+  stats_df,
+  low_signal_thresh,
+  country_region,
+  adm1_group_horizon,
+  adm1_pop = NULL,
+  ratio_eps = 0.25
+) {
   out <- stats_df %>%
     dplyr::mutate(
-      country     = stringr::str_extract(adm1_unit, "^[A-Z]{3}"),
-      low_signal  = (forecast + counterfactual) < low_signal_thresh,
-      ratio       = (forecast + ratio_eps) / (counterfactual + ratio_eps),
-      ratio       = ifelse(low_signal, NA_real_, ratio),
-      log2_ratio  = log2(ratio),
-      significant = !low_signal & (diff_ci_low > 0 | diff_ci_high < 0))
-  if (!is.null(adm1_pop))
+      country = stringr::str_extract(adm1_unit, "^[A-Z]{3}"),
+      low_signal = (forecast + counterfactual) < low_signal_thresh,
+      ratio = (forecast + ratio_eps) / (counterfactual + ratio_eps),
+      ratio = ifelse(low_signal, NA_real_, ratio),
+      log2_ratio = log2(ratio),
+      significant = !low_signal & (diff_ci_low > 0 | diff_ci_high < 0)
+    )
+  if (!is.null(adm1_pop)) {
     out <- out %>%
       dplyr::left_join(adm1_pop, by = "adm1_unit") %>%
-      dplyr::mutate(incidence_forecast       = 1e5 * forecast / pop_adm1,
-                    incidence_counterfactual = 1e5 * counterfactual / pop_adm1)
+      dplyr::mutate(
+        incidence_forecast = 1e5 * forecast / pop_adm1,
+        incidence_counterfactual = 1e5 * counterfactual / pop_adm1
+      )
+  }
   out %>%
     dplyr::left_join(country_region, by = "country") %>%
     dplyr::left_join(adm1_group_horizon, by = "adm1_unit")
@@ -1792,34 +2700,53 @@ finish_adm1_ratio <- function(stats_df, low_signal_thresh, country_region,
 #' replicate against EVERY counterfactual replicate (replicate_id pairing is
 #' ignored on purpose). `keep_means = FALSE` returns only prob_larger /
 #' prob_smaller (the slim variant 09's sensitivity grid uses).
-adm1_prob_stats <- function(df, value_col, threshold, keep_means = TRUE)
+adm1_prob_stats <- function(df, value_col, threshold, keep_means = TRUE) {
   adm1_prob_stats_cum(adm1_prob_cum(df, value_col), threshold, keep_means)
+}
 
 #' adm1_prob_stats() in two stages, so a caller looping over thresholds sums
 #' the window totals once: adm1_prob_cum() = per (run, ADM1, replicate) totals
 #' of `value_col`; adm1_prob_stats_cum() = the probabilities from them.
-adm1_prob_cum <- function(df, value_col)
+adm1_prob_cum <- function(df, value_col) {
   .sum_by_keys(df, c("run", "adm1_unit", "replicate_id"), c(value = value_col))
+}
 
 adm1_prob_stats_cum <- function(cum, threshold, keep_means = TRUE) {
   cum %>%
     dplyr::group_by(adm1_unit) %>%
     dplyr::group_modify(function(sub, key) {
-      f <- sub$value[sub$run == "forecast"]; cc <- sub$value[sub$run == "counterfactual"]
+      f <- sub$value[sub$run == "forecast"]
+      cc <- sub$value[sub$run == "counterfactual"]
       if (length(f) == 0L || length(cc) == 0L) {
         out <- tibble::tibble(prob_larger = NA_real_, prob_smaller = NA_real_)
-        if (keep_means)
-          out <- dplyr::bind_cols(out, tibble::tibble(
-            mean_forecast = NA_real_, mean_counterfactual = NA_real_,
-            n_forecast = length(f), n_counterfactual = length(cc)))
+        if (keep_means) {
+          out <- dplyr::bind_cols(
+            out,
+            tibble::tibble(
+              mean_forecast = NA_real_,
+              mean_counterfactual = NA_real_,
+              n_forecast = length(f),
+              n_counterfactual = length(cc)
+            )
+          )
+        }
         return(out)
       }
-      out <- tibble::tibble(prob_larger  = .prob_pairs_gt(f, (1 + threshold) * cc),
-                            prob_smaller = .prob_pairs_lt(f, (1 - threshold) * cc))
-      if (keep_means)
-        out <- dplyr::bind_cols(out, tibble::tibble(
-          mean_forecast = mean(f), mean_counterfactual = mean(cc),
-          n_forecast = length(f), n_counterfactual = length(cc)))
+      out <- tibble::tibble(
+        prob_larger = .prob_pairs_gt(f, (1 + threshold) * cc),
+        prob_smaller = .prob_pairs_lt(f, (1 - threshold) * cc)
+      )
+      if (keep_means) {
+        out <- dplyr::bind_cols(
+          out,
+          tibble::tibble(
+            mean_forecast = mean(f),
+            mean_counterfactual = mean(cc),
+            n_forecast = length(f),
+            n_counterfactual = length(cc)
+          )
+        )
+      }
       out
     }) %>%
     dplyr::ungroup()
@@ -1828,16 +2755,25 @@ adm1_prob_stats_cum <- function(cum, threshold, keep_means = TRUE) {
 #' Country / low-signal / signed-probability / significance columns for an
 #' adm1_prob_stats(keep_means = TRUE) table. Low-signal ADM1 units are greyed
 #' out; `sig_threshold` is both the magnitude cutoff and the confidence cutoff.
-finish_adm1_prob <- function(stats_df, low_signal_thresh, sig_threshold,
-                             country_region, adm1_group_horizon) {
+finish_adm1_prob <- function(
+  stats_df,
+  low_signal_thresh,
+  sig_threshold,
+  country_region,
+  adm1_group_horizon
+) {
   stats_df %>%
     dplyr::mutate(
-      country     = stringr::str_extract(adm1_unit, "^[A-Z]{3}"),
-      low_signal  = (mean_forecast + mean_counterfactual) < low_signal_thresh,
-      signed_prob = dplyr::case_when(low_signal ~ NA_real_,
-                                     prob_larger >= prob_smaller ~ prob_larger,
-                                     TRUE ~ -prob_smaller),
-      significant = !low_signal & (prob_larger >= sig_threshold | prob_smaller >= sig_threshold)) %>%
+      country = stringr::str_extract(adm1_unit, "^[A-Z]{3}"),
+      low_signal = (mean_forecast + mean_counterfactual) < low_signal_thresh,
+      signed_prob = dplyr::case_when(
+        low_signal ~ NA_real_,
+        prob_larger >= prob_smaller ~ prob_larger,
+        TRUE ~ -prob_smaller
+      ),
+      significant = !low_signal &
+        (prob_larger >= sig_threshold | prob_smaller >= sig_threshold)
+    ) %>%
     dplyr::left_join(country_region, by = "country") %>%
     dplyr::left_join(adm1_group_horizon, by = "adm1_unit")
 }

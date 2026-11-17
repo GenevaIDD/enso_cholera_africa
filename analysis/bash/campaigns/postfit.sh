@@ -201,5 +201,5 @@ echo "============================================================"
 echo "Submitted:"
 for s in "${SUMMARY[@]}"; do echo "  ${s}"; done
 echo "Watch:  squeue -u \$USER"
-echo "Outputs: cb_surfaces via make*RunFile (generated_data/), LOO rankings under generated_data/loo_compare/<batch>/, figures dir via makeFigureDir"
+echo "Outputs: cb_surfaces via make_*_run_file (generated_data/), LOO rankings under generated_data/loo_compare/<batch>/, figures dir via make_figure_dir"
 echo "============================================================"

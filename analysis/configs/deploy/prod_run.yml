@@ -111,7 +111,7 @@ deploy:
     exclude_models: ["CM2.1-NMME"]   # analog: left out (largest share, strongest post-El Nino cold bias)
     seam: last_full_oni    # analog seam at the last full 3-month CFSv2 mean; firm horizons move back one month
 
-  # --- Counterfactual ENSO analog pool (enso.R::ensoCounterfactualCfg) ---
+  # --- Counterfactual ENSO analog pool (enso.R::enso_counterfactual_cfg) ---
   # Library matcher: the pool drawn from the continuation library (same rescaled
   # series, features, exclude_models and faded join), every DJF a reported
   # month reads constrained; per-run cache built / verified in-process by

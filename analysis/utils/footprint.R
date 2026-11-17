@@ -1,54 +1,47 @@
-# ===========================================================================
-# footprint.R -- the (gid, year_seas, admin_level) footprint collapse
-# ===========================================================================
+# footprint.R — the (gid, year_seas, admin_level) footprint collapse and the
+#   canonical episode table shared by the size, duration and monthly tracks.
 #
-# WHY THIS MODULE EXISTS.
+# Provides:
+#   FOOTPRINT_KEY, footprint_key()   the collapse key, named once
+#   unify_footprint_ids(), collapse_to_footprint()   one row per footprint
+#   footprint_member_rows()          which LPs fed each footprint
+#   aggregate_monthly_to_footprint() monthly series on the footprint key
+#   build_canonical_episodes(), canonical_episodes()   cross-track episodes
+#   canonical_season_calendar(), representative_ids_by_gid()
+#   adm0_episode_counts(), discarded_onset_table()
 #
-# 03_prepare_siz.R ends by collapsing the episode table to ONE row per
+# Details:
+#   The size frame must stay bit-identical so archived fits remain comparable:
+#   unify_footprint_ids() / collapse_to_footprint() are not to be re-specified;
+#   footprint_member_rows() is purely additive. Callers source base.R; dplyr /
+#   tibble via `::`.
+
+# Why footprints. 03_prepare_siz.R collapses the episode table to ONE row per
 # (gid, year_seas, admin_level) footprint: cases are SUMMED across every
 # location period that resolves to the same gid in the same season-year, and
-# every other column is taken with `dplyr::first()`. That means the surviving
-# `uid` / `location_period_id` on a size (and therefore duration) episode is a
+# every other column is taken with `dplyr::first()`. So the surviving `uid` /
+# `location_period_id` on a size (and therefore duration) episode is a
 # REPRESENTATIVE LABEL, not the identity of the thing whose cases the row
-# carries. Measured on the Aug-2026 corpus under
-# `--pop_source crosswalk --composite_policy drop_collapse`:
+# carries. Measured on the Aug-2026 corpus (`--pop_source crosswalk
+# --composite_policy drop_collapse`): 314 / 1581 rows (19.9%) carry more cases
+# than their own (uid, lp) total in outbreak_metadata.rds; those rows hold
+# 29.7% of the size-track case mass; the worst ratio is 127x.
 #
-#   314 / 1581 rows (19.9%) carry more cases than their own (uid, lp) total in
-#   outbreak_metadata.rds; those rows hold 29.7% of the size-track case mass;
-#   238,350 cases are absorbed from sibling location periods; the worst ratio
-#   is 127x.
-#
-# Anything that wants to attach an EXTERNAL per-location-period quantity to a
-# size/duration episode -- the monthly case series from
-# 01b_preprocess_outbreaks_monthly.R being the first such consumer -- therefore
-# cannot join on (uid, location_period_id). It must join on the footprint key,
-# and it needs to know which location periods fed each footprint. That
-# membership only ever existed transiently inside 03_prepare_siz.R, between the
-# climate join and the collapse, and `across(..., first)` destroyed it.
-#
-# So the collapse moves here, gains a membership map as a first-class output,
-# and 03_prepare_siz.R (producer) and 03_prepare_mon.R (consumer) share one
-# definition of what a footprint is. The alternative -- re-deriving `gid` in the
-# monthly script -- would mean duplicating the ~500-line seasonality/crosswalk
-# match cascade, and the two copies would drift.
-#
-# BEHAVIOURAL CONTRACT. `unifyFootprintIds()` and `collapseToFootprint()` are
-# the pre-existing 03_prepare_siz.R blocks moved verbatim (lines 617-625 and
-# 627-634 of the pre-refactor file). They are not improved, reordered or
-# re-specified here: the size frame must stay bit-identical so archived fits
-# remain comparable. `footprintMembers()` is purely additive -- it reads the
-# frame and returns a new tibble, mutating nothing.
-#
-# Sourced-only. Depends on: base (`%||%`). Uses dplyr/tibble via `::`.
-# ===========================================================================
-
+# Anything that attaches an EXTERNAL per-location-period quantity to a
+# size/duration episode (e.g. the monthly case series of
+# 01b_preprocess_outbreaks_monthly.R) therefore cannot join on
+# (uid, location_period_id). It must join on the footprint key and know which
+# location periods fed each footprint -- the membership map this module
+# returns as a first-class output, so 03_prepare_siz.R (producer) and
+# 03_prepare_mon.R (consumer) share one definition of a footprint instead of
+# duplicating the seasonality / crosswalk match cascade.
 
 # The collapse key. Named once so a consumer cannot spell it differently from
 # the producer -- the exact failure this module exists to prevent.
 FOOTPRINT_KEY <- c("gid", "year_seas", "admin_level")
 
 
-#' .footprintKeyChr
+#' .footprint_key_chr
 #'
 #' Coerce the three key columns to character so a factor `admin_level` on one
 #' side and a character `admin_level` on the other cannot silently fail to
@@ -59,17 +52,28 @@ FOOTPRINT_KEY <- c("gid", "year_seas", "admin_level")
 #'
 #' @param d data frame carrying FOOTPRINT_KEY
 #' @return `d` with the three key columns as character
-.footprintKeyChr <- function(d, .fn = ".footprintKeyChr", key = FOOTPRINT_KEY) {
+.footprint_key_chr <- function(
+  d,
+  .fn = ".footprint_key_chr",
+  key = FOOTPRINT_KEY
+) {
   miss <- setdiff(key, names(d))
-  if (length(miss))
-    stop(.fn, ": missing footprint key column(s): ",
-         paste(miss, collapse = ", "), call. = FALSE)
-  for (k in key) d[[k]] <- as.character(d[[k]])
+  if (length(miss)) {
+    stop(
+      .fn,
+      ": missing footprint key column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  for (k in key) {
+    d[[k]] <- as.character(d[[k]])
+  }
   d
 }
 
 
-#' unifyFootprintIds
+#' unify_footprint_ids
 #'
 #' LEGACY-ONLY id unification, moved verbatim from 03_prepare_siz.R:617-625.
 #' Fixes ONE representative location_period_id / uid per (gid, admin_level)
@@ -94,29 +98,35 @@ FOOTPRINT_KEY <- c("gid", "year_seas", "admin_level")
 #'   `uid`
 #' @return `dat` with `location_period_id` / `uid` replaced by the per-(gid,
 #'   admin_level) representative
-unifyFootprintIds <- function(dat) {
+unify_footprint_ids <- function(dat) {
   need <- c("gid", "admin_level", "location_period_id", "uid")
   miss <- setdiff(need, names(dat))
-  if (length(miss))
-    stop("unifyFootprintIds: missing column(s): ", paste(miss, collapse = ", "),
-         call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "unify_footprint_ids: missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   dat %>%
     dplyr::group_by(gid, admin_level) %>%
-    dplyr::mutate(.rep_i             = order(location_period_id)[1],
-                  location_period_id = location_period_id[.rep_i],
-                  uid                = uid[.rep_i]) %>%
+    dplyr::mutate(
+      .rep_i = order(location_period_id)[1],
+      location_period_id = location_period_id[.rep_i],
+      uid = uid[.rep_i]
+    ) %>%
     dplyr::ungroup() %>%
     dplyr::select(-.rep_i)
 }
 
 
-#' footprintMembers
+#' footprint_member_rows
 #'
 #' Capture which (uid, location_period_id) rows feed each footprint, BEFORE the
 #' collapse throws the information away.
 #'
-#' MUST BE CALLED BEFORE `unifyFootprintIds()`, not after. Under
+#' MUST BE CALLED BEFORE `unify_footprint_ids()`, not after. Under
 #' `--pop_source legacy` the unification overwrites `uid` /
 #' `location_period_id` with a single representative across all season-years,
 #' so a map built afterwards would claim every season's cases belong to one
@@ -126,7 +136,7 @@ unifyFootprintIds <- function(dat) {
 #' unification/collapse still run in their original order.
 #'
 #' `.member_i` reproduces the row that `dplyr::first()` will pick in
-#' `collapseToFootprint()`. `group_by() |> summarise()` sorts GROUPS by key but
+#' `collapse_to_footprint()`. `group_by() |> summarise()` sorts GROUPS by key but
 #' preserves the original row order WITHIN a group, and `mutate()` never
 #' reorders, so `.member_i == 1L` is the representative. It is recorded rather
 #' than recomputed downstream because that equivalence is a dplyr semantics
@@ -143,37 +153,46 @@ unifyFootprintIds <- function(dat) {
 #' @return tibble, one row per input row: FOOTPRINT_KEY (character) +
 #'   `uid`, `location_period_id`, `TL`, `TR`, `suspected_cases`, `apportion_w`,
 #'   `.member_i`, `n_members`
-footprintMembers <- function(dat) {
+footprint_member_rows <- function(dat) {
   need <- c(FOOTPRINT_KEY, "uid", "location_period_id")
   miss <- setdiff(need, names(dat))
-  if (length(miss))
-    stop("footprintMembers: missing column(s): ", paste(miss, collapse = ", "),
-         call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "footprint_member_rows: missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   out <- tibble::tibble(
-    gid                = as.character(dat$gid),
-    year_seas          = as.character(dat$year_seas),
-    admin_level        = as.character(dat$admin_level),
-    uid                = as.character(dat$uid),
+    gid = as.character(dat$gid),
+    year_seas = as.character(dat$year_seas),
+    admin_level = as.character(dat$admin_level),
+    uid = as.character(dat$uid),
     location_period_id = as.character(dat$location_period_id),
-    TL                 = if ("TL" %in% names(dat)) as.Date(dat$TL) else as.Date(NA),
-    TR                 = if ("TR" %in% names(dat)) as.Date(dat$TR) else as.Date(NA),
-    suspected_cases    = if ("suspected_cases" %in% names(dat))
-                           as.numeric(dat$suspected_cases) else NA_real_,
+    TL = if ("TL" %in% names(dat)) as.Date(dat$TL) else as.Date(NA),
+    TR = if ("TR" %in% names(dat)) as.Date(dat$TR) else as.Date(NA),
+    suspected_cases = if ("suspected_cases" %in% names(dat)) {
+      as.numeric(dat$suspected_cases)
+    } else {
+      NA_real_
+    },
     # 1 under legacy / collapse / drop_collapse; H/P_l under `keep`.
-    apportion_w        = if ("apportion_w" %in% names(dat))
-                           as.numeric(dat$apportion_w) else 1
+    apportion_w = if ("apportion_w" %in% names(dat)) {
+      as.numeric(dat$apportion_w)
+    } else {
+      1
+    }
   )
 
   out %>%
     dplyr::group_by(gid, year_seas, admin_level) %>%
-    dplyr::mutate(.member_i = dplyr::row_number(),
-                  n_members = dplyr::n()) %>%
+    dplyr::mutate(.member_i = dplyr::row_number(), n_members = dplyr::n()) %>%
     dplyr::ungroup()
 }
 
 
-#' collapseToFootprint
+#' collapse_to_footprint
 #'
 #' The footprint collapse, moved verbatim from 03_prepare_siz.R:627-634.
 #'
@@ -184,17 +203,21 @@ footprintMembers <- function(dat) {
 #'
 #' POPULATION IS A STOCK and `sum(pop)` here is NOT the final answer -- the
 #' caller replaces it with the coverage-saturated min(sum_l H, Q_g) via
-#' `reconcileFootprintPop()`. That step stays at the call site: it needs the
+#' `reconcile_footprint_pop()`. That step stays at the call site: it needs the
 #' population tables, which this module deliberately does not depend on.
 #'
 #' @param dat episode table carrying FOOTPRINT_KEY, `suspected_cases`, `pop`
 #' @return one row per footprint
-collapseToFootprint <- function(dat) {
+collapse_to_footprint <- function(dat) {
   need <- c(FOOTPRINT_KEY, "suspected_cases", "pop")
   miss <- setdiff(need, names(dat))
-  if (length(miss))
-    stop("collapseToFootprint: missing column(s): ",
-         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "collapse_to_footprint: missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   dat %>%
     dplyr::group_by(gid, year_seas, admin_level) %>%
@@ -204,11 +227,12 @@ collapseToFootprint <- function(dat) {
       # apportionment); the legacy sum(pop) otherwise.
       pop = sum(pop, na.rm = TRUE),
       dplyr::across(-c(suspected_cases, pop), dplyr::first),
-      .groups = "drop")
+      .groups = "drop"
+    )
 }
 
 
-#' aggregateMonthlyToFootprint
+#' aggregate_monthly_to_footprint
 #'
 #' Push a per-(uid, location_period_id, month) series through the same
 #' membership the footprint collapse used, so the result is on the SAME
@@ -223,28 +247,41 @@ collapseToFootprint <- function(dat) {
 #' enforced here so the caller decides fatality (and can report before dying).
 #'
 #' @param monthly   per-(uid, location_period_id, month) tibble from
-#'   `makeMonthlyCasesFile()`; needs `uid`, `location_period_id`, `month`,
+#'   `make_monthly_cases_file()`; needs `uid`, `location_period_id`, `month`,
 #'   `cases_month`, and optionally `obs_days`, `n_intervals`
-#' @param members   output of `footprintMembers()`
-#' @param footprints collapsed frame (output of `collapseToFootprint()`, or any
+#' @param members   output of `footprint_member_rows()`
+#' @param footprints collapsed frame (output of `collapse_to_footprint()`, or any
 #'   frame with FOOTPRINT_KEY + `suspected_cases`) used for the conservation
 #'   check. NULL to skip the check.
 #' @param tolerance relative tolerance for conservation
-#' @param key the episode key (`footprintKey()`); FOOTPRINT_KEY by default, so
+#' @param key the episode key (`footprint_key()`); FOOTPRINT_KEY by default, so
 #'   every existing call is unchanged. `c("gid", "year_seas")` under
 #'   `episodes.key: gid_season`.
 #' @return list(monthly = <footprint x month tibble>, recon = <per-footprint
 #'   reconciliation tibble>, report = <one-row summary tibble>)
-aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
-                                        tolerance = 1e-6, key = FOOTPRINT_KEY) {
+aggregate_monthly_to_footprint <- function(
+  monthly,
+  members,
+  footprints = NULL,
+  tolerance = 1e-6,
+  key = FOOTPRINT_KEY
+) {
   need_m <- c("uid", "location_period_id", "month", "cases_month")
-  miss   <- setdiff(need_m, names(monthly))
-  if (length(miss))
-    stop("aggregateMonthlyToFootprint: `monthly` is missing column(s): ",
-         paste(miss, collapse = ", "), call. = FALSE)
-  if (!all(c(key, "uid", "location_period_id") %in% names(members)))
-    stop("aggregateMonthlyToFootprint: `members` is not a footprintMembers() ",
-         "output.", call. = FALSE)
+  miss <- setdiff(need_m, names(monthly))
+  if (length(miss)) {
+    stop(
+      "aggregate_monthly_to_footprint: `monthly` is missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  if (!all(c(key, "uid", "location_period_id") %in% names(members))) {
+    stop(
+      "aggregate_monthly_to_footprint: `members` is not a footprint_member_rows() ",
+      "output.",
+      call. = FALSE
+    )
+  }
 
   # Select down to exactly the columns this function uses BEFORE the join.
   # `monthly` (01b's output) carries its own `admin_level` (and `location`,
@@ -254,14 +291,22 @@ aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
   # that dplyr does error on group_by() not finding the bare name, which is
   # how this was caught.
   mon <- monthly %>%
-    dplyr::transmute(uid                = as.character(uid),
-                     location_period_id = as.character(location_period_id),
-                     month              = as.Date(month),
-                     cases_month        = cases_month,
-                     obs_days           = if ("obs_days" %in% names(monthly))
-                                            obs_days else NA_real_,
-                     n_intervals        = if ("n_intervals" %in% names(monthly))
-                                            n_intervals else NA_integer_)
+    dplyr::transmute(
+      uid = as.character(uid),
+      location_period_id = as.character(location_period_id),
+      month = as.Date(month),
+      cases_month = cases_month,
+      obs_days = if ("obs_days" %in% names(monthly)) {
+        obs_days
+      } else {
+        NA_real_
+      },
+      n_intervals = if ("n_intervals" %in% names(monthly)) {
+        n_intervals
+      } else {
+        NA_integer_
+      }
+    )
 
   # Members whose location period has NO monthly series at all. Counted and
   # returned, never silently dropped: this is the corpus-vintage tripwire.
@@ -275,10 +320,12 @@ aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
   # different footprints (many-to-one). Both are intended; declaring it stops
   # dplyr warning about a fan-out that is the whole mechanism.
   joined <- members %>%
-    dplyr::select(dplyr::all_of(key), uid, location_period_id,
-                  apportion_w) %>%
-    dplyr::inner_join(mon, by = c("uid", "location_period_id"),
-                      relationship = "many-to-many")
+    dplyr::select(dplyr::all_of(key), uid, location_period_id, apportion_w) %>%
+    dplyr::inner_join(
+      mon,
+      by = c("uid", "location_period_id"),
+      relationship = "many-to-many"
+    )
 
   out <- joined %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(c(key, "month")))) %>%
@@ -286,17 +333,21 @@ aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
       # apportion_w is 1 unless --composite_policy keep split this LP across
       # member gids; then the monthly series must be split by the same w the
       # episode total was, or the footprint totals stop matching.
-      cases_month   = sum(cases_month * apportion_w, na.rm = TRUE),
-      obs_days      = sum(obs_days, na.rm = TRUE),
-      n_lp          = dplyr::n_distinct(location_period_id),
-      n_intervals   = sum(n_intervals, na.rm = TRUE),
-      .groups       = "drop")
+      cases_month = sum(cases_month * apportion_w, na.rm = TRUE),
+      obs_days = sum(obs_days, na.rm = TRUE),
+      n_lp = dplyr::n_distinct(location_period_id),
+      n_intervals = sum(n_intervals, na.rm = TRUE),
+      .groups = "drop"
+    )
 
   recon <- NULL
   if (!is.null(footprints)) {
-    fp <- .footprintKeyChr(footprints, "aggregateMonthlyToFootprint", key) %>%
-      dplyr::select(dplyr::all_of(key),
-                    episode_cases = suspected_cases)
+    fp <- .footprint_key_chr(
+      footprints,
+      "aggregate_monthly_to_footprint",
+      key
+    ) %>%
+      dplyr::select(dplyr::all_of(key), episode_cases = suspected_cases)
     recon <- out %>%
       dplyr::group_by(dplyr::across(dplyr::all_of(key))) %>%
       dplyr::summarise(monthly_cases = sum(cases_month), .groups = "drop") %>%
@@ -304,21 +355,26 @@ aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
       dplyr::mutate(
         monthly_cases = dplyr::coalesce(monthly_cases, 0),
         episode_cases = dplyr::coalesce(episode_cases, 0),
-        abs_err       = abs(monthly_cases - episode_cases),
-        rel_err       = abs_err / pmax(1, abs(episode_cases)),
-        conserved     = rel_err <= tolerance)
+        abs_err = abs(monthly_cases - episode_cases),
+        rel_err = abs_err / pmax(1, abs(episode_cases)),
+        conserved = rel_err <= tolerance
+      )
   }
 
   report <- tibble::tibble(
-    n_members            = nrow(members),
-    n_member_unmatched   = as.integer(n_member_unmatched),
-    n_footprints_in      = nrow(dplyr::distinct(members[, key, drop = FALSE])),
-    n_footprints_out     = nrow(dplyr::distinct(out[, key, drop = FALSE])),
-    n_rows_out           = nrow(out),
-    cases_out            = sum(out$cases_month),
-    n_not_conserved      = if (is.null(recon)) NA_integer_
-                           else as.integer(sum(!recon$conserved)),
-    max_rel_err          = if (is.null(recon)) NA_real_ else max(recon$rel_err))
+    n_members = nrow(members),
+    n_member_unmatched = as.integer(n_member_unmatched),
+    n_footprints_in = nrow(dplyr::distinct(members[, key, drop = FALSE])),
+    n_footprints_out = nrow(dplyr::distinct(out[, key, drop = FALSE])),
+    n_rows_out = nrow(out),
+    cases_out = sum(out$cases_month),
+    n_not_conserved = if (is.null(recon)) {
+      NA_integer_
+    } else {
+      as.integer(sum(!recon$conserved))
+    },
+    max_rel_err = if (is.null(recon)) NA_real_ else max(recon$rel_err)
+  )
 
   list(monthly = out, recon = recon, report = report)
 }
@@ -363,27 +419,31 @@ aggregateMonthlyToFootprint <- function(monthly, members, footprints = NULL,
 # Base-only like the rest of this module: no population/provenance calls. The
 # caller supplies `level_of` and computes the digest (provenance.R).
 
-#' footprintKey
+#' footprint_key
 #'
 #' The episode key for a given `episodes.key`. `lp_season` keeps
 #' FOOTPRINT_KEY exactly, so every existing caller is unchanged.
-footprintKey <- function(episode_key = "lp_season") {
-  if (identical(episode_key, "gid_season")) c("gid", "year_seas") else FOOTPRINT_KEY
+footprint_key <- function(episode_key = "lp_season") {
+  if (identical(episode_key, "gid_season")) {
+    c("gid", "year_seas")
+  } else {
+    FOOTPRINT_KEY
+  }
 }
 
 .ADMIN_LEVEL_RANK <- c(ADM0 = 0L, ADM1 = 1L, ADM2 = 2L, ADM3 = 3L)
 
-.adminRank <- function(level) {
+.admin_rank <- function(level) {
   r <- unname(.ADMIN_LEVEL_RANK[as.character(level)])
   r[is.na(r)] <- -1L
   r
 }
 
 # `%m+%` (lubridate::add_with_rollback) by a per-row number of months -- the
-# same arithmetic as occ_data.R::applyOffsetMonths(), vectorised over k.
-.shiftMonths <- function(d, k) {
-  d   <- as.Date(d)
-  k   <- as.integer(k)
+# same arithmetic as occ_data.R::apply_offset_months(), vectorised over k.
+.shift_months <- function(d, k) {
+  d <- as.Date(d)
+  k <- as.integer(k)
   out <- d
   for (u in unique(k[!is.na(k)])) {
     i <- which(k == u)
@@ -392,7 +452,7 @@ footprintKey <- function(episode_key = "lp_season") {
   out
 }
 
-#' canonicalSeasonCalendar
+#' canonical_season_calendar
 #'
 #' One cholera-season calendar per gid. `min_seas` is resolved per LOCATION
 #' PERIOD upstream (from the LP's centroid seasonality match), and under the
@@ -408,12 +468,16 @@ footprintKey <- function(episode_key = "lp_season") {
 #' @param members post-composite-reduction episode rows (`ob_ts3`).
 #' @return `members`, re-dated, with attributes `n_min_seas_reassigned` and
 #'   `n_redate_dropped`.
-canonicalSeasonCalendar <- function(members) {
+canonical_season_calendar <- function(members) {
   need <- c("gid", "location_period_id", "uid", "TL", "TR", "min_seas")
   miss <- setdiff(need, names(members))
-  if (length(miss))
-    stop("canonicalSeasonCalendar: missing column(s): ",
-         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "canonical_season_calendar: missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   canon <- members %>%
     dplyr::count(gid, min_seas, name = ".n") %>%
@@ -426,17 +490,20 @@ canonicalSeasonCalendar <- function(members) {
   n_reassigned <- sum(out$min_seas != out$.min_seas_canon, na.rm = TRUE)
 
   out <- out %>%
-    dplyr::mutate(min_seas   = .min_seas_canon,
-                  TL_seas    = .shiftMonths(TL, -(min_seas - 1L)),
-                  TR_seas    = .shiftMonths(TR, -(min_seas - 1L)),
-                  month_seas = lubridate::month(TL_seas),
-                  year_seas  = lubridate::year(TL_seas)) %>%
+    dplyr::mutate(
+      min_seas = .min_seas_canon,
+      TL_seas = .shift_months(TL, -(min_seas - 1L)),
+      TR_seas = .shift_months(TR, -(min_seas - 1L)),
+      month_seas = lubridate::month(TL_seas),
+      year_seas = lubridate::year(TL_seas)
+    ) %>%
     dplyr::select(-.min_seas_canon)
-  if ("TL_seas_min" %in% names(out))
+  if ("TL_seas_min" %in% names(out)) {
     out <- out %>%
       dplyr::group_by(location_period_id) %>%
       dplyr::mutate(TL_seas_min = min(TL_seas), TL_seas_max = max(TL_seas)) %>%
       dplyr::ungroup()
+  }
 
   n_in <- nrow(out)
   out <- out %>%
@@ -444,11 +511,11 @@ canonicalSeasonCalendar <- function(members) {
     dplyr::distinct(location_period_id, gid, year_seas, .keep_all = TRUE)
 
   attr(out, "n_min_seas_reassigned") <- as.integer(n_reassigned)
-  attr(out, "n_redate_dropped")      <- as.integer(n_in - nrow(out))
+  attr(out, "n_redate_dropped") <- as.integer(n_in - nrow(out))
   out
 }
 
-#' finestLevelTotals
+#' finest_level_totals
 #'
 #' Per key: sum `value_col` within each level, then keep the level with the
 #' largest total (ties -> finer level). Returns the total, the level used and
@@ -456,31 +523,43 @@ canonicalSeasonCalendar <- function(members) {
 #' spatpomp_core.R::.aggregate_footprint_counts(..., keys = keys) -- pinned by
 #' analysis/tests/test_episode_key.R -- but also says WHICH level won, which
 #' the episode builder needs to flag the members it counted.
-finestLevelTotals <- function(df, value_col, keys, level_col = "admin_level") {
+finest_level_totals <- function(
+  df,
+  value_col,
+  keys,
+  level_col = "admin_level"
+) {
   df %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(c(keys, level_col)))) %>%
-    dplyr::summarise(.v = sum(.data[[value_col]], na.rm = TRUE), .groups = "drop") %>%
-    dplyr::mutate(.rank = .adminRank(.data[[level_col]])) %>%
+    dplyr::summarise(
+      .v = sum(.data[[value_col]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(.rank = .admin_rank(.data[[level_col]])) %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(keys))) %>%
     dplyr::arrange(dplyr::desc(.v), dplyr::desc(.rank), .by_group = TRUE) %>%
-    dplyr::summarise(total      = dplyr::first(.v),
-                     level_used = as.character(dplyr::first(.data[[level_col]])),
-                     n_levels   = dplyr::n(),
-                     .groups    = "drop")
+    dplyr::summarise(
+      total = dplyr::first(.v),
+      level_used = as.character(dplyr::first(.data[[level_col]])),
+      n_levels = dplyr::n(),
+      .groups = "drop"
+    )
 }
 
-#' finestLevelRows
+#' finest_level_rows
 #'
-#' The rows of `df` that finestLevelTotals() counts: per key, only the rows of
+#' The rows of `df` that finest_level_totals() counts: per key, only the rows of
 #' the level it picks (largest total, ties -> finer). Row order and columns are
 #' kept, so a sum over the result runs over the same rows in the same order as a
 #' sum over `df` wherever each key has one level (bitwise equal there). Used for
 #' observed monthly cases summed above the gid (08c, 09 smoothing), where
 #' summing every row double-counts nested reports of one gid at two levels.
 #' Without `level_col` in `df`, `df` is returned unchanged.
-finestLevelRows <- function(df, value_col, keys, level_col = "admin_level") {
-  if (!level_col %in% names(df)) return(df)
-  used <- finestLevelTotals(df, value_col, keys, level_col) %>%
+finest_level_rows <- function(df, value_col, keys, level_col = "admin_level") {
+  if (!level_col %in% names(df)) {
+    return(df)
+  }
+  used <- finest_level_totals(df, value_col, keys, level_col) %>%
     dplyr::select(dplyr::all_of(keys), .level_used = level_used)
   df %>%
     dplyr::mutate(.level_used = as.character(.data[[level_col]])) %>%
@@ -488,25 +567,27 @@ finestLevelRows <- function(df, value_col, keys, level_col = "admin_level") {
     dplyr::select(-".level_used")
 }
 
-#' representativeIdsByGid
+#' representative_ids_by_gid
 #'
 #' ONE (uid, location_period_id) per gid across all seasons: the row with the
 #' smallest location_period_id -- exactly the rule 03_prepare_occ.R has always
 #' used before its gid union (`order(location_period_id)[1]`), now shared by
 #' both prep scripts.
-representativeIdsByGid <- function(dat) {
+representative_ids_by_gid <- function(dat) {
   dat %>%
     dplyr::group_by(gid) %>%
-    dplyr::summarise(.rep_i = order(location_period_id)[1],
-                     rep_location_period_id = location_period_id[.rep_i],
-                     rep_uid = uid[.rep_i],
-                     .groups = "drop") %>%
+    dplyr::summarise(
+      .rep_i = order(location_period_id)[1],
+      rep_location_period_id = location_period_id[.rep_i],
+      rep_uid = uid[.rep_i],
+      .groups = "drop"
+    ) %>%
     dplyr::select(-.rep_i)
 }
 
-#' canonicalEpisodes
+#' canonical_episodes
 #'
-#' @param members re-dated member rows (canonicalSeasonCalendar() output):
+#' @param members re-dated member rows (canonical_season_calendar() output):
 #'   gid, year_seas, uid, location_period_id, admin_level (the member's
 #'   REPORTING level, corpus label), TL, TR, TL_seas, TR_seas, `cases_col`,
 #'   optionally `pop_col` and `apportion_w`.
@@ -516,56 +597,99 @@ representativeIdsByGid <- function(dat) {
 #'   overwritten by the canonical TL/TR/TL_seas/TR_seas/cases/pop,
 #'   `admin_level` (geometry), `admin_level_corpus` (the counted reporting
 #'   level), representative uid/location_period_id, `onset_lp`,
-#'   `censor_lp_id`, `n_members`, `n_levels`. `members`: the footprintMembers()
+#'   `censor_lp_id`, `n_members`, `n_levels`. `members`: the footprint_member_rows()
 #'   schema keyed on the episode, plus `report_level` and `in_total`.
-canonicalEpisodes <- function(members, level_of,
-                              cases_col = "suspected_cases", pop_col = "pop") {
-  need <- c("gid", "year_seas", "uid", "location_period_id", "admin_level",
-            "TL", "TR", "TL_seas", "TR_seas", cases_col)
+canonical_episodes <- function(
+  members,
+  level_of,
+  cases_col = "suspected_cases",
+  pop_col = "pop"
+) {
+  need <- c(
+    "gid",
+    "year_seas",
+    "uid",
+    "location_period_id",
+    "admin_level",
+    "TL",
+    "TR",
+    "TL_seas",
+    "TR_seas",
+    cases_col
+  )
   miss <- setdiff(need, names(members))
-  if (length(miss))
-    stop("canonicalEpisodes: missing column(s): ", paste(miss, collapse = ", "),
-         call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "canonical_episodes: missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
   key <- c("gid", "year_seas")
   has_pop <- pop_col %in% names(members)
 
   m <- members %>%
-    dplyr::mutate(report_level = as.character(admin_level),
-                  TL = as.Date(TL), TR = as.Date(TR),
-                  TL_seas = as.Date(TL_seas), TR_seas = as.Date(TR_seas))
-  lvl <- finestLevelTotals(m, cases_col, key, "report_level")
+    dplyr::mutate(
+      report_level = as.character(admin_level),
+      TL = as.Date(TL),
+      TR = as.Date(TR),
+      TL_seas = as.Date(TL_seas),
+      TR_seas = as.Date(TR_seas)
+    )
+  lvl <- finest_level_totals(m, cases_col, key, "report_level")
   m <- m %>%
-    dplyr::left_join(lvl %>% dplyr::select(dplyr::all_of(key), level_used, n_levels),
-                     by = key) %>%
+    dplyr::left_join(
+      lvl %>% dplyr::select(dplyr::all_of(key), level_used, n_levels),
+      by = key
+    ) %>%
     dplyr::mutate(in_total = report_level == level_used)
 
   # Onset member: earliest TL; among ties prefer a counted member, then the
   # finer reporting level, then uid -- deterministic.
   m <- m %>%
-    dplyr::mutate(.rank = .adminRank(report_level)) %>%
-    dplyr::arrange(gid, year_seas, TL, dplyr::desc(in_total), dplyr::desc(.rank), uid)
+    dplyr::mutate(.rank = .admin_rank(report_level)) %>%
+    dplyr::arrange(
+      gid,
+      year_seas,
+      TL,
+      dplyr::desc(in_total),
+      dplyr::desc(.rank),
+      uid
+    )
 
   agg <- m %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(key))) %>%
     dplyr::summarise(
-      .TL      = min(TL), .TR = max(TR),
-      .TL_seas = min(TL_seas), .TR_seas = max(TR_seas),
-      .cases   = sum(.data[[cases_col]][in_total], na.rm = TRUE),
-      .pop     = if (has_pop) sum(.data[[pop_col]][in_total], na.rm = TRUE) else NA_real_,
+      .TL = min(TL),
+      .TR = max(TR),
+      .TL_seas = min(TL_seas),
+      .TR_seas = max(TR_seas),
+      .cases = sum(.data[[cases_col]][in_total], na.rm = TRUE),
+      .pop = if (has_pop) {
+        sum(.data[[pop_col]][in_total], na.rm = TRUE)
+      } else {
+        NA_real_
+      },
       onset_lp = dplyr::first(location_period_id),
       # censoring is a property of the member whose report ENDS the episode;
       # ties broken on the smallest location_period_id.
-      censor_lp_id = location_period_id[order(-as.numeric(TR),
-                                              as.character(location_period_id))[1]],
+      censor_lp_id = location_period_id[order(
+        -as.numeric(TR),
+        as.character(location_period_id)
+      )[1]],
       n_members = dplyr::n(),
       admin_level_corpus = dplyr::first(level_used),
       # reporting gap inside the episode: a member starting more than a month
       # after every earlier member has ended.
       .gap = {
-        o <- order(TL); tl <- TL[o]; tr <- TR[o]
-        length(tl) > 1L && any(tl[-1] > cummax(as.numeric(tr))[-length(tr)] + 31)
+        o <- order(TL)
+        tl <- TL[o]
+        tr <- TR[o]
+        length(tl) > 1L &&
+          any(tl[-1] > cummax(as.numeric(tr))[-length(tr)] + 31)
       },
-      .groups = "drop")
+      .groups = "drop"
+    )
 
   onset <- m %>%
     dplyr::distinct(dplyr::across(dplyr::all_of(key)), .keep_all = TRUE) %>%
@@ -573,82 +697,116 @@ canonicalEpisodes <- function(members, level_of,
 
   ep <- onset %>%
     dplyr::inner_join(agg, by = key) %>%
-    dplyr::mutate(TL = .TL, TR = .TR, TL_seas = .TL_seas, TR_seas = .TR_seas,
-                  month_seas = lubridate::month(TL_seas),
-                  admin_level = as.character(level_of(gid)))
+    dplyr::mutate(
+      TL = .TL,
+      TR = .TR,
+      TL_seas = .TL_seas,
+      TR_seas = .TR_seas,
+      month_seas = lubridate::month(TL_seas),
+      admin_level = as.character(level_of(gid))
+    )
   ep[[cases_col]] <- ep$.cases
-  if (has_pop) ep[[pop_col]] <- ep$.pop
+  if (has_pop) {
+    ep[[pop_col]] <- ep$.pop
+  }
   ep <- ep %>% dplyr::select(-.TL, -.TR, -.TL_seas, -.TR_seas, -.cases, -.pop)
 
-  rep_ids <- representativeIdsByGid(m)
+  rep_ids <- representative_ids_by_gid(m)
   ep <- ep %>%
     dplyr::left_join(rep_ids, by = "gid") %>%
-    dplyr::mutate(uid = rep_uid, location_period_id = rep_location_period_id) %>%
+    dplyr::mutate(
+      uid = rep_uid,
+      location_period_id = rep_location_period_id
+    ) %>%
     dplyr::select(-rep_uid, -rep_location_period_id)
-  if ("TL_seas_min" %in% names(ep))
+  if ("TL_seas_min" %in% names(ep)) {
     ep <- ep %>%
       dplyr::group_by(gid) %>%
       dplyr::mutate(TL_seas_min = min(TL_seas), TL_seas_max = max(TL_seas)) %>%
       dplyr::ungroup()
+  }
 
   # --- invariants -----------------------------------------------------------
-  if (anyDuplicated(ep[, key]))
-    stop("canonicalEpisodes: (gid, year_seas) is not unique.", call. = FALSE)
-  if (any(ep$TL > ep$TR, na.rm = TRUE))
-    stop("canonicalEpisodes: ", sum(ep$TL > ep$TR, na.rm = TRUE),
-         " episode(s) end before they start.", call. = FALSE)
+  if (anyDuplicated(ep[, key])) {
+    stop("canonical_episodes: (gid, year_seas) is not unique.", call. = FALSE)
+  }
+  if (any(ep$TL > ep$TR, na.rm = TRUE)) {
+    stop(
+      "canonical_episodes: ",
+      sum(ep$TL > ep$TR, na.rm = TRUE),
+      " episode(s) end before they start.",
+      call. = FALSE
+    )
+  }
   uid_gids <- tapply(ep$gid, ep$uid, function(g) length(unique(g)))
-  if (any(uid_gids > 1L))
-    stop("canonicalEpisodes: representative uid <-> gid is not 1:1 (",
-         sum(uid_gids > 1L), " uid(s) represent several gids, e.g. ",
-         paste(utils::head(names(uid_gids)[uid_gids > 1L], 3), collapse = ", "),
-         "). This happens when one location period spans several gids ",
-         "(--composite_policy keep/drop); use collapse or drop_collapse.",
-         call. = FALSE)
+  if (any(uid_gids > 1L)) {
+    stop(
+      "canonical_episodes: representative uid <-> gid is not 1:1 (",
+      sum(uid_gids > 1L),
+      " uid(s) represent several gids, e.g. ",
+      paste(utils::head(names(uid_gids)[uid_gids > 1L], 3), collapse = ", "),
+      "). This happens when one location period spans several gids ",
+      "(--composite_policy keep/drop); use collapse or drop_collapse.",
+      call. = FALSE
+    )
+  }
 
-  # --- members, in the footprintMembers() schema ------------------------------
+  # --- members, in the footprint_member_rows() schema ------------------------------
   mem <- m %>%
-    dplyr::left_join(ep %>% dplyr::select(dplyr::all_of(key),
-                                          episode_admin_level = admin_level),
-                     by = key) %>%
+    dplyr::left_join(
+      ep %>%
+        dplyr::select(dplyr::all_of(key), episode_admin_level = admin_level),
+      by = key
+    ) %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(key))) %>%
     dplyr::mutate(.member_i = dplyr::row_number(), n_members = dplyr::n()) %>%
     dplyr::ungroup()
   mem <- tibble::tibble(
-    gid                = as.character(mem$gid),
-    year_seas          = as.character(mem$year_seas),
-    admin_level        = as.character(mem$episode_admin_level),
-    uid                = as.character(mem$uid),
+    gid = as.character(mem$gid),
+    year_seas = as.character(mem$year_seas),
+    admin_level = as.character(mem$episode_admin_level),
+    uid = as.character(mem$uid),
     location_period_id = as.character(mem$location_period_id),
-    TL                 = as.Date(mem$TL),
-    TR                 = as.Date(mem$TR),
-    suspected_cases    = as.numeric(mem[[cases_col]]),
-    apportion_w        = if ("apportion_w" %in% names(mem))
-                           dplyr::coalesce(as.numeric(mem$apportion_w), 1) else 1,
-    report_level       = mem$report_level,
-    in_total           = mem$in_total,
-    .member_i          = mem$.member_i,
-    n_members          = mem$n_members)
+    TL = as.Date(mem$TL),
+    TR = as.Date(mem$TR),
+    suspected_cases = as.numeric(mem[[cases_col]]),
+    apportion_w = if ("apportion_w" %in% names(mem)) {
+      dplyr::coalesce(as.numeric(mem$apportion_w), 1)
+    } else {
+      1
+    },
+    report_level = mem$report_level,
+    in_total = mem$in_total,
+    .member_i = mem$.member_i,
+    n_members = mem$n_members
+  )
 
   yr_tr <- lubridate::year(ep$TR_seas)
-  nxt <- ep %>% dplyr::arrange(gid, TL) %>% dplyr::group_by(gid) %>%
-    dplyr::mutate(.overlap = dplyr::lead(TL) <= TR) %>% dplyr::ungroup()
+  nxt <- ep %>%
+    dplyr::arrange(gid, TL) %>%
+    dplyr::group_by(gid) %>%
+    dplyr::mutate(.overlap = dplyr::lead(TL) <= TR) %>%
+    dplyr::ungroup()
   report <- list(
-    n_episodes_canonical     = nrow(ep),
-    n_members                = nrow(mem),
-    n_multi_member_episodes  = sum(ep$n_members > 1L),
-    n_multi_level_episodes   = sum(ep$n_levels > 1L),
-    n_gap_episodes           = sum(ep$.gap),
-    n_cross_season_episodes  = sum(yr_tr > as.integer(ep$year_seas), na.rm = TRUE),
-    n_overlapping_next       = sum(nxt$.overlap, na.rm = TRUE),
-    cases_members            = sum(as.numeric(members[[cases_col]]), na.rm = TRUE),
-    cases_episodes           = sum(ep[[cases_col]], na.rm = TRUE))
+    n_episodes_canonical = nrow(ep),
+    n_members = nrow(mem),
+    n_multi_member_episodes = sum(ep$n_members > 1L),
+    n_multi_level_episodes = sum(ep$n_levels > 1L),
+    n_gap_episodes = sum(ep$.gap),
+    n_cross_season_episodes = sum(
+      yr_tr > as.integer(ep$year_seas),
+      na.rm = TRUE
+    ),
+    n_overlapping_next = sum(nxt$.overlap, na.rm = TRUE),
+    cases_members = sum(as.numeric(members[[cases_col]]), na.rm = TRUE),
+    cases_episodes = sum(ep[[cases_col]], na.rm = TRUE)
+  )
   ep <- ep %>% dplyr::select(-.gap)
 
   list(episodes = ep, members = mem, report = report)
 }
 
-#' buildCanonicalEpisodes
+#' build_canonical_episodes
 #'
 #' THE shared entry point: 03_prepare_occ.R and 03_prepare_siz.R call this
 #' with identical arguments on their post-composite-reduction `ob_ts3`, so the
@@ -656,16 +814,29 @@ canonicalEpisodes <- function(members, level_of,
 #' SAME episode table -- the episode digest then proves it.
 #'
 #' @param ob_ts3 post-C2 episode rows (one per LP-event per member gid).
-#' @param level_of function(gid) -> canonical level (population.R::canonicalLevelLookup()).
-#' @return canonicalEpisodes() output, with `report` extended by the calendar
+#' @param level_of function(gid) -> canonical level (population.R::canonical_level_lookup()).
+#' @return canonical_episodes() output, with `report` extended by the calendar
 #'   counts.
-buildCanonicalEpisodes <- function(ob_ts3, level_of,
-                                   cases_col = "suspected_cases", pop_col = "pop") {
-  cal <- canonicalSeasonCalendar(ob_ts3)
-  res <- canonicalEpisodes(cal, level_of, cases_col = cases_col, pop_col = pop_col)
-  res$report <- c(res$report, list(
-    n_min_seas_reassigned = attr(cal, "n_min_seas_reassigned"),
-    n_redate_dropped      = attr(cal, "n_redate_dropped")))
+build_canonical_episodes <- function(
+  ob_ts3,
+  level_of,
+  cases_col = "suspected_cases",
+  pop_col = "pop"
+) {
+  cal <- canonical_season_calendar(ob_ts3)
+  res <- canonical_episodes(
+    cal,
+    level_of,
+    cases_col = cases_col,
+    pop_col = pop_col
+  )
+  res$report <- c(
+    res$report,
+    list(
+      n_min_seas_reassigned = attr(cal, "n_min_seas_reassigned"),
+      n_redate_dropped = attr(cal, "n_redate_dropped")
+    )
+  )
   res$member_rows <- cal
   res
 }
@@ -674,23 +845,26 @@ buildCanonicalEpisodes <- function(ob_ts3, level_of,
 # Discarded onsets and the ADM0 drop
 # ---------------------------------------------------------------------------
 
-#' adm0EpisodeCounts
+#' adm0_episode_counts
 #'
 #' National (ADM0) database outbreak rows, which 03_prepare_occ.R drops before
 #' any panel is built: per country, the number of rows and their cases.
 #' @param ob_ts outbreak rows (country, admin_level, suspected_cases).
 #' @return tibble(country, n_adm0_episodes, cases_adm0).
-adm0EpisodeCounts <- function(ob_ts) {
+adm0_episode_counts <- function(ob_ts) {
   ob_ts %>%
     dplyr::ungroup() %>%
     dplyr::filter(as.character(admin_level) == "ADM0") %>%
     dplyr::group_by(country = as.character(country)) %>%
-    dplyr::summarise(n_adm0_episodes = dplyr::n(),
-                     cases_adm0 = sum(as.numeric(suspected_cases), na.rm = TRUE), .groups = "drop") %>%
+    dplyr::summarise(
+      n_adm0_episodes = dplyr::n(),
+      cases_adm0 = sum(as.numeric(suspected_cases), na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
     dplyr::arrange(country)
 }
 
-#' discardedOnsetTable
+#' discarded_onset_table
 #'
 #' Every database onset that does not become a canonical episode onset of the
 #' occurrence panel, one row each, by reason:
@@ -702,7 +876,7 @@ adm0EpisodeCounts <- function(ob_ts) {
 #'                      year of the gid's CANONICAL calendar than the kept one
 #'                      (discarded only because of the LP calendar);
 #'   redate_duplicate   dropped as a duplicate after re-dating onto the gid's
-#'                      canonical calendar (canonicalSeasonCalendar());
+#'                      canonical calendar (canonical_season_calendar());
 #'   absorbed_member    a later member of a canonical episode (its onset is the
 #'                      episode's earliest member onset);
 #'   absorbed_after_gap the same, starting more than 31 days after every
@@ -711,59 +885,112 @@ adm0EpisodeCounts <- function(ob_ts) {
 #' @param ob_ts2 rows before the first-onset filter (location_period_id, gid,
 #'   country, TL, TR, suspected_cases, year_seas).
 #' @param ob_ts3_first rows right after it (same columns).
-#' @param ob_ts3_final the rows buildCanonicalEpisodes() was given (after the
+#' @param ob_ts3_final the rows build_canonical_episodes() was given (after the
 #'   composite reduction; rows with a NA min_seas are ignored).
-#' @param ep_res buildCanonicalEpisodes() output (episodes, members, member_rows).
+#' @param ep_res build_canonical_episodes() output (episodes, members, member_rows).
 #' @return tibble(reason, location_period_id, gid, country, TL, TR, cases,
 #'   year_seas_lp, year_seas_gid, after_episode_end, lp_calendar_only).
-discardedOnsetTable <- function(ob_ts2, ob_ts3_first, ob_ts3_final, ep_res) {
-  k <- function(d) paste(d$location_period_id, d$gid, as.Date(d$TL), as.Date(d$TR))
-  norm <- function(d) d %>% dplyr::ungroup() %>%
-    dplyr::mutate(location_period_id = as.character(location_period_id),
-                  gid = as.character(gid), country = as.character(country),
-                  TL = as.Date(TL), TR = as.Date(TR))
-  a <- norm(ob_ts2); b <- norm(ob_ts3_first); f <- norm(ob_ts3_final)
-  ms <- ep_res$episodes %>% dplyr::distinct(gid = as.character(gid), min_seas = as.integer(min_seas))
+discarded_onset_table <- function(ob_ts2, ob_ts3_first, ob_ts3_final, ep_res) {
+  k <- function(d) {
+    paste(d$location_period_id, d$gid, as.Date(d$TL), as.Date(d$TR))
+  }
+  norm <- function(d) {
+    d %>%
+      dplyr::ungroup() %>%
+      dplyr::mutate(
+        location_period_id = as.character(location_period_id),
+        gid = as.character(gid),
+        country = as.character(country),
+        TL = as.Date(TL),
+        TR = as.Date(TR)
+      )
+  }
+  a <- norm(ob_ts2)
+  b <- norm(ob_ts3_first)
+  f <- norm(ob_ts3_final)
+  ms <- ep_res$episodes %>%
+    dplyr::distinct(gid = as.character(gid), min_seas = as.integer(min_seas))
   gyear <- function(gid, TL) {
     m <- ms$min_seas[match(gid, ms$gid)]
-    ifelse(is.na(m), NA_integer_, as.integer(lubridate::year(as.Date(TL) %m+% months(-(m - 1L)))))
+    ifelse(
+      is.na(m),
+      NA_integer_,
+      as.integer(lubridate::year(as.Date(TL) %m+% months(-(m - 1L))))
+    )
   }
   # 1. LP-calendar first-onset filter
   lp2 <- a[!k(a) %in% k(b), , drop = FALSE]
-  kept <- b %>% dplyr::group_by(location_period_id, year_seas) %>%
+  kept <- b %>%
+    dplyr::group_by(location_period_id, year_seas) %>%
     dplyr::summarise(k_TL = min(TL), k_TR = max(TR), .groups = "drop")
-  lp2 <- lp2 %>% dplyr::left_join(kept, by = c("location_period_id", "year_seas"))
+  lp2 <- lp2 %>%
+    dplyr::left_join(kept, by = c("location_period_id", "year_seas"))
   t1 <- tibble::tibble(
-    reason = "lp_second_onset", location_period_id = lp2$location_period_id, gid = lp2$gid,
-    country = lp2$country, TL = lp2$TL, TR = lp2$TR, cases = as.numeric(lp2$suspected_cases),
-    year_seas_lp = as.integer(lp2$year_seas), year_seas_gid = gyear(lp2$gid, lp2$TL),
+    reason = "lp_second_onset",
+    location_period_id = lp2$location_period_id,
+    gid = lp2$gid,
+    country = lp2$country,
+    TL = lp2$TL,
+    TR = lp2$TR,
+    cases = as.numeric(lp2$suspected_cases),
+    year_seas_lp = as.integer(lp2$year_seas),
+    year_seas_gid = gyear(lp2$gid, lp2$TL),
     after_episode_end = !is.na(lp2$k_TR) & lp2$TL > lp2$k_TR,
-    lp_calendar_only = !is.na(lp2$k_TL) & gyear(lp2$gid, lp2$TL) != gyear(lp2$gid, lp2$k_TL))
+    lp_calendar_only = !is.na(lp2$k_TL) &
+      gyear(lp2$gid, lp2$TL) != gyear(lp2$gid, lp2$k_TL)
+  )
   # 2. re-dating duplicates (rows of ob_ts3 the canonical calendar dropped)
   cal <- norm(ep_res$member_rows)
   b_ok <- f[!is.na(f$min_seas), , drop = FALSE]
   rd <- b_ok[!k(b_ok) %in% k(cal), , drop = FALSE]
   t2 <- tibble::tibble(
-    reason = "redate_duplicate", location_period_id = rd$location_period_id, gid = rd$gid,
-    country = rd$country, TL = rd$TL, TR = rd$TR, cases = as.numeric(rd$suspected_cases),
-    year_seas_lp = as.integer(rd$year_seas), year_seas_gid = gyear(rd$gid, rd$TL),
-    after_episode_end = NA, lp_calendar_only = NA)
+    reason = "redate_duplicate",
+    location_period_id = rd$location_period_id,
+    gid = rd$gid,
+    country = rd$country,
+    TL = rd$TL,
+    TR = rd$TR,
+    cases = as.numeric(rd$suspected_cases),
+    year_seas_lp = as.integer(rd$year_seas),
+    year_seas_gid = gyear(rd$gid, rd$TL),
+    after_episode_end = NA,
+    lp_calendar_only = NA
+  )
   # 3. absorbed members of a canonical episode
-  mem <- ep_res$members %>% dplyr::ungroup() %>%
-    dplyr::mutate(gid = as.character(gid), TL = as.Date(TL), TR = as.Date(TR)) %>%
+  mem <- ep_res$members %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(
+      gid = as.character(gid),
+      TL = as.Date(TL),
+      TR = as.Date(TR)
+    ) %>%
     dplyr::arrange(gid, year_seas, TL) %>%
     dplyr::group_by(gid, year_seas) %>%
-    dplyr::mutate(.on_TL = min(TL),
-                  .prev_TR = dplyr::lag(cummax(as.numeric(TR))),
-                  .gap = !is.na(.prev_TR) & as.numeric(TL) > .prev_TR + 31) %>%
+    dplyr::mutate(
+      .on_TL = min(TL),
+      .prev_TR = dplyr::lag(cummax(as.numeric(TR))),
+      .gap = !is.na(.prev_TR) & as.numeric(TL) > .prev_TR + 31
+    ) %>%
     dplyr::ungroup() %>%
     dplyr::filter(TL > .on_TL)
-  ctry <- ep_res$episodes %>% dplyr::distinct(gid = as.character(gid), country = as.character(country))
+  ctry <- ep_res$episodes %>%
+    dplyr::distinct(gid = as.character(gid), country = as.character(country))
   t3 <- tibble::tibble(
-    reason = as.character(ifelse(mem$.gap, "absorbed_after_gap", "absorbed_member")),
-    location_period_id = as.character(mem$location_period_id), gid = mem$gid,
-    country = ctry$country[match(mem$gid, ctry$gid)], TL = mem$TL, TR = mem$TR,
-    cases = as.numeric(mem$suspected_cases), year_seas_lp = NA_integer_,
-    year_seas_gid = as.integer(mem$year_seas), after_episode_end = NA, lp_calendar_only = NA)
+    reason = as.character(ifelse(
+      mem$.gap,
+      "absorbed_after_gap",
+      "absorbed_member"
+    )),
+    location_period_id = as.character(mem$location_period_id),
+    gid = mem$gid,
+    country = ctry$country[match(mem$gid, ctry$gid)],
+    TL = mem$TL,
+    TR = mem$TR,
+    cases = as.numeric(mem$suspected_cases),
+    year_seas_lp = NA_integer_,
+    year_seas_gid = as.integer(mem$year_seas),
+    after_episode_end = NA,
+    lp_calendar_only = NA
+  )
   dplyr::bind_rows(t1, t2, t3) %>% dplyr::arrange(reason, country, gid, TL)
 }

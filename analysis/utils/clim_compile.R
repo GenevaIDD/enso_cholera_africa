@@ -1,48 +1,68 @@
+# clim_compile.R — read raw climate files per GADM unit and compile monthly
+#   stats and extremes (CSV or parquet source).
+#
+# Provides:
+#   get_clim_files_gid(), read_clim_csv()       raw climate files of a gid
+#   get_precip_vars(), get_temp_vars()          variable names
+#   compute_baseline_stats()                    baseline climatology
+#   compile_all_stats(), compile_all_extremes() monthly stats / extremes
+#   compile_all_stats_parquet(), compile_all_extremes_parquet()
+#
+# Details:
+#   Used by 02_preprocess_climate.R (stats into climate_stats.sqlite) and the
+#   03 / 04 data builders.
 
 # Climate data wrangling --------------------------------------------------
 
-#' getClimFilesGid
+#' get_clim_files_gid
 #' get all climate data files corresponding to a given GADM id
-#' 
-#' @param gid 
-#' @param clim_dir 
 #'
-getClimFilesGid <- function(gid, 
-                            clim_dir = "data/climate_data/") {
-  
+#' @param gid
+#' @param clim_dir
+#'
+get_clim_files_gid <- function(gid, clim_dir = "data/climate_data/") {
   country <- stringr::str_extract(gid, "[A-Z]{3}")
-  gid_num <- stringr::str_remove(gid, stringr::str_c(country, "_")) %>% 
+  gid_num <- stringr::str_remove(gid, stringr::str_c(country, "_")) %>%
     stringr::str_remove(country)
-  
+
   this_dir <- dir(clim_dir, pattern = country, full.names = T, recursive = F)
-  
-  dir(this_dir, pattern = gid_num, full.names = T, recursive = T) %>% 
-    stringr::str_subset(stringr::str_c("v410_", gid_num, "_[A-Z]")) %>% 
-    stringr::str_subset("txt", negate = T) %>% 
+
+  dir(this_dir, pattern = gid_num, full.names = T, recursive = T) %>%
+    stringr::str_subset(stringr::str_c("v410_", gid_num, "_[A-Z]")) %>%
+    stringr::str_subset("txt", negate = T) %>%
     stringr::str_subset("1980|1990|2000|2010|2020")
 }
 
-#' parseFileInfo
+#' parse_file_info
 #' Parse the information in a climate file name
-#' @param str 
+#' @param str
 #'
-parseFileInfo <- function(str) {
+parse_file_info <- function(str) {
   country <- stringr::str_extract(str, "[A-Z]{3}")
   for (l in 2:1) {
-    unit <- stringr::str_extract(str, stringr::str_c("(?<=410_)", stringr::str_c(rep("[0-9]+", l+1), collapse = "_")))
+    unit <- stringr::str_extract(
+      str,
+      stringr::str_c(
+        "(?<=410_)",
+        stringr::str_c(rep("[0-9]+", l + 1), collapse = "_")
+      )
+    )
     admin_level <- l
     if (!is.na(unit)) {
       break()
     }
   }
-  
+
   if (is.na(unit)) {
     unit <- "country"
     admin_level <- 0
   }
-  
+
   period <- stringr::str_extract(str, "[0-9]{4}_[0-9]{4}")
-  variable <- stringr::str_extract(str, glue::glue("(?<={unit}_)(.)*(?=_{period})"))
+  variable <- stringr::str_extract(
+    str,
+    glue::glue("(?<={unit}_)(.)*(?=_{period})")
+  )
   tibble(
     country = country,
     admin_level = admin_level,
@@ -57,208 +77,217 @@ parseFileInfo <- function(str) {
 
 # Climate data stats ------------------------------------------------------
 
-
-readClimCSV <- function(x) {
-  
+read_clim_csv <- function(x) {
   # Namespaced: furrr's multisession workers do not attach readr.
-  res <- readr::read_csv(x, 
-                  na = c("", "NA", "-9999"), 
-                  show_col_types = FALSE) 
-  
+  res <- readr::read_csv(x, na = c("", "NA", "-9999"), show_col_types = FALSE)
+
   if (nrow(res) == 0) {
     warning("File ", x, " is empty.")
   }
-  
+
   res
 }
 
-#' computeStatsPrecip
+#' compute_stats_precip
 #' Compute the statistics of monthly precipitation
-#' 
+#'
 #' @param x csv file to process
 #'
-computeStatsPrecip <- function(x) {
-  
-  res <- readClimCSV(x)
-  
+compute_stats_precip <- function(x) {
+  res <- read_clim_csv(x)
+
   if (nrow(res) == 0) {
-    return(NULL)  
+    return(NULL)
   }
-  
-  res %>% 
-    select(Date, contains("2010")) %>% 
-    janitor::clean_names() %>% 
-    mutate(month = format(date, "%Y-%m") %>% stringr::str_c("-01") %>% as.Date(),
-           pl1 = lag(chirps_pop_2010, 1),
-           pl2 = lag(chirps_pop_2010, 2),
-           pl3 = lag(chirps_pop_2010, 3),
-           pl4 = lag(chirps_pop_2010, 4),
-           pl5 = lag(chirps_pop_2010, 5),
-           pl6 = lag(chirps_pop_2010, 6),
-           pcum7 = chirps_pop_2010 + pl1 + pl2 + pl3 + pl4 + pl5 + pl6 + pl6
-    ) %>% 
-    group_by(month) %>% 
-    summarise(precip = sum(chirps_pop_2010),
-              max_precip = max(chirps_pop_2010),
-              mean_cum7 = mean(pcum7, na.rm = T),
-              max_cum7 = max(pcum7, na.rm = T))
+
+  res %>%
+    select(Date, contains("2010")) %>%
+    janitor::clean_names() %>%
+    mutate(
+      month = format(date, "%Y-%m") %>% stringr::str_c("-01") %>% as.Date(),
+      pl1 = lag(chirps_pop_2010, 1),
+      pl2 = lag(chirps_pop_2010, 2),
+      pl3 = lag(chirps_pop_2010, 3),
+      pl4 = lag(chirps_pop_2010, 4),
+      pl5 = lag(chirps_pop_2010, 5),
+      pl6 = lag(chirps_pop_2010, 6),
+      pcum7 = chirps_pop_2010 + pl1 + pl2 + pl3 + pl4 + pl5 + pl6 + pl6
+    ) %>%
+    group_by(month) %>%
+    summarise(
+      precip = sum(chirps_pop_2010),
+      max_precip = max(chirps_pop_2010),
+      mean_cum7 = mean(pcum7, na.rm = T),
+      max_cum7 = max(pcum7, na.rm = T)
+    )
 }
 
-#' computeStatsTemp
+#' compute_stats_temp
 #' Compute statistics of monthly temperature
-#' 
+#'
 #' @param x csv file to process
 #'
-computeStatsTemp <- function(x) {
-  
+compute_stats_temp <- function(x) {
   stat <- stringr::str_extract(x, "daymin|daymax")
-  
+
   if (is.na(stat)) {
     stat <- "daymean"
   }
-  
+
   dict <- c("value")
   names(dict) <- stringr::str_c("temp_", stat)
-  
-  res <- readClimCSV(x)
-  
+
+  res <- read_clim_csv(x)
+
   if (nrow(res) == 0) {
-    return(NULL)  
+    return(NULL)
   }
-  
-  res %>% 
-    select(Date, contains("2010")) %>% 
-    janitor::clean_names() %>% 
-    mutate(month = format(date, "%Y-%m") %>% stringr::str_c("-01") %>% as.Date()) %>% 
-    group_by(month) %>% 
-    summarise(value = mean(era5_land_pop_2010)) %>% 
+
+  res %>%
+    select(Date, contains("2010")) %>%
+    janitor::clean_names() %>%
+    mutate(
+      month = format(date, "%Y-%m") %>% stringr::str_c("-01") %>% as.Date()
+    ) %>%
+    group_by(month) %>%
+    summarise(value = mean(era5_land_pop_2010)) %>%
     rename(dict)
 }
 
 
-#' getPrecipVars
+#' get_precip_vars
 #' Returns columns names of precipitation statistics
-#' 
-getPrecipVars <- function() {
+#'
+get_precip_vars <- function() {
   c("precip", "max_precip", "mean_cum7", "max_cum7")
 }
 
-#' getTempVars
+#' get_temp_vars
 #' Returns columns names of precipitation statistics
-#' 
-getTempVars <- function() {
+#'
+get_temp_vars <- function() {
   c("temp_daymean", "temp_daymax", "temp_daymin")
 }
 
 
-#' computeBaselineStats
+#' compute_baseline_stats
 #' Compute the monthly statistics for the period 1980-2009
-#' 
+#'
 #' @param dat the dataframe of statistics to preocess
 #' @param vars the variables to compute statistics for
-#' 
-computeBaselineStats <- function(gid, 
-                                 stats = NULL,
-                                 var = "precip",
-                                 redo = FALSE,
-                                 baseline) {
-  gid <- flattenGid(gid)
-  out_file <- makeClimBaselineStatsFile(var = var, gid = gid, baseline = baseline)
-  
+#'
+compute_baseline_stats <- function(
+  gid,
+  stats = NULL,
+  var = "precip",
+  redo = FALSE,
+  baseline
+) {
+  gid <- flatten_gid(gid)
+  out_file <- make_clim_baseline_stats_file(
+    var = var,
+    gid = gid,
+    baseline = baseline
+  )
+
   if (!file.exists(out_file) | redo) {
-    
     # Get climate stats if not provided
     if (is.null(stats)) {
-      stats <- compileStats(gid = gid,
-                            var = var,
-                            redo = redo)
+      stats <- compile_stats(gid = gid, var = var, redo = redo)
     }
-    
+
     cat("-- Computing baseline stats for", var, gid, baseline, "\n")
-    
+
     # Get variables of interest
-    clim_vars <- getClimVars(var)
+    clim_vars <- get_clim_vars(var)
     # Make the left and right time bounds
-    time_bounds <- makeBaselineTimeBounds(baseline)
-    
-    baseline_stats <-  stats %>% 
-      filter(lubridate::year(month) >= time_bounds$TL & lubridate::year(month) <= time_bounds$TR) %>% 
-      mutate(month_num = lubridate::month(month)) %>% 
-      tidyr::pivot_longer(any_of(clim_vars)) %>% 
-      group_by(month_num, name) %>% 
-      summarise(q10 = quantile(value, 0.1, na.rm = T),
-                q90 = quantile(value, 0.9, na.rm = T),
-                mean = mean(value, na.rm = T),
-                sd = sd(value, na.rm = T))
-    
-    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)   # a fresh checkout has no cache dirs
+    time_bounds <- make_baseline_time_bounds(baseline)
+
+    baseline_stats <- stats %>%
+      filter(
+        lubridate::year(month) >= time_bounds$TL &
+          lubridate::year(month) <= time_bounds$TR
+      ) %>%
+      mutate(month_num = lubridate::month(month)) %>%
+      tidyr::pivot_longer(any_of(clim_vars)) %>%
+      group_by(month_num, name) %>%
+      summarise(
+        q10 = quantile(value, 0.1, na.rm = T),
+        q90 = quantile(value, 0.9, na.rm = T),
+        mean = mean(value, na.rm = T),
+        sd = sd(value, na.rm = T)
+      )
+
+    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE) # a fresh checkout has no cache dirs
     saveRDS(baseline_stats, file = out_file)
-    
   } else {
     cat("-- Reading pre-computed baseline stats for", var, gid, "\n")
     baseline_stats <- readRDS(out_file)
   }
-  
+
   baseline_stats
 }
 
 
-makeBaselineTimeBounds <- function(baseline) {
-  
+make_baseline_time_bounds <- function(baseline) {
   time_bounds <- list(
     TL = as.numeric(stringr::str_extract(baseline, "[0-9]{4}")),
     TR = as.numeric(stringr::str_extract(baseline, "(?<=_)[0-9]{4}"))
   )
-  
+
   if (any(is.na(time_bounds))) {
-    stop("Failed in extracting time bounds from ", baseline, ". Provide as YYYY_YYYY")
+    stop(
+      "Failed in extracting time bounds from ",
+      baseline,
+      ". Provide as YYYY_YYYY"
+    )
   }
-  
+
   time_bounds
 }
 
 
-#' getClimVars
+#' get_clim_vars
 #' Define variables of interest
 #' @param var variable, one of precip or temp
 #'
-getClimVars <- function(var) {
+get_clim_vars <- function(var) {
   if (var == "temp") {
-    clim_vars <- getTempVars()
+    clim_vars <- get_temp_vars()
   } else if (var == "precip") {
-    clim_vars <- getPrecipVars()
+    clim_vars <- get_precip_vars()
   } else if (var == "all_parquet") {
     # The parquet source puts every variable in ONE file per admin unit, so it
     # has no temp/precip split to dispatch on. Branch added so the untouched
-    # computeBaselineStats() / computeExtremes() can be reused verbatim.
-    clim_vars <- getClimVarsParquet()
+    # compute_baseline_stats() / compute_extremes() can be reused verbatim.
+    clim_vars <- get_clim_vars_parquet()
   } else {
     stop("Variable ", var, " not found.")
   }
   clim_vars
 }
 
-#' getStatsFun
+#' get_stats_fun
 #' Define function to compute statistics
-#' @param var 
+#' @param var
 #'
-getStatsFun <- function(var) {
+get_stats_fun <- function(var) {
   # Define variables of interest and stat functions
   if (var == "temp") {
-    statsFun <- computeStatsTemp
+    statsFun <- compute_stats_temp
   } else if (var == "precip") {
-    statsFun <- computeStatsPrecip
+    statsFun <- compute_stats_precip
   } else {
     stop("Variable ", var, " not found.")
   }
   statsFun
 }
 
-#' getMatchPattern
+#' get_match_pattern
 #' Define pattern to look for in climate outputs
-#' @param var 
+#' @param var
 #'
-getMatchPattern <- function(var) {
+get_match_pattern <- function(var) {
   # Define variables of interest and stat functions
   if (var == "temp") {
     match_pattern <- "ERA5_Land_2m_temperature"
@@ -271,178 +300,190 @@ getMatchPattern <- function(var) {
 }
 
 
-#' compileStats
+#' compile_stats
 #' Computes and compiles the stats data for a given gid
-#' 
+#'
 #' @param gid the gid for which to compile the data
 #' @param var the variable to compile data for, one of `temp` or `precip`
 #' @param redo whether to redo the compilation
 #'
-compileStats <- function(gid,
-                         var = "temp",
-                         redo = TRUE) {
-  gid <- flattenGid(gid)
-  out_file <- makeClimStatsFile(var = var, gid = gid)
-  
+compile_stats <- function(gid, var = "temp", redo = TRUE) {
+  gid <- flatten_gid(gid)
+  out_file <- make_clim_stats_file(var = var, gid = gid)
+
   if (!file.exists(out_file) | redo) {
-    
     cat("-- Computing stats for", var, gid, "\n")
-    
-    clim_files <- getClimFilesGid(gid)
-    
+
+    clim_files <- get_clim_files_gid(gid)
+
     if (length(clim_files) == 0) {
       warning("No files found for", gid)
       return(NULL)
     }
-    
+
     # Define variables, function and pattern
-    statsFun <- getStatsFun(var)
-    match_pattern <- getMatchPattern(var)
-    
+    statsFun <- get_stats_fun(var)
+    match_pattern <- get_match_pattern(var)
+
     # Get files corresponding to variable of interest
     var_files <- stringr::str_subset(clim_files, match_pattern)
-    
+
     if (length(var_files) == 0) {
       warning("No files found for ", gid, " ", var)
       return(NULL)
     }
-    
+
     # Parse the file information to group by unique variable
-    var_files_info <- purrr::map_df(var_files, parseFileInfo)
-    
+    var_files_info <- purrr::map_df(var_files, parse_file_info)
+
     # Compute statistics for each variable
-    res_list <- var_files_info %>% 
-      group_by(variable) %>% 
+    res_list <- var_files_info %>%
+      group_by(variable) %>%
       group_map(function(x, y) {
-        purrr::map_df(x$file, ~statsFun(.))
-      }) 
-    
+        purrr::map_df(x$file, ~ statsFun(.))
+      })
+
     has_res <- purrr::map_lgl(res_list, ~ nrow(.) > 0)
-    
+
     if (!any(has_res)) {
       warning("All files empty for ", gid, " ", var)
       return(NULL)
     }
-    
-    res <- res_list[has_res]  %>% 
-      purrr::reduce(full_join) %>% 
+
+    res <- res_list[has_res] %>%
+      purrr::reduce(full_join) %>%
       arrange(month)
-    
+
     # Save
-    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)   # a fresh checkout has no cache dirs
+    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE) # a fresh checkout has no cache dirs
     saveRDS(res, file = out_file)
-    
   } else {
     cat("-- Reading pre-computed stats for", var, gid, "\n")
     res <- readRDS(out_file)
   }
-  
-  res  %>% 
+
+  res %>%
     mutate(gid = gid)
 }
 
 
-#' compileExtremes
+#' compile_extremes
 #' Computes and compiles the extremes data for a given gid
-#' 
+#'
 #' @param gid the gid for which to compile the data
 #' @param var the variable to compile data for, one of `temp` or `precip`
 #' @param redo whether to redo the compilation
 #'
-compileExtremes <- function(gid,
-                            var = "temp",
-                            redo = TRUE,
-                            baseline = "1980-2009") {
-  
-  gid <- flattenGid(gid)
-  out_file <- makeClimExtremesFile(var = var, gid = gid, baseline = baseline)
-  
+compile_extremes <- function(
+  gid,
+  var = "temp",
+  redo = TRUE,
+  baseline = "1980-2009"
+) {
+  gid <- flatten_gid(gid)
+  out_file <- make_clim_extremes_file(var = var, gid = gid, baseline = baseline)
+
   if (!file.exists(out_file) | redo) {
-    
     cat("-- Computing extrems for", var, gid, baseline, "\n")
-    
-    stats <- compileStats(gid = gid,
-                          var = var,
-                          redo = redo)
-    
+
+    stats <- compile_stats(gid = gid, var = var, redo = redo)
+
     if (is.null(stats)) {
-      warning("Extremes computation failed for ", gid, " ", var, " because no data was found.")
+      warning(
+        "Extremes computation failed for ",
+        gid,
+        " ",
+        var,
+        " because no data was found."
+      )
       return(NULL)
     }
-    
+
     # Compute baseline statistics for 30yr period as defined by user
-    baseline_stats <- computeBaselineStats(gid = gid, 
-                                           stats = stats, 
-                                           var = var,
-                                           redo = redo, 
-                                           baseline = baseline)
-    
+    baseline_stats <- compute_baseline_stats(
+      gid = gid,
+      stats = stats,
+      var = var,
+      redo = redo,
+      baseline = baseline
+    )
+
     # Define climate variables of interest
-    clim_vars <- getClimVars(var)
-    
+    clim_vars <- get_clim_vars(var)
+
     # Compute extremes for each variable
-    res <- computeExtremes(dat = stats, 
-                           baseline_stats = baseline_stats,
-                           vars = clim_vars) %>% 
+    res <- compute_extremes(
+      dat = stats,
+      baseline_stats = baseline_stats,
+      vars = clim_vars
+    ) %>%
       mutate(gid = gid)
-    
+
     # Save
-    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)   # a fresh checkout has no cache dirs
+    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE) # a fresh checkout has no cache dirs
     saveRDS(res, file = out_file)
-    
   } else {
     cat("-- Reading pre-computed extrems for", var, gid, "\n")
     res <- readRDS(out_file)
   }
-  
+
   res
 }
 
-#' compileAllStats
-#' Wrapper to compute all climate statistics for a given gid 
-#' 
+#' compile_all_stats
+#' Wrapper to compute all climate statistics for a given gid
+#'
 #' @param gid the gid for which to compile the data
 #' @param var the variable to compile data for, one of `temp` or `precip`
 #' @param redo whether to redo the compilation
 #'
-compileAllStats <- function(gid, 
-                            vars = c("temp", "precip"),
-                            redo = FALSE) {
-  
-  res <- purrr::map(vars, ~ compileStats(gid = gid, var = ., redo = redo))
-  
+compile_all_stats <- function(gid, vars = c("temp", "precip"), redo = FALSE) {
+  res <- purrr::map(vars, ~ compile_stats(gid = gid, var = ., redo = redo))
+
   if (all(purrr::map_lgl(res, is.null))) {
     return(NULL)
   } else {
-    res <- res %>% 
-      purrr::reduce(full_join) %>% 
+    res <- res %>%
+      purrr::reduce(full_join) %>%
       arrange(month)
   }
-  
-  cat("---------------------------------
-      -- Done stats computations for ", gid, "
-      ---------------------------------\n")
-  
+
+  cat(
+    "---------------------------------
+      -- Done stats computations for ",
+    gid,
+    "
+      ---------------------------------\n"
+  )
+
   res
 }
 
-#' compileAllExtremes
-#' Wrapper to compute all climate extremes for a given gid 
-#' 
+#' compile_all_extremes
+#' Wrapper to compute all climate extremes for a given gid
+#'
 #' @param gid the gid for which to compile the data
 #' @param var the variable to compile data for, one of `temp` or `precip`
 #' @param redo whether to redo the compilation
 #'
-compileAllExtremes <- function(gid, 
-                               vars = c("temp", "precip"),
-                               redo = FALSE,
-                               baseline) {
-  
-  res <- purrr::map_df(vars, ~ compileExtremes(gid = gid, var = ., redo = redo, baseline = baseline))
-  
-  cat("----------------------------------------------- \n",
-      "-- Done extreme computations for ", gid, "\n",
-      "----------------------------------------------- \n")
+compile_all_extremes <- function(
+  gid,
+  vars = c("temp", "precip"),
+  redo = FALSE,
+  baseline
+) {
+  res <- purrr::map_df(
+    vars,
+    ~ compile_extremes(gid = gid, var = ., redo = redo, baseline = baseline)
+  )
+
+  cat(
+    "----------------------------------------------- \n",
+    "-- Done extreme computations for ",
+    gid,
+    "\n",
+    "----------------------------------------------- \n"
+  )
 
   res
 }
@@ -457,22 +498,21 @@ compileAllExtremes <- function(gid,
 # These functions sit ALONGSIDE the CSV ones above; nothing there is edited, so
 # `--climate_source csv` remains bit-identical and old-vs-new comparison stays
 # possible indefinitely. The CSV readers cannot be reused because:
-#   * getClimFilesGid() ends in str_subset("1980|1990|2000|2010|2020"), which
+#   * get_clim_files_gid() ends in str_subset("1980|1990|2000|2010|2020"), which
 #     rejects every `..._1981_2024_...` filename outright;
-#   * getMatchPattern()'s "CHIRPS_total_precipitation" /
+#   * get_match_pattern()'s "CHIRPS_total_precipitation" /
 #     "ERA5_Land_2m_temperature" strings do not occur in the new names;
-#   * the whole one-file-per-variable architecture (compileStats() mapping over
+#   * the whole one-file-per-variable architecture (compile_stats() mapping over
 #     `var`, then full_join-ing) collapses when one file holds every variable.
 #
-# That last point is the reason for the switch: compileStats()'s
+# That last point is the reason for the switch: compile_stats()'s
 # purrr::reduce(full_join) cartesian-multiplies whenever the substring file match
 # returns more than one CSV per (gid, variable), which is exactly what GADM's
 # malformed Ghana ids cause (`GHA5_2` substring-matches `GHA5.10_2`,
 # `GHA5.15_2`, ...). Three Ghana gids ended up holding 99.7% of the 8.5 GB
 # climate_stats.sqlite. One file per gid removes the join entirely.
 
-
-#' makeClimParquetCore
+#' make_clim_parquet_core
 #' The region-independent tail of a unit's parquet filename, derived from its gid.
 #'
 #' The publisher's rule, verified against COM / GHA / LSO / STP / BEN / GNB / NER
@@ -501,17 +541,17 @@ compileAllExtremes <- function(gid,
 #'   flattened `AGO_4_1` form used as the database key — flattening is lossy
 #'   here because it erases the dot the split depends on.
 #'
-makeClimParquetCore <- function(gid) {
+make_clim_parquet_core <- function(gid) {
   parts <- stringr::str_split(gid, stringr::fixed("."), n = 2)[[1]]
   stem <- stringr::str_c(parts[1], "_v410")
   if (length(parts) > 1 && nzchar(parts[2])) {
-    stem <- stringr::str_c(stem, "_", flattenGid(parts[2]))
+    stem <- stringr::str_c(stem, "_", flatten_gid(parts[2]))
   }
   stringr::str_c(stem, "_CHIRPSv3_ERA5Land_1981_2024_observation.parquet.gzip")
 }
 
 
-#' getClimParquetGid
+#' get_clim_parquet_gid
 #' Resolve a GADM id to its single parquet file.
 #'
 #' Matches on the full `_<core>` suffix (an exact string, not a substring
@@ -524,9 +564,7 @@ makeClimParquetCore <- function(gid) {
 #'   published under two region prefixes, and picking one silently is exactly the
 #'   failure mode this rewrite exists to remove.
 #'
-getClimParquetGid <- function(gid,
-                              clim_dir = "data/climate_parquet/") {
-
+get_clim_parquet_gid <- function(gid, clim_dir = "data/climate_parquet/") {
   country <- stringr::str_extract(gid, "[A-Z]{3}")
   if (is.na(country)) {
     warning("Could not extract an ISO3 country code from gid '", gid, "'")
@@ -538,39 +576,50 @@ getClimParquetGid <- function(gid,
     return(NULL)
   }
 
-  suffix <- stringr::str_c("_", makeClimParquetCore(gid))
-  files  <- list.files(country_dir)
-  hits   <- files[endsWith(files, suffix)]
+  suffix <- stringr::str_c("_", make_clim_parquet_core(gid))
+  files <- list.files(country_dir)
+  hits <- files[endsWith(files, suffix)]
 
   if (length(hits) == 0) {
     return(NULL)
   }
   if (length(hits) > 1) {
-    stop("getClimParquetGid(): gid '", gid, "' matched ", length(hits),
-         " parquet files in ", country_dir, ": ",
-         paste(hits, collapse = ", "),
-         "\n  A unit must resolve to exactly one file. Refusing to guess.")
+    stop(
+      "get_clim_parquet_gid(): gid '",
+      gid,
+      "' matched ",
+      length(hits),
+      " parquet files in ",
+      country_dir,
+      ": ",
+      paste(hits, collapse = ", "),
+      "\n  A unit must resolve to exactly one file. Refusing to guess."
+    )
   }
 
   file.path(country_dir, hits)
 }
 
 
-#' getClimVarsParquet
-#' Monthly statistic columns produced by computeStatsParquet().
+#' get_clim_vars_parquet
+#' Monthly statistic columns produced by compute_stats_parquet().
 #'
-#' The first seven are getPrecipVars() + getTempVars(), which downstream
+#' The first seven are get_precip_vars() + get_temp_vars(), which downstream
 #' readers expect; the rest are extra columns the parquet release provides.
 #'
-getClimVarsParquet <- function() {
-  c(getPrecipVars(),                      # precip, max_precip, mean_cum7, max_cum7
-    getTempVars(),                        # temp_daymean, temp_daymax, temp_daymin
-    "temp_absmax", "temp_absmin",         # monthly extreme of the daily extreme
-    "hurs_mean", "huss_mean")             # relative / specific humidity
+get_clim_vars_parquet <- function() {
+  c(
+    get_precip_vars(), # precip, max_precip, mean_cum7, max_cum7
+    get_temp_vars(), # temp_daymean, temp_daymax, temp_daymin
+    "temp_absmax",
+    "temp_absmin", # monthly extreme of the daily extreme
+    "hurs_mean",
+    "huss_mean"
+  ) # relative / specific humidity
 }
 
 
-#' readClimParquet
+#' read_clim_parquet
 #' Read one admin-unit parquet and mask its missing-value sentinel.
 #'
 #' @param weighting spatial aggregation across the unit's pixels: `simple`
@@ -578,9 +627,10 @@ getClimVarsParquet <- function() {
 #'   every 10 years). `dynamic` is the closest analogue to the CSV era's
 #'   `*_pop_2010` columns.
 #'
-readClimParquet <- function(path,
-                            weighting = c("dynamic", "static", "simple")) {
-
+read_clim_parquet <- function(
+  path,
+  weighting = c("dynamic", "static", "simple")
+) {
   weighting <- match.arg(weighting)
 
   vars <- c("pr", "tas", "tasmax", "tasmin", "hurs", "huss")
@@ -601,38 +651,41 @@ readClimParquet <- function(path,
   # CRITICAL: missing values are the numeric sentinel -9999, NOT NA. Verified on
   # a COM ADM1 unit whose metadata reports `pixels: 0` — all six ERA5 columns are
   # -9999 and is.na() finds nothing. Unmasked, a monthly mean is off by ~10^4.
-  # (readClimCSV() gets this for free via read_csv(na = ...); here it is manual.)
+  # (read_clim_csv() gets this for free via read_csv(na = ...); here it is manual.)
   res %>%
     mutate(across(dplyr::all_of(vars), ~ dplyr::na_if(., -9999))) %>%
     arrange(Date)
 }
 
 
-#' computeStatsParquet
+#' compute_stats_parquet
 #' Monthly statistics for one admin unit, from its parquet file.
 #'
-#' Replaces computeStatsPrecip() + computeStatsTemp() in a single pass — the
+#' Replaces compute_stats_precip() + compute_stats_temp() in a single pass — the
 #' parquet holds precipitation, temperature and humidity together, so there is
 #' nothing left to join.
 #'
-computeStatsParquet <- function(x,
-                                weighting = "dynamic") {
-
-  res <- readClimParquet(x, weighting = weighting)
+compute_stats_parquet <- function(x, weighting = "dynamic") {
+  res <- read_clim_parquet(x, weighting = weighting)
 
   if (is.null(res)) {
     return(NULL)
   }
 
   # mean_cum7 / max_cum7 are trailing 7-day cumulative precipitation. The CSV
-  # version (computeStatsPrecip) wrote
+  # version (compute_stats_precip) wrote
   #   pcum7 = value + pl1 + pl2 + pl3 + pl4 + pl5 + pl6 + pl6
   # -- pl6 twice, eight terms -- so it was neither a 7- nor a 6-day window and
   # double-counted the oldest day. Corrected here to a true 7-day trailing sum,
   # which means new *_cum7 values are NOT comparable to the ones already in
   # climate_stats.sqlite. Recorded as cum7_definition in the provenance sidecar.
   res <- res %>%
-    mutate(pcum7 = rowSums(do.call(cbind, lapply(0:6, function(k) dplyr::lag(pr, k)))))
+    mutate(
+      pcum7 = rowSums(do.call(
+        cbind,
+        lapply(0:6, function(k) dplyr::lag(pr, k))
+      ))
+    )
 
   res %>%
     mutate(month = as.Date(format(Date, "%Y-%m-01"))) %>%
@@ -640,40 +693,42 @@ computeStatsParquet <- function(x,
     summarise(
       # na.rm = FALSE, as in the CSV path: a month containing masked days yields
       # NA rather than a silently partial total.
-      precip       = sum(pr),
-      max_precip   = max(pr),
+      precip = sum(pr),
+      max_precip = max(pr),
       # na.rm = TRUE, as in the CSV path -- the first six days of the series have
-      # no 7-day window. .safeAggStat keeps an all-NA month as NA instead of
+      # no 7-day window. .safe_agg_stat keeps an all-NA month as NA instead of
       # letting max() return -Inf.
-      mean_cum7    = .safeAggStat(mean, pcum7),
-      max_cum7     = .safeAggStat(max, pcum7),
-      # Monthly MEAN of the daily statistic, matching computeStatsTemp().
+      mean_cum7 = .safe_agg_stat(mean, pcum7),
+      max_cum7 = .safe_agg_stat(max, pcum7),
+      # Monthly MEAN of the daily statistic, matching compute_stats_temp().
       temp_daymean = mean(tas),
-      temp_daymax  = mean(tasmax),
-      temp_daymin  = mean(tasmin),
+      temp_daymax = mean(tasmax),
+      temp_daymin = mean(tasmin),
       # New: the monthly extreme of the daily extreme.
-      temp_absmax  = max(tasmax),
-      temp_absmin  = min(tasmin),
-      hurs_mean    = mean(hurs),
-      huss_mean    = mean(huss),
+      temp_absmax = max(tasmax),
+      temp_absmin = min(tasmin),
+      hurs_mean = mean(hurs),
+      huss_mean = mean(huss),
       .groups = "drop"
     ) %>%
     arrange(month)
 }
 
 
-#' .safeAggStat
+#' .safe_agg_stat
 #' Apply an aggregation with na.rm = TRUE, but return NA (not NaN / -Inf) when
 #' every value is missing.
 #'
-.safeAggStat <- function(f, x) {
-  if (all(is.na(x))) return(NA_real_)
+.safe_agg_stat <- function(f, x) {
+  if (all(is.na(x))) {
+    return(NA_real_)
+  }
   as.numeric(f(x, na.rm = TRUE))
 }
 
 
-#' compileAllStatsParquet
-#' Drop-in replacement for compileAllStats() reading the parquet source.
+#' compile_all_stats_parquet
+#' Drop-in replacement for compile_all_stats() reading the parquet source.
 #'
 #' No join anywhere in this path — that is the whole point.
 #'
@@ -681,19 +736,19 @@ computeStatsParquet <- function(x,
 #'   returned `gid` column both use the flattened form, matching the CSV path
 #'   and the climate_stats key.
 #'
-compileAllStatsParquet <- function(gid,
-                                   weighting = "dynamic",
-                                   redo = FALSE,
-                                   clim_dir = "data/climate_parquet/") {
-
-  gid_flat <- flattenGid(gid)
-  out_file <- makeClimStatsFile(var = "all_parquet", gid = gid_flat)
+compile_all_stats_parquet <- function(
+  gid,
+  weighting = "dynamic",
+  redo = FALSE,
+  clim_dir = "data/climate_parquet/"
+) {
+  gid_flat <- flatten_gid(gid)
+  out_file <- make_clim_stats_file(var = "all_parquet", gid = gid_flat)
 
   if (!file.exists(out_file) | redo) {
-
     # The raw gid is required here: flattening erases the dot that
     # makeClimParquetName() splits on.
-    clim_file <- getClimParquetGid(gid, clim_dir = clim_dir)
+    clim_file <- get_clim_parquet_gid(gid, clim_dir = clim_dir)
 
     if (is.null(clim_file)) {
       warning("No parquet file found for ", gid)
@@ -702,7 +757,7 @@ compileAllStatsParquet <- function(gid,
 
     cat("-- Computing parquet stats for", gid, "\n")
 
-    res <- computeStatsParquet(clim_file, weighting = weighting)
+    res <- compute_stats_parquet(clim_file, weighting = weighting)
 
     if (is.null(res) || nrow(res) == 0) {
       warning("Parquet file empty for ", gid)
@@ -710,110 +765,127 @@ compileAllStatsParquet <- function(gid,
     }
 
     if (anyDuplicated(res$month)) {
-      stop("compileAllStatsParquet(): duplicated months for ", gid,
-           ". One parquet file must yield one row per month; a duplicate means ",
-           "the file itself is malformed. Refusing to return it -- this is the ",
-           "class of defect that inflated climate_stats.sqlite to 8.5 GB.")
+      stop(
+        "compile_all_stats_parquet(): duplicated months for ",
+        gid,
+        ". One parquet file must yield one row per month; a duplicate means ",
+        "the file itself is malformed. Refusing to return it -- this is the ",
+        "class of defect that inflated climate_stats.sqlite to 8.5 GB."
+      )
     }
 
-    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)   # a fresh checkout has no cache dirs
+    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE) # a fresh checkout has no cache dirs
     saveRDS(res, file = out_file)
-
   } else {
     cat("-- Reading pre-computed parquet stats for", gid_flat, "\n")
     res <- readRDS(out_file)
   }
 
-  cat("---------------------------------
-      -- Done parquet stats for ", gid_flat, "
-      ---------------------------------\n")
+  cat(
+    "---------------------------------
+      -- Done parquet stats for ",
+    gid_flat,
+    "
+      ---------------------------------\n"
+  )
 
   res %>%
     mutate(gid = gid_flat)
 }
 
 
-#' compileAllExtremesParquet
-#' Drop-in replacement for compileAllExtremes() reading the parquet source.
+#' compile_all_extremes_parquet
+#' Drop-in replacement for compile_all_extremes() reading the parquet source.
 #'
-#' computeBaselineStats(), makeBaselineTimeBounds() and computeExtremes() are
+#' compute_baseline_stats(), make_baseline_time_bounds() and compute_extremes() are
 #' reused UNCHANGED — the extremes maths is source-agnostic, and keeping it
 #' shared is what makes an old-vs-new comparison meaningful.
 #'
-compileAllExtremesParquet <- function(gid,
-                                      redo = FALSE,
-                                      baseline,
-                                      weighting = "dynamic",
-                                      clim_dir = "data/climate_parquet/") {
-
-  gid_flat <- flattenGid(gid)
-  out_file <- makeClimExtremesFile(var = "all_parquet", gid = gid_flat,
-                                   baseline = baseline)
+compile_all_extremes_parquet <- function(
+  gid,
+  redo = FALSE,
+  baseline,
+  weighting = "dynamic",
+  clim_dir = "data/climate_parquet/"
+) {
+  gid_flat <- flatten_gid(gid)
+  out_file <- make_clim_extremes_file(
+    var = "all_parquet",
+    gid = gid_flat,
+    baseline = baseline
+  )
 
   if (!file.exists(out_file) | redo) {
-
-    stats <- compileAllStatsParquet(gid = gid, weighting = weighting,
-                                    redo = redo, clim_dir = clim_dir)
+    stats <- compile_all_stats_parquet(
+      gid = gid,
+      weighting = weighting,
+      redo = redo,
+      clim_dir = clim_dir
+    )
 
     if (is.null(stats)) {
-      warning("Extremes computation failed for ", gid,
-              " because no parquet data was found.")
+      warning(
+        "Extremes computation failed for ",
+        gid,
+        " because no parquet data was found."
+      )
       return(NULL)
     }
 
     cat("-- Computing parquet extremes for", gid_flat, baseline, "\n")
 
-    baseline_stats <- computeBaselineStats(gid = gid_flat,
-                                          stats = stats,
-                                          var = "all_parquet",
-                                          redo = redo,
-                                          baseline = baseline)
+    baseline_stats <- compute_baseline_stats(
+      gid = gid_flat,
+      stats = stats,
+      var = "all_parquet",
+      redo = redo,
+      baseline = baseline
+    )
 
-    res <- computeExtremes(dat = stats,
-                           baseline_stats = baseline_stats,
-                           vars = getClimVarsParquet()) %>%
+    res <- compute_extremes(
+      dat = stats,
+      baseline_stats = baseline_stats,
+      vars = get_clim_vars_parquet()
+    ) %>%
       mutate(gid = gid_flat)
 
-    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)   # a fresh checkout has no cache dirs
+    dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE) # a fresh checkout has no cache dirs
     saveRDS(res, file = out_file)
-
   } else {
     cat("-- Reading pre-computed parquet extremes for", gid_flat, "\n")
     res <- readRDS(out_file)
   }
 
-  cat("----------------------------------------------- \n",
-      "-- Done parquet extremes for ", gid_flat, "\n",
-      "----------------------------------------------- \n")
+  cat(
+    "----------------------------------------------- \n",
+    "-- Done parquet extremes for ",
+    gid_flat,
+    "\n",
+    "----------------------------------------------- \n"
+  )
 
   res
 }
 
 
-#' computeExtremes
+#' compute_extremes
 #' Computes the extremes using baseline statistics using the sd and the quantiles
-#' 
+#'
 #' @param dat the stats data on which to compute extremes
 #' @param baseline_stats the baseline statistics to use for definition of extremes
 #' @param vars the variables for which to compute extremes
 #'
-computeExtremes <- function(dat,
-                            baseline_stats,
-                            vars) {
-  dat %>% 
-    tidyr::pivot_longer(any_of(vars)) %>% 
-    mutate(month_num = lubridate::month(month)) %>% 
-    inner_join(baseline_stats, by = c("name", "month_num")) %>% 
+compute_extremes <- function(dat, baseline_stats, vars) {
+  dat %>%
+    tidyr::pivot_longer(any_of(vars)) %>%
+    mutate(month_num = lubridate::month(month)) %>%
+    inner_join(baseline_stats, by = c("name", "month_num")) %>%
     mutate(
-      hi_sd = value > (mean + 2*sd),
+      hi_sd = value > (mean + 2 * sd),
       hi_q = value > q90,
-      lo_sd = value < (mean - 2*sd),
+      lo_sd = value < (mean - 2 * sd),
       lo_q = value < q10,
-      hilo_sd = case_when(hi_sd ~ "high",
-                          lo_sd ~ "low",
-                          T ~ "none"),
-      hilo_q = case_when(hi_q ~ "high",
-                         lo_q ~ "low",
-                         T ~ "none")
+      hilo_sd = case_when(hi_sd ~ "high", lo_sd ~ "low", T ~ "none"),
+      hilo_q = case_when(hi_q ~ "high", lo_q ~ "low", T ~ "none")
     )
 }

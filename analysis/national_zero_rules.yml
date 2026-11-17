@@ -1,7 +1,7 @@
 # National-zero rule registry.
 #
 # Named parameter sets for 01_preprocess_national_zero_months.R
-# (utils/national_zero.R::buildNationalZeroMonths()). A rule is chosen by
+# (utils/national_zero.R::build_national_zero_months()). A rule is chosen by
 # episodes.national_zero_rule (03_prepare_occ.R --national_zero_rule; 01 --rule);
 # "" means `legacy`. The WHO case threshold is NOT part of a rule: it stays
 # episodes.national_zero_threshold (01 --zero_threshold), so one rule serves the
@@ -16,7 +16,7 @@
 #                      guard, the mirror of the tail guard); 0 = off
 #   db_tolerance       database deepest-level episode cases > this x WHO total
 #                      flags the WHO country-year as under-reported
-#                      (utils/national_zero.R::dbWhoConsistency())
+#                      (utils/national_zero.R::db_who_consistency())
 #   consistency_scope  threshold: that flag removes only below-threshold months;
 #                      all: it also removes months resting on a WHO EXACT zero
 #                      (who_zero and no national zero) -- what AWD reporting

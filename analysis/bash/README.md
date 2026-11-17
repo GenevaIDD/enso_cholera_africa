@@ -46,6 +46,7 @@ memory, time and cores, and nothing is loaded before `Rscript`.
 | `campaigns/preprocess.sh` | The 00-02 data leg (ingest, outbreaks, population, crosswalk, climate); then `stages/03_prepare.sh` builds the model panels. `--plan` prints the job chain. |
 | `tools/run_synthetic_pipeline.sh` | The whole pipeline on the synthetic world, on this machine: its data phase (00 synthetic → 03), then `run_pipeline.sh --deploy analysis/configs/deploy/synth_run1.yml --local --from fits --until manuscript` (`--from` / `--until`, `--cores`). |
 | `tools/run_batch_cb_local.sh` | Postprocess (crossbasis surfaces) and draw one batch of fits locally. |
+| `tools/style.sh` | Format the R code with air (settings: root `air.toml`): `--check` reports, `--fix` rewrites; optional paths. |
 | `tools/download_jahn2026_parquet.sh` | Download the CHIRPS / ERA5-Land admin-unit parquet corpus (Jahn et al. 2026) listed in `analysis/data_manifests/`. |
 
 Rules: bash never builds artefact names (R prints them as `KEY=value` lines, e.g.

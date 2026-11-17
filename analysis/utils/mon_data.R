@@ -1,16 +1,15 @@
-# ===========================================================================
-# mon_data.R -- outbreak-MONTHLY-SIZE track data preparation (fit-time loader)
-# ===========================================================================
+# mon_data.R — fit-time loader of the monthly case-count panel (mon track)
 #
-# Fourth model track alongside occ_data.R / siz_data.R / dur_data.R. The panel
-# itself (one row per active month of an episode, response `cases_month`) is
-# built by 03_prepare_mon.R; this module is the thin fit-time loader that
-# mirrors load_duration_data() (dur_data.R) -- column-class scaling is NOT
-# needed here (the monthly panel inherits already-scaled precip/temp columns
-# from the duration panel it is joined onto), so this file is just filtering
-# plus the two column families the formula builder references but that are
-# built nowhere upstream: the harmonic seasonal columns and cases_prev.
-# ===========================================================================
+# Provides:
+#   load_monthly_data()   read + filter the panel for 04_fit_mon_brms(_cb).R
+#
+# Details:
+#   The panel (one row per active month of an episode, response `cases_month`)
+#   is built by 03_prepare_mon.R; this module only filters it and adds the
+#   column families the formula builder references but nothing upstream
+#   builds: the harmonic seasonal columns and cases_prev. No column-class
+#   scaling here: the panel inherits already-scaled precip/temp columns from
+#   the duration panel it is joined onto (unlike dur_data.R's loader).
 
 #' load_monthly_data
 #'
@@ -31,11 +30,11 @@
 #'      gaps within an episode's window (03_prepare_mon.R), already coalesced
 #'      to `cases_month = 0`, and dropping them would silently delete the rows
 #'      documented there;
-#'   5b. P1/P3/P4, the estimand-coherence apparatus ported from readSizeData()
+#'   5b. P1/P3/P4, the estimand-coherence apparatus ported from read_size_data()
 #'      (siz_data.R) and interleaved at the SAME positions, because the ordering
 #'      is what makes it correct: `pop` is repointed at the declared denominator
 #'      and `admin_level` re-keyed to the canonical GADM level BEFORE
-#'      applyAdminLevelFilter() (so the row filter, the anchor's pooling key and
+#'      apply_admin_level_filter() (so the row filter, the anchor's pooling key and
 #'      the elasticity's centring key are one keying, not three), while the
 #'      `log_pop_c` deviation column is built AFTER every row filter (so its
 #'      centres are the means of the rows actually fitted, which is what the
@@ -56,19 +55,25 @@
 #' @return the filtered monthly panel, with month_num / cases_prev / harmonic
 #'   columns attached as configured.
 load_monthly_data <- function(opt, path = NULL) {
-
-  if (is.null(path)) path <- makeMonthlyDatFile(opt)
-  if (!file.exists(path))
-    stop("load_monthly_data: missing input ", path,
-         " -- run analysis/03_prepare_mon.R first.", call. = FALSE)
+  if (is.null(path)) {
+    path <- make_monthly_dat_file(opt)
+  }
+  if (!file.exists(path)) {
+    stop(
+      "load_monthly_data: missing input ",
+      path,
+      " -- run analysis/03_prepare_mon.R first.",
+      call. = FALSE
+    )
+  }
 
   panel <- readRDS(path)
-  ep_rec <- assertEpisodeKey(opt, path, "monthly")
+  ep_rec <- assert_episode_key(opt, path, "monthly")
 
   # P0: resolve and validate the estimand ONCE, up front, so a mis-declared
   # config fails before any data work rather than producing a plausible-looking
-  # fit on mixed units (readSizeData()'s rule, same reason).
-  estimand <- resolveMonthlyEstimand(opt)
+  # fit on mixed units (read_size_data()'s rule, same reason).
+  estimand <- resolve_monthly_estimand(opt)
 
   # --- cases_prev, from the FULL unfiltered panel (the reference GAM's rule) --
   mon <- opt$monthly %||% list()
@@ -78,10 +83,14 @@ load_monthly_data <- function(opt, path = NULL) {
 
     panel <- panel %>%
       dplyr::mutate(month_prev = month %m-% months(1)) %>%
-      dplyr::left_join(prev_lookup,
-                       by = c("episode_id", "month_prev" = "month")) %>%
-      dplyr::mutate(cases_prev     = tidyr::replace_na(cases_prev_raw, 0),
-                    log_cases_prev = log1p(cases_prev)) %>%
+      dplyr::left_join(
+        prev_lookup,
+        by = c("episode_id", "month_prev" = "month")
+      ) %>%
+      dplyr::mutate(
+        cases_prev = tidyr::replace_na(cases_prev_raw, 0),
+        log_cases_prev = log1p(cases_prev)
+      ) %>%
       dplyr::select(-month_prev, -cases_prev_raw)
   }
 
@@ -103,23 +112,26 @@ load_monthly_data <- function(opt, path = NULL) {
   # by 1/coverage. `footprint` keeps exactly that behaviour; `gid` is a hard
   # error until 03_prepare_dur.R/03_prepare_mon.R have been re-run to carry the
   # P1 triple through (dur_data.R meta_cols).
-  d <- resolveSizePopColumn(d, estimand, tag = "load_monthly_data")
+  d <- resolve_size_pop_column(d, estimand, tag = "load_monthly_data")
 
   # --- P3: canonical admin level, BEFORE the admin_level row filter --------
-  # Load-bearing position, exactly as in readSizeData(): `admin_level` is the
+  # Load-bearing position, exactly as in read_size_data(): `admin_level` is the
   # row filter's partition key, the mon anchor's pooling key AND the elasticity
   # centring key. Re-keying after the filter would leave the filter working on
   # corpus labels while the other two pooled on canonical ones -- three keyings
   # of one dataset, which is the defect. Gated on the estimand being opted in,
   # so pre-P0 configs are untouched.
-  d <- .applyP3(d, opt, "monthly", estimand, tag = "load_monthly_data/P3")
+  d <- .apply_p3(d, opt, "monthly", estimand, tag = "load_monthly_data/P3")
 
   # --- admin_level filter (shared helper; "ADM1-ADM2" keeps both, dropping
   # only the coarse ADM1 units that have an ADM2 sibling) -----------------
-  d <- applyAdminLevelFilter(d, admin_level_opt = mon$admin_level %||% "ADM1-ADM2")
+  d <- apply_admin_level_filter(
+    d,
+    admin_level_opt = mon$admin_level %||% "ADM1-ADM2"
+  )
 
   # re_adm2_leaf_scope: adm2_only -> is_adm2 / gid_leaf (utils/paths.R).
-  d <- .leafColumnsFor(d, mon, ep_rec, tag = "load_monthly_data")
+  d <- .leaf_columns_for(d, mon, ep_rec, tag = "load_monthly_data")
 
   # --- calendar-month seasonality ------------------------------------------
   d <- d %>% dplyr::mutate(month_num = lubridate::month(month))
@@ -127,10 +139,11 @@ load_monthly_data <- function(opt, path = NULL) {
   if (identical(mon$seasonal_term %||% "none", "harmonic2")) {
     d <- d %>%
       dplyr::mutate(
-        sin_month  = sin(2 * pi * month_num / 12),
-        cos_month  = cos(2 * pi * month_num / 12),
+        sin_month = sin(2 * pi * month_num / 12),
+        cos_month = cos(2 * pi * month_num / 12),
         sin2_month = sin(4 * pi * month_num / 12),
-        cos2_month = cos(4 * pi * month_num / 12))
+        cos2_month = cos(4 * pi * month_num / 12)
+      )
   }
 
   # --- integer response for family = negbinomial() (point 6 above) ---------
@@ -140,24 +153,30 @@ load_monthly_data <- function(opt, path = NULL) {
   # monthly.offset_baserate -- OFF by default, so every config that exists today
   # is bit-inert here. Built on the FULL corpus ahead of the country and
   # admin-level subsets above, so a per-group fit resolves against the global
-  # fallback tiers. `.monAnchorView()` rounds `cases_month` the same way the
+  # fallback tiers. `.mon_anchor_view()` rounds `cases_month` the same way the
   # line above does, so the anchor is a rate for the response actually fitted.
-  if (anchorEnabled(opt, "mon")) d <- attachBaseRate(d, opt, "mon")
+  if (anchor_enabled(opt, "mon")) {
+    d <- attach_base_rate(d, opt, "mon")
+  }
 
   # P4: the elasticity deviation column. Built AFTER all row filters so the
   # centres are the means of the rows actually fitted -- centring on the
   # unfiltered panel would put the pivot outside the training set, and the
   # simulator (which reuses these centres via the stamp below) would extrapolate
   # around a population no row ever had.
-  if (!identical(estimand$pop_elasticity, "fixed"))
-    d <- .addLogPopCentred(d, tag = "load_monthly_data/P4")
+  if (!identical(estimand$pop_elasticity, "fixed")) {
+    d <- .add_log_pop_centred(d, tag = "load_monthly_data/P4")
+  }
 
-  attr(d, "mon_estimand") <- monthlyEstimandStamp(opt, extra = list(
-    n_rows          = nrow(d),
-    cases_total     = sum(d$cases_month, na.rm = TRUE),
-    admin_level     = mon$admin_level %||% NA_character_,
-    log_pop_centres = attr(d, "log_pop_centres")
-  ))
+  attr(d, "mon_estimand") <- monthly_estimand_stamp(
+    opt,
+    extra = list(
+      n_rows = nrow(d),
+      cases_total = sum(d$cases_month, na.rm = TRUE),
+      admin_level = mon$admin_level %||% NA_character_,
+      log_pop_centres = attr(d, "log_pop_centres")
+    )
+  )
   attr(d, "episode_stamp") <- ep_rec
   d
 }

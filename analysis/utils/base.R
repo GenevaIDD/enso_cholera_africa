@@ -1,3 +1,16 @@
+# base.R — small shared helpers every other module and script relies on.
+#
+# Provides:
+#   %||%                          NULL default
+#   wquantile()                   weighted quantile (step-function CDF)
+#   enso_lag_col_name(), sl_token(), sl_tag()   signed ENSO-lag names
+#   map_workers()                 forked parallel map, warnings re-raised
+#   content_digest()              16-char content hash (NA without digest)
+#   horizon_month_seq()           months of a closed forward horizon
+#   filter_window_months()        months of a half-open filter window
+#
+# Details:
+#   Sourced first by every caller; it sources nothing itself.
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
@@ -7,32 +20,37 @@
 # caller sources.
 wquantile <- function(x, w, probs) {
   ord <- order(x, na.last = TRUE)
-  xs  <- x[ord]; ws <- w[ord]
-  ws  <- ws / sum(ws, na.rm = TRUE)
-  cw  <- cumsum(ws)
-  vapply(probs, function(p) {
-    i <- which(cw >= p)[1L]
-    if (is.na(i)) xs[length(xs)] else xs[i]
-  }, numeric(1L))
+  xs <- x[ord]
+  ws <- w[ord]
+  ws <- ws / sum(ws, na.rm = TRUE)
+  cw <- cumsum(ws)
+  vapply(
+    probs,
+    function(p) {
+      i <- which(cw >= p)[1L]
+      if (is.na(i)) xs[length(xs)] else xs[i]
+    },
+    numeric(1L)
+  )
 }
 
 # ENSO single-lag naming. A negative single_lag -k is a LEAD: the
-# ONI k months AFTER the outcome month (joinEnsoLags() subtracts the lag from
+# ONI k months AFTER the outcome month (join_enso_lags() subtracts the lag from
 # the date). Every writer and reader of a lag-keyed name goes through these, so
 # lag -3 and lag 3 never share a column, config file or fit file; non-negative
 # lags keep their historical names byte-for-byte.
-#   ensoLagColName(-3) "enso_lead3"   ensoLagColName(3) "enso_lag3"
-#   slToken(-3)        "m3"           slToken(3)        "3"     (config: _sl-<tok>_grp-)
-#   slTag(-3)          "slm3"         slTag(3)          "sl3"   (fit-file tag)
-ensoLagColName <- function(lag) {
+#   enso_lag_col_name(-3) "enso_lead3"   enso_lag_col_name(3) "enso_lag3"
+#   sl_token(-3)        "m3"           sl_token(3)        "3"     (config: _sl-<tok>_grp-)
+#   sl_tag(-3)          "slm3"         sl_tag(3)          "sl3"   (fit-file tag)
+enso_lag_col_name <- function(lag) {
   lag <- as.integer(lag)
   ifelse(lag < 0L, sprintf("enso_lead%d", -lag), sprintf("enso_lag%d", lag))
 }
-slToken <- function(lag) {
+sl_token <- function(lag) {
   lag <- as.integer(lag)
   ifelse(lag < 0L, sprintf("m%d", -lag), sprintf("%d", lag))
 }
-slTag <- function(lag) paste0("sl", slToken(lag))
+sl_tag <- function(lag) paste0("sl", sl_token(lag))
 
 # Time to last outbreak (TTLO) categories: one table
 # for the panel builder, the occurrence loader and the R-side simulator bins.
@@ -42,12 +60,20 @@ slTag <- function(lag) paste0("sl", slToken(lag))
 #                   cut((pmax(0, days) + 1) / 365, c(0:6, Inf), include.lowest =
 #                   TRUE, right = FALSE), NA -> the top level "[6,Inf]".
 #                   "[0,1)" is the reference level. Used by occ_data.R::
-#                   makeTimeToLastOutbreakCat() and simulator_core.R
+#                   make_time_to_last_outbreak_cat() and simulator_core.R
 #                   (bin_ttlo(), ttlo_init_from_panel(), evaluate_lp()).
 #   .TTLO_NONE_DAYS the finite "no recorded prior onset" sentinel (days),
 #                   used by the level "none".
-.TTLO_ORIGIN    <- as.Date("2000-01-01")
-.TTLO_LEVELS    <- c("[0,1)", "[1,2)", "[2,3)", "[3,4)", "[4,5)", "[5,6)", "[6,Inf]")
+.TTLO_ORIGIN <- as.Date("2000-01-01")
+.TTLO_LEVELS <- c(
+  "[0,1)",
+  "[1,2)",
+  "[2,3)",
+  "[3,4)",
+  "[4,5)",
+  "[5,6)",
+  "[6,Inf]"
+)
 .TTLO_NONE_DAYS <- 1e9
 
 #' lapply() over `X`, on `workers` forked processes when workers > 1.
@@ -58,11 +84,15 @@ slTag <- function(lag) paste0("sl", slToken(lag))
 #' stops with that worker's message. workers <= 1 (or one element) is a plain
 #' lapply(), so serial callers are unchanged. Fork-based: no parallelism on
 #' Windows, where workers > 1 falls back to serial with a message.
-mapWorkers <- function(X, FUN, workers = 1L) {
+map_workers <- function(X, FUN, workers = 1L) {
   workers <- as.integer(workers %||% 1L)
-  if (is.na(workers) || workers <= 1L || length(X) <= 1L) return(lapply(X, FUN))
+  if (is.na(workers) || workers <= 1L || length(X) <= 1L) {
+    return(lapply(X, FUN))
+  }
   if (.Platform$OS.type == "windows") {
-    message("mapWorkers: forked workers unavailable on Windows; running serially.")
+    message(
+      "map_workers: forked workers unavailable on Windows; running serially."
+    )
     return(lapply(X, FUN))
   }
   wrapped <- function(x) {
@@ -73,16 +103,34 @@ mapWorkers <- function(X, FUN, workers = 1L) {
     })
     list(value = val, warnings = warns)
   }
-  out <- parallel::mclapply(X, wrapped, mc.cores = min(workers, length(X)),
-                            mc.preschedule = FALSE)
-  failed <- vapply(out, function(o) inherits(o, "try-error") || is.null(o), logical(1))
+  out <- parallel::mclapply(
+    X,
+    wrapped,
+    mc.cores = min(workers, length(X)),
+    mc.preschedule = FALSE
+  )
+  failed <- vapply(
+    out,
+    function(o) inherits(o, "try-error") || is.null(o),
+    logical(1)
+  )
   if (any(failed)) {
     i <- which(failed)[1L]
-    msg <- if (inherits(out[[i]], "try-error")) conditionMessage(attr(out[[i]], "condition"))
-           else "the worker returned nothing (killed, e.g. out of memory?)"
-    stop(sprintf("mapWorkers: element %d of %d failed: %s", i, length(X), msg), call. = FALSE)
+    msg <- if (inherits(out[[i]], "try-error")) {
+      conditionMessage(attr(out[[i]], "condition"))
+    } else {
+      "the worker returned nothing (killed, e.g. out of memory?)"
+    }
+    stop(
+      sprintf("map_workers: element %d of %d failed: %s", i, length(X), msg),
+      call. = FALSE
+    )
   }
-  for (o in out) for (w in o$warnings) warning(w)
+  for (o in out) {
+    for (w in o$warnings) {
+      warning(w)
+    }
+  }
   lapply(out, `[[`, "value")
 }
 
@@ -134,16 +182,26 @@ mapWorkers <- function(X, FUN, workers = 1L) {
 #'   absent (as `registry_digest()` and `provenance.R::digest_or_null()`: a
 #'   missing package weakens a check, never breaks the pipeline).
 content_digest <- function(x, digits = 15L) {
-  if (!requireNamespace("digest", quietly = TRUE)) return(NA_character_)
-  bytes <- if (is.raw(x)) x else charToRaw(enc2utf8(.content_canonical_text(x, digits)))
+  if (!requireNamespace("digest", quietly = TRUE)) {
+    return(NA_character_)
+  }
+  bytes <- if (is.raw(x)) {
+    x
+  } else {
+    charToRaw(enc2utf8(.content_canonical_text(x, digits)))
+  }
   digest::digest(bytes, algo = "xxhash64", serialize = FALSE)
 }
 
 # Canonical text of the values of one atomic vector, one string per element
 # (rules in content_digest()).
 .content_canonical_values <- function(v, digits = 15L) {
-  if (is.factor(v)) v <- as.character(v)
-  if (!length(v)) return(character(0))
+  if (is.factor(v)) {
+    v <- as.character(v)
+  }
+  if (!length(v)) {
+    return(character(0))
+  }
   if (inherits(v, "Date")) {
     out <- format(v, "%Y-%m-%d")
   } else if (inherits(v, "POSIXct")) {
@@ -155,52 +213,95 @@ content_digest <- function(x, digits = 15L) {
   } else if (is.integer(v) || is.double(v)) {
     v <- as.double(v)
     v[!is.na(v) & v == 0] <- 0
-    return(sprintf(paste0("%.", as.integer(digits), "g"), v))   # NA / NaN / Inf as printed
+    return(sprintf(paste0("%.", as.integer(digits), "g"), v)) # NA / NaN / Inf as printed
   } else {
-    stop(sprintf("content_digest: unsupported atomic type '%s'", typeof(v)), call. = FALSE)
+    stop(
+      sprintf("content_digest: unsupported atomic type '%s'", typeof(v)),
+      call. = FALSE
+    )
   }
   out[is.na(v)] <- "NA"
   out
 }
 
-.content_lines <- function(lines) if (length(lines)) paste0(lines, "\n", collapse = "") else ""
+.content_lines <- function(lines) {
+  if (length(lines)) paste0(lines, "\n", collapse = "") else ""
+}
 
 # The canonical text content_digest() hashes (a raw `x` is hashed as bytes and
 # never reaches this function at the top level).
 .content_canonical_text <- function(x, digits = 15L) {
-  if (is.null(x)) return("")
-  if (inherits(x, "POSIXlt")) x <- as.POSIXct(x)
-  if (is.matrix(x) && !is.data.frame(x)) x <- as.data.frame(x, stringsAsFactors = FALSE)
+  if (is.null(x)) {
+    return("")
+  }
+  if (inherits(x, "POSIXlt")) {
+    x <- as.POSIXct(x)
+  }
+  if (is.matrix(x) && !is.data.frame(x)) {
+    x <- as.data.frame(x, stringsAsFactors = FALSE)
+  }
   if (is.data.frame(x)) {
     x <- as.data.frame(x, stringsAsFactors = FALSE)
-    if (any(vapply(x, is.list, logical(1))))
-      stop("content_digest: a data.frame list column is not supported", call. = FALSE)
+    if (any(vapply(x, is.list, logical(1)))) {
+      stop(
+        "content_digest: a data.frame list column is not supported",
+        call. = FALSE
+      )
+    }
     header <- paste(.content_canonical_values(names(x), digits), collapse = ",")
-    rows <- if (nrow(x) > 0L && ncol(x) > 0L)
-      do.call(paste, c(unname(lapply(x, .content_canonical_values, digits = digits)), sep = ","))
-    else character(0)
+    rows <- if (nrow(x) > 0L && ncol(x) > 0L) {
+      do.call(
+        paste,
+        c(
+          unname(lapply(x, .content_canonical_values, digits = digits)),
+          sep = ","
+        )
+      )
+    } else {
+      character(0)
+    }
     return(.content_lines(c(header, rows)))
   }
   if (is.list(x)) {
     nm <- names(x)
-    blocks <- vapply(seq_along(x), function(i) {
-      el  <- x[[i]]
-      txt <- if (is.raw(el)) .content_lines(paste(as.character(el), collapse = ""))
-             else .content_canonical_text(el, digits)
-      key <- if (!is.null(nm) && !is.na(nm[i]) && nzchar(nm[i]))
-        .content_canonical_values(nm[i]) else as.character(i)
-      paste0("[[", key, "]] ", nchar(txt, type = "bytes"), "\n", txt)
-    }, character(1))
+    blocks <- vapply(
+      seq_along(x),
+      function(i) {
+        el <- x[[i]]
+        txt <- if (is.raw(el)) {
+          .content_lines(paste(as.character(el), collapse = ""))
+        } else {
+          .content_canonical_text(el, digits)
+        }
+        key <- if (!is.null(nm) && !is.na(nm[i]) && nzchar(nm[i])) {
+          .content_canonical_values(nm[i])
+        } else {
+          as.character(i)
+        }
+        paste0("[[", key, "]] ", nchar(txt, type = "bytes"), "\n", txt)
+      },
+      character(1)
+    )
     return(paste(blocks, collapse = ""))
   }
-  if (is.raw(x)) return(.content_lines(paste(as.character(x), collapse = "")))
+  if (is.raw(x)) {
+    return(.content_lines(paste(as.character(x), collapse = "")))
+  }
   if (is.atomic(x)) {
     vals <- .content_canonical_values(x, digits)
-    if (!is.null(names(x)))
-      vals <- paste(.content_canonical_values(names(x), digits), vals, sep = ",")
+    if (!is.null(names(x))) {
+      vals <- paste(
+        .content_canonical_values(names(x), digits),
+        vals,
+        sep = ","
+      )
+    }
     return(.content_lines(vals))
   }
-  stop(sprintf("content_digest: cannot digest an object of type '%s'", typeof(x)), call. = FALSE)
+  stop(
+    sprintf("content_digest: cannot digest an object of type '%s'", typeof(x)),
+    call. = FALSE
+  )
 }
 
 # ---------------------------------------------------------------------------
@@ -215,22 +316,24 @@ content_digest <- function(x, digits = 15L) {
 # month itself belongs to the forward arm that launches there.
 # ---------------------------------------------------------------------------
 
-#' horizonMonths
+#' horizon_month_seq
 #'
 #' Months of a CLOSED forward horizon [start, end] (first-of-month Dates);
 #' empty when end < start.
-horizonMonths <- function(start, end) {
+horizon_month_seq <- function(start, end) {
   s <- as.Date(format(as.Date(start), "%Y-%m-01"))
   e <- as.Date(format(as.Date(end), "%Y-%m-01"))
-  if (is.na(s) || is.na(e) || e < s) return(as.Date(character(0)))
+  if (is.na(s) || is.na(e) || e < s) {
+    return(as.Date(character(0)))
+  }
   seq(s, e, by = "1 month")
 }
 
-#' filterWindowMonths
+#' filter_window_months
 #'
 #' Months of a HALF-OPEN filter window [start, end) (first-of-month Dates; the
 #' end, the handoff month, is excluded); empty when end <= start.
-filterWindowMonths <- function(start, end) {
-  m <- horizonMonths(start, end)
+filter_window_months <- function(start, end) {
+  m <- horizon_month_seq(start, end)
   m[m < as.Date(format(as.Date(end), "%Y-%m-01"))]
 }

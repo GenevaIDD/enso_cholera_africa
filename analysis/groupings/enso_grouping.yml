@@ -1,7 +1,7 @@
 # Display metadata for enso_grouping.csv (utils/config.R::load_grouping_meta()).
 # Reproduces the tables formerly hardcoded in utils/results_core.R
 # (GROUP_LABELS / GROUP_SHORT / GROUP_ORDER / GROUP_SHORT_FIG) and
-# utils/enso.R::ensoGroupColours(); test_grouping_meta.R pins the equality.
+# utils/enso.R::enso_group_colours(); test_grouping_meta.R pins the equality.
 # Colours: a red/blue-free slice of ColorBrewer Dark2 (red/blue mean
 # increase/decrease in Figure 4).
 label_prefix: "enso_"

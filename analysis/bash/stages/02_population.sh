@@ -22,7 +22,7 @@
 #   1. Build task YAMLs via Rscript analysis/02a_preprocess_population_tasks.R.
 #   2. Count task files; derive --array spec.
 #      --resume: re-submit only tasks with a missing or stale partition
-#      (population_core.R::popPartFresh(): _SUCCESS built from the current LP
+#      (population_core.R::pop_part_fresh(): _SUCCESS built from the current LP
 #      corpus); emit a sparse spec.
 #   3. sbatch the array, then 02c_preprocess_population_compile.R afterok on it.
 #
@@ -177,7 +177,7 @@ if [[ "$RESUME" == "true" ]]; then
   echo "--- Resume mode: scanning for missing or stale partitions ..."
   MISSING_IDS=$(Rscript --vanilla - "$TASKS_DIR" 2>/dev/null << 'RSCRIPT'
 suppressPackageStartupMessages(library(yaml))
-source("analysis/utils/population_core.R")   # popPartFresh()
+source("analysis/utils/population_core.R")   # pop_part_fresh()
 args      <- commandArgs(trailingOnly = TRUE)
 tasks_dir <- args[1]
 files     <- sort(list.files(tasks_dir, pattern = "^task_[0-9]+\\.yml$", full.names = TRUE))
@@ -189,7 +189,7 @@ for (i in seq_along(files)) {
   if (is.null(md5[[lp]])) md5[[lp]] <- unname(tools::md5sum(path.expand(lp)))
   # A country task (part_dirs) is done only when every year is fresh.
   dirs <- unlist(task$part_dirs %||% task$part_dir)
-  if (!all(vapply(dirs, popPartFresh, logical(1), lp_shapefiles = lp, lp_md5 = md5[[lp]])))
+  if (!all(vapply(dirs, pop_part_fresh, logical(1), lp_shapefiles = lp, lp_md5 = md5[[lp]])))
     missing <- c(missing, i - 1L)
 }
 if (!length(missing)) cat("NONE\n") else cat(paste(missing, collapse = ","), "\n")

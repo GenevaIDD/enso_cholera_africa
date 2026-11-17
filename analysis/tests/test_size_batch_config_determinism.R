@@ -1,24 +1,16 @@
-# test_size_batch_config_determinism.R — verify make_batch_configs.R
-# produces deterministic, idempotent size-batch outputs.
+# test_size_batch_config_determinism.R — HARD: make_batch_configs.R produces
+#   deterministic, idempotent size-batch outputs.
 #
-# Hard-fail gate. The BATCH_REGISTRY entries in make_batch_configs.R drive
-# every multi-config sensitivity batch (size_run1_benchmark,
-# size_seasonal_sensitivity, size_enso_lag_sensitivity, size_re_structure).
-# A regression that:
-#   - reorders expand.grid columns,
-#   - randomises hash / file order,
-#   - changes the filename token convention (DIM_ABBREV / make_config_filename),
-#   - mutates default values silently,
-# would break downstream batch postprocessing (which keys on filenames)
-# and force every cached fit to be re-run.
+# Usage:
+#   Rscript analysis/tests/test_size_batch_config_determinism.R
 #
-# Strategy: generate each size batch into a TEMP directory, then call
-# generate_batch() a second time into another TEMP directory and verify
-# byte-identical YAML content per filename. Cross-check against the
-# committed batches (analysis/configs/<batch>/) for the same filename set
-# and key-by-key content equality (allowing for timestamp-only drift in
-# manifest.yml).
-#
+# Details:
+#   The BATCH_REGISTRY entries drive every multi-config sensitivity batch. A
+#   regression that reorders expand.grid columns, randomises hash / file
+#   order, changes the filename token convention (DIM_ABBREV /
+#   make_config_filename) or silently mutates defaults would break downstream
+#   batch postprocessing (keyed on filenames) and force every cached fit to be
+#   re-run.
 
 suppressPackageStartupMessages({
   library(yaml)
@@ -26,11 +18,12 @@ suppressPackageStartupMessages({
 })
 
 source("analysis/utils/config.R")
-source("analysis/utils/paths.R")   # nbrCovariatePattern()/nbrCovariateName() -- call-time dependency of formula.R::build_formula_terms() and simulator_core.R::evaluate_lp() (utils/README.md dependency table)
+source("analysis/utils/paths.R") # nbr_covariate_pattern()/nbr_covariate_name() -- call-time dependency of formula.R::build_formula_terms() and simulator_core.R::evaluate_lp() (utils/README.md dependency table)
 source("analysis/utils/make_batch_configs.R")
 
-PASS <- 0L; FAIL <- 0L
-source("analysis/tests/helpers.R")  # expect/fail/expect_true/expect_equal
+PASS <- 0L
+FAIL <- 0L
+source("analysis/tests/helpers.R") # expect/fail/expect_true/expect_equal
 
 # generate_batch() writes into get_config_dir() / <batch>. We need to
 # redirect it to a temp dir for the determinism check. The cleanest way is
@@ -42,11 +35,17 @@ source("analysis/tests/helpers.R")  # expect/fail/expect_true/expect_equal
   unlockBinding("get_config_dir", as.environment(asNamespace("base")))
   # Override the helper in the script's namespace (sourced, so global).
   assign("get_config_dir", function() tmpdir, envir = .GlobalEnv)
-  on.exit({
-    assign("get_config_dir", saved %||% function() here::here("analysis/configs/"),
-           envir = .GlobalEnv)
-    unlink(tmpdir, recursive = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      assign(
+        "get_config_dir",
+        saved %||% function() here::here("analysis/configs/"),
+        envir = .GlobalEnv
+      )
+      unlink(tmpdir, recursive = TRUE)
+    },
+    add = TRUE
+  )
   force(expr)
   tmpdir
 }
@@ -78,7 +77,9 @@ read_dir_yamls <- function(d) {
 yaml_equal <- function(a, b, ignore_keys = character()) {
   a_keys <- setdiff(names(a), ignore_keys)
   b_keys <- setdiff(names(b), ignore_keys)
-  if (!identical(sort(a_keys), sort(b_keys))) return(FALSE)
+  if (!identical(sort(a_keys), sort(b_keys))) {
+    return(FALSE)
+  }
   for (k in a_keys) {
     if (!identical(a[[k]], b[[k]])) return(FALSE)
   }
@@ -93,6 +94,9 @@ SIZE_BATCHES <- c(
 )
 
 # --- 1. Determinism: two runs of generate_batch produce identical files --
+# Strategy: generate each size batch into a TEMP directory, then call
+# generate_batch() a second time into another TEMP directory and verify
+# byte-identical YAML content per filename.
 cat("\n[1] determinism — two runs produce identical files\n")
 
 for (b in SIZE_BATCHES) {
@@ -102,8 +106,7 @@ for (b in SIZE_BATCHES) {
   # Same filename set.
   f1 <- sort(list.files(d1, pattern = "\\.yml$"))
   f2 <- sort(list.files(d2, pattern = "\\.yml$"))
-  expect(identical(f1, f2),
-         sprintf("%s: same filename set across runs", b))
+  expect(identical(f1, f2), sprintf("%s: same filename set across runs", b))
 
   # Per-config byte-identical content (ignore manifest$created — depends
   # on first-seen mtime, never on grid).
@@ -141,7 +144,10 @@ for (b in SIZE_BATCHES) {
     ignore <- if (nm == "manifest.yml") "created" else character()
     if (!yaml_equal(y1[[nm]], y2[[nm]], ignore_keys = ignore)) ok <- FALSE
   }
-  expect(ok, sprintf("%s: in-place regeneration is a no-op (modulo timestamp)", b))
+  expect(
+    ok,
+    sprintf("%s: in-place regeneration is a no-op (modulo timestamp)", b)
+  )
 
   unlink(dirname(d), recursive = TRUE)
 }
@@ -159,18 +165,26 @@ for (b in SIZE_BATCHES) {
   d <- generate_batch_into_tmp(b)
   fls <- sort(setdiff(list.files(d, pattern = "\\.yml$"), "manifest.yml"))
   # All start with batch name
-  expect(all(startsWith(fls, b)),
-         sprintf("%s: all filenames begin with batch name", b))
+  expect(
+    all(startsWith(fls, b)),
+    sprintf("%s: all filenames begin with batch name", b)
+  )
   # All end with .yml
-  expect(all(grepl("\\.yml$", fls)),
-         sprintf("%s: all filenames end in .yml", b))
+  expect(
+    all(grepl("\\.yml$", fls)),
+    sprintf("%s: all filenames end in .yml", b)
+  )
 
   # Manifest claims n_configs == len(fls)
   mf <- yaml::read_yaml(file.path(d, "manifest.yml"))
-  expect(identical(mf$n_configs, length(fls)),
-         sprintf("%s: manifest$n_configs matches actual file count", b))
-  expect(identical(sort(unlist(mf$configs)), fls),
-         sprintf("%s: manifest$configs lists every generated YAML", b))
+  expect(
+    identical(mf$n_configs, length(fls)),
+    sprintf("%s: manifest$n_configs matches actual file count", b)
+  )
+  expect(
+    identical(sort(unlist(mf$configs)), fls),
+    sprintf("%s: manifest$configs lists every generated YAML", b)
+  )
 
   unlink(dirname(d), recursive = TRUE)
 }
@@ -180,17 +194,26 @@ cat("\n[4] grid expansion produces exactly n_configs YAMLs\n")
 
 for (b in SIZE_BATCHES) {
   spec <- BATCH_REGISTRY[[b]]
-  expected_n <- nrow(do.call(expand.grid,
-                              c(spec$grid, list(stringsAsFactors = FALSE))))
+  expected_n <- nrow(do.call(
+    expand.grid,
+    c(spec$grid, list(stringsAsFactors = FALSE))
+  ))
   d <- generate_batch_into_tmp(b)
-  actual_n <- length(setdiff(list.files(d, pattern = "\\.yml$"), "manifest.yml"))
-  expect(identical(actual_n, expected_n),
-         sprintf("%s: %d YAMLs == nrow(expand.grid(grid))",
-                 b, expected_n))
+  actual_n <- length(setdiff(
+    list.files(d, pattern = "\\.yml$"),
+    "manifest.yml"
+  ))
+  expect(
+    identical(actual_n, expected_n),
+    sprintf("%s: %d YAMLs == nrow(expand.grid(grid))", b, expected_n)
+  )
   unlink(dirname(d), recursive = TRUE)
 }
 
 # --- 5. Committed batches still match the registry output ----------------
+# Cross-check against the committed batches (analysis/configs/<batch>/) for
+# the same filename set and key-by-key content equality (allowing for
+# timestamp-only drift in manifest.yml).
 # Drift guard: if BATCH_REGISTRY is edited without re-running generate_batch,
 # the committed YAMLs go stale. This is a "soft" check — we expect equality
 # for stable batches but accept that the test author may have just edited
@@ -204,17 +227,26 @@ if (dir.exists(committed)) {
   c2 <- read_dir_yamls(d)
   # Same per-config keys (ignore manifest$created drift only)
   same_names <- identical(sort(names(c1)), sort(names(c2)))
-  expect(same_names,
-         "size_run1_benchmark: committed filename set == registry-generated set")
+  expect(
+    same_names,
+    "size_run1_benchmark: committed filename set == registry-generated set"
+  )
   if (same_names) {
     n_ok <- 0L
     for (nm in names(c1)) {
       ignore <- if (nm == "manifest.yml") "created" else character()
-      if (yaml_equal(c1[[nm]], c2[[nm]], ignore_keys = ignore)) n_ok <- n_ok + 1L
+      if (yaml_equal(c1[[nm]], c2[[nm]], ignore_keys = ignore)) {
+        n_ok <- n_ok + 1L
+      }
     }
-    expect(n_ok == length(c1),
-           sprintf("size_run1_benchmark: %d/%d configs byte-equal to committed",
-                   n_ok, length(c1)))
+    expect(
+      n_ok == length(c1),
+      sprintf(
+        "size_run1_benchmark: %d/%d configs byte-equal to committed",
+        n_ok,
+        length(c1)
+      )
+    )
   }
   unlink(dirname(d), recursive = TRUE)
 } else {
@@ -222,5 +254,7 @@ if (dir.exists(committed)) {
 }
 
 cat(sprintf("\n=== %d passed, %d failed ===\n", PASS, FAIL))
-if (FAIL > 0) quit(save = "no", status = 1)
+if (FAIL > 0) {
+  quit(save = "no", status = 1)
+}
 message("PASS  test_size_batch_config_determinism")

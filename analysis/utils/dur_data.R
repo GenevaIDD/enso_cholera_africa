@@ -1,44 +1,21 @@
-# ===========================================================================
-# dur_data.R -- outbreak-DURATION track data preparation
-# ===========================================================================
+# dur_data.R — duration (cessation-hazard) track data preparation: one row per
+#   ACTIVE MONTH of an episode.
 #
-# The duration track models the per-month probability that an ongoing outbreak
-# CEASES (a discrete-time cessation hazard), fitted as Poisson-with-log-offset
-# exactly like the occurrence track (04_fit_occ_brms.R:124,125,153). The row
-# grain is therefore one row per ACTIVE MONTH of an episode, not one row per
-# episode:
+# Provides:
+#   make_duration_panel()      episode table -> active-month panel
+#   bin_mso()                  months-since-onset bands (mso_band)
+#   derive_series_end(), flag_right_censored()   censoring of episodes
+#   duration_span_summary()    onset-to-last-active span (stamped by 03)
+#   outbreak_episode_guard_flags()   what the occurrence guard WOULD drop
+#   duration_episode_rows(), load_duration_data()   read the panel for a fit
 #
-#   y          = as.integer(ended)     1 on the last active month iff uncensored
-#   exposure   = days of calendar month m intersected with [TL, TR]
-#   log_offset = log(pmax(exposure, 1))
-#
-# WHY THIS TRACK EXISTS. At fit time the occurrence
-# contagion covariates are ON for every month an outbreak spans TL..TR
-# (03_prepare_occ.R::activeLastMonth()): a median of 5 calendar months touched,
-# i.e. a whole-month span (onset month to last active month, n_months - 1) of
-# median 4 [IQR 3-7] under gid_season (durationSpanSummary(), stamped by
-# 03_prepare_dur.R as median_span_months). The v1 simulator's update_lags()
-# is fed last month's ONSET indicator instead (simulator_core.R:1580), so it is
-# on for exactly one month -- roughly a quarter of the fit-time duty cycle. The
-# missing ingredient is a model that says when a location stops being active.
-#
-# SOURCE OF THE EPISODE TABLE. The panel is expanded from the SIZE track's
-# episode table (generated_data/outbreak_size_analysis_data.rds), not rebuilt
-# from outbreak_metadata.rds. Two reasons, both load-bearing:
-#   1. It already carries gid / ADM1 / min_seas / AFRO_region resolved through
-#      the seasonality-match cascade (03_prepare_siz.R sections A-B). Rebuilding
-#      that cascade here would duplicate ~250 lines and could silently drift.
-#   2. Phase 05 (dependence check) pairs size and duration residuals PER
-#      EPISODE. Deriving both from one episode table makes the keys align by
-#      construction rather than by a join that might not be 1:1.
-#
-# DELIBERATELY NOT CALLED: guardOutbreakEpisodes() (occ_data.R). It has no
-# pipeline call site and its max_duration_days = 730 drop would truncate exactly the
-# tail the cessation hazard is meant to estimate. Long episodes are warned
-# about, never dropped; outbreakEpisodeGuardFlags() below counts what the guard
-# WOULD drop, and 03_prepare_dur.R stamps those counts (n_guard_*).
-# ===========================================================================
-
+# Details:
+#   Poisson with log offset, like occurrence:
+#     y          = as.integer(ended)   1 on the last active month iff uncensored
+#     exposure   = days of calendar month m intersected with [TL, TR]
+#     log_offset = log(pmax(exposure, 1))
+#   Episodes come from the size track's episode table, not a rebuild (see
+#   make_duration_panel()).
 
 # ---------------------------------------------------------------------------
 # months-since-onset banding
@@ -85,20 +62,31 @@
 #' @param breaks numeric, left edges plus a terminal Inf.
 #' @return ordered factor with labels "1", "2", "3", "4-5", "6-8", "9+".
 bin_mso <- function(mso, breaks = .DUR_MSO_BREAKS) {
-  if (length(breaks) < 2L || !is.infinite(breaks[length(breaks)]))
+  if (length(breaks) < 2L || !is.infinite(breaks[length(breaks)])) {
     stop("bin_mso: `breaks` must end in Inf.", call. = FALSE)
+  }
 
   labs <- character(length(breaks) - 1L)
   for (i in seq_len(length(breaks) - 1L)) {
     lo <- breaks[i]
     hi <- breaks[i + 1L]
-    labs[i] <- if (is.infinite(hi)) sprintf("%d+", as.integer(lo))
-               else if (hi - lo == 1) sprintf("%d", as.integer(lo))
-               else sprintf("%d-%d", as.integer(lo), as.integer(hi) - 1L)
+    labs[i] <- if (is.infinite(hi)) {
+      sprintf("%d+", as.integer(lo))
+    } else if (hi - lo == 1) {
+      sprintf("%d", as.integer(lo))
+    } else {
+      sprintf("%d-%d", as.integer(lo), as.integer(hi) - 1L)
+    }
   }
 
-  cut(as.numeric(mso), breaks = breaks, labels = labs,
-      right = FALSE, include.lowest = TRUE, ordered_result = FALSE)
+  cut(
+    as.numeric(mso),
+    breaks = breaks,
+    labels = labs,
+    right = FALSE,
+    include.lowest = TRUE,
+    ordered_result = FALSE
+  )
 }
 
 
@@ -106,7 +94,7 @@ bin_mso <- function(mso, breaks = .DUR_MSO_BREAKS) {
 # right-censoring
 # ---------------------------------------------------------------------------
 
-#' deriveSeriesEnd
+#' derive_series_end
 #'
 #' Last date on which each location's surveillance record carries data, from
 #' the pre-outbreak-extraction aggregated time series written by
@@ -135,39 +123,53 @@ bin_mso <- function(mso, breaks = .DUR_MSO_BREAKS) {
 #'   only for LPs absent from the LP-level series -- empty in practice on the
 #'   current corpus, kept so a future corpus refresh degrades rather than fails.
 #' @return tibble(location_period_id, series_end [Date], series_end_source).
-deriveSeriesEnd <- function(episodes,
-                            aggregated_ts_path,
-                            aggregated_adm_ts_path = NULL) {
-
-  if (!file.exists(aggregated_ts_path))
-    stop("deriveSeriesEnd: aggregated_ts not found: ", aggregated_ts_path,
-         call. = FALSE)
+derive_series_end <- function(
+  episodes,
+  aggregated_ts_path,
+  aggregated_adm_ts_path = NULL
+) {
+  if (!file.exists(aggregated_ts_path)) {
+    stop(
+      "derive_series_end: aggregated_ts not found: ",
+      aggregated_ts_path,
+      call. = FALSE
+    )
+  }
 
   need <- c("location_period_id", "country")
   miss <- setdiff(need, names(episodes))
-  if (length(miss))
-    stop("deriveSeriesEnd: `episodes` is missing: ",
-         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "derive_series_end: `episodes` is missing: ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   lp_end <- readRDS(aggregated_ts_path) %>%
-    dplyr::mutate(location_period_id = as.character(location_period_id),
-                  TR = as.Date(TR)) %>%
+    dplyr::mutate(
+      location_period_id = as.character(location_period_id),
+      TR = as.Date(TR)
+    ) %>%
     dplyr::filter(!is.na(TR)) %>%
     dplyr::group_by(location_period_id) %>%
     dplyr::summarise(series_end = max(TR), .groups = "drop") %>%
     dplyr::mutate(series_end_source = "location_period")
 
   out <- episodes %>%
-    dplyr::distinct(location_period_id = as.character(location_period_id),
-                    country            = as.character(country)) %>%
+    dplyr::distinct(
+      location_period_id = as.character(location_period_id),
+      country = as.character(country)
+    ) %>%
     dplyr::left_join(lp_end, by = "location_period_id")
 
   # Fallback: country x admin_level window, for LPs with no series of their own.
   missing_lp <- out$location_period_id[is.na(out$series_end)]
-  if (length(missing_lp) > 0 &&
+  if (
+    length(missing_lp) > 0 &&
       !is.null(aggregated_adm_ts_path) &&
-      file.exists(aggregated_adm_ts_path)) {
-
+      file.exists(aggregated_adm_ts_path)
+  ) {
     ctry_end <- readRDS(aggregated_adm_ts_path) %>%
       dplyr::mutate(country = as.character(country), TR = as.Date(TR)) %>%
       dplyr::filter(!is.na(TR)) %>%
@@ -177,26 +179,34 @@ deriveSeriesEnd <- function(episodes,
     out <- out %>%
       dplyr::left_join(ctry_end, by = "country") %>%
       dplyr::mutate(
-        series_end_source = dplyr::if_else(is.na(series_end) & !is.na(ctry_end),
-                                           "country_fallback", series_end_source),
-        series_end        = dplyr::coalesce(series_end, ctry_end)) %>%
+        series_end_source = dplyr::if_else(
+          is.na(series_end) & !is.na(ctry_end),
+          "country_fallback",
+          series_end_source
+        ),
+        series_end = dplyr::coalesce(series_end, ctry_end)
+      ) %>%
       dplyr::select(-ctry_end)
 
     message(sprintf(
       "[dur/censor] %d location period(s) used the country-level series-end fallback.",
-      length(missing_lp)))
+      length(missing_lp)
+    ))
   } else if (length(missing_lp) > 0) {
     message(sprintf(
       "[dur/censor] %d location period(s) have no series end -- treated as uncensored.",
-      length(missing_lp)))
+      length(missing_lp)
+    ))
   }
 
   out %>%
-    dplyr::mutate(series_end_source = dplyr::coalesce(series_end_source, "none")) %>%
+    dplyr::mutate(
+      series_end_source = dplyr::coalesce(series_end_source, "none")
+    ) %>%
     dplyr::select(location_period_id, series_end, series_end_source)
 }
 
-#' flagRightCensored
+#' flag_right_censored
 #'
 #' An episode is right-censored when its recorded end sits at (or beyond) the
 #' end of its location's observation record: we saw it stop being reported, not
@@ -207,7 +217,7 @@ deriveSeriesEnd <- function(episodes,
 #' contributes at-risk months with `ended = 0` throughout.
 #'
 #' @param episodes data frame with `location_period_id`, `country`, `TR`.
-#' @param series_end tibble from deriveSeriesEnd().
+#' @param series_end tibble from derive_series_end().
 #' @param censor_tol_days integer. TR within this many days of the series end
 #'   counts as censored. Default 73 = 31 + 42: the corpus is (sub-)weekly and
 #'   an outbreak whose last week falls in the final month of the record cannot
@@ -216,14 +226,14 @@ deriveSeriesEnd <- function(episodes,
 #'   six-week closing run (OutbreakExtractR `exclude_closing_tail`), so an
 #'   outbreak still running when the record stops ends 42 days before it.
 #' @return `episodes` plus series_end, series_end_source, censored.
-flagRightCensored <- function(episodes, series_end, censor_tol_days = 73L) {
-
+flag_right_censored <- function(episodes, series_end, censor_tol_days = 73L) {
   episodes %>%
     dplyr::mutate(location_period_id = as.character(location_period_id)) %>%
     dplyr::left_join(series_end, by = "location_period_id") %>%
     dplyr::mutate(
       censored = !is.na(series_end) &
-                 as.Date(TR) >= (series_end - as.integer(censor_tol_days)))
+        as.Date(TR) >= (series_end - as.integer(censor_tol_days))
+    )
 }
 
 
@@ -231,7 +241,7 @@ flagRightCensored <- function(episodes, series_end, censor_tol_days = 73L) {
 # the active-month panel
 # ---------------------------------------------------------------------------
 
-#' .expandActiveMonths
+#' .expand_active_months
 #'
 #' One row per calendar month intersected by [TL, TR]. `exposure` is the number
 #' of days of that month the episode was actually active, so the first and last
@@ -242,38 +252,64 @@ flagRightCensored <- function(episodes, series_end, censor_tol_days = 73L) {
 #' @param ep data frame with episode_id, TL, TR (one row per episode).
 #' @return tibble(episode_id, month [Date, first of month], mso, exposure,
 #'   n_months).
-.expandActiveMonths <- function(ep) {
-
+.expand_active_months <- function(ep) {
   tl <- as.Date(ep$TL)
   tr <- as.Date(ep$TR)
-  if (any(is.na(tl) | is.na(tr)))
-    stop(".expandActiveMonths: NA in TL/TR.", call. = FALSE)
-  if (any(tr < tl))
-    stop(".expandActiveMonths: ", sum(tr < tl), " episode(s) with TR < TL.",
-         call. = FALSE)
+  if (any(is.na(tl) | is.na(tr))) {
+    stop(".expand_active_months: NA in TL/TR.", call. = FALSE)
+  }
+  if (any(tr < tl)) {
+    stop(
+      ".expand_active_months: ",
+      sum(tr < tl),
+      " episode(s) with TR < TL.",
+      call. = FALSE
+    )
+  }
 
   m0 <- lubridate::floor_date(tl, "month")
   m1 <- lubridate::floor_date(tr, "month")
-  n  <- (lubridate::year(m1) - lubridate::year(m0)) * 12L +
-        (lubridate::month(m1) - lubridate::month(m0)) + 1L
+  n <- (lubridate::year(m1) - lubridate::year(m0)) *
+    12L +
+    (lubridate::month(m1) - lubridate::month(m0)) +
+    1L
 
   idx <- rep(seq_len(nrow(ep)), times = n)
-  mso <- sequence(n)                       # 1..n within each episode
+  mso <- sequence(n) # 1..n within each episode
   month <- m0[idx] %m+% months(mso - 1L)
 
   month_end <- lubridate::ceiling_date(month, "month") - 1L
   # +1 so a single-day overlap counts as one day of exposure, not zero.
-  exposure  <- as.numeric(pmin(tr[idx], month_end) - pmax(tl[idx], month)) + 1
+  exposure <- as.numeric(pmin(tr[idx], month_end) - pmax(tl[idx], month)) + 1
 
   tibble::tibble(
     episode_id = ep$episode_id[idx],
-    month      = month,
-    mso        = as.integer(mso),
-    exposure   = exposure,
-    n_months   = n[idx])
+    month = month,
+    mso = as.integer(mso),
+    exposure = exposure,
+    n_months = n[idx]
+  )
 }
 
-#' makeDurationPanel
+# Why this track exists. At fit time the occurrence contagion covariates are ON
+# for every month an outbreak spans TL..TR (03_prepare_occ.R::
+# active_last_month()): a whole-month span (onset month to last active month)
+# of median 4 [IQR 3-7] under gid_season (duration_span_summary(), stamped by
+# 03_prepare_dur.R as median_span_months). A simulator fed last month's ONSET
+# indicator is on for exactly one month -- roughly a quarter of the fit-time
+# duty cycle. The missing ingredient is a model of when a location stops being
+# active.
+#
+# Source of the episode table. The panel is expanded from the SIZE track's
+# episode table (generated_data/outbreak_size_analysis_data.rds), not rebuilt
+# from outbreak_metadata.rds. Two reasons, both load-bearing:
+#   1. It already carries gid / ADM1 / min_seas / AFRO_region resolved through
+#      the seasonality-match cascade (03_prepare_siz.R sections A-B). Rebuilding
+#      that cascade here would duplicate ~250 lines and could silently drift.
+#   2. Phase 05 (dependence check) pairs size and duration residuals PER
+#      EPISODE. Deriving both from one episode table makes the keys align by
+#      construction rather than by a join that might not be 1:1.
+#' make_duration_panel
 #'
 #' Expand an episode table into the active-month panel the cessation hazard is
 #' fitted on, joining month-of-exposure climate, ENSO lags and seasonal time.
@@ -288,32 +324,45 @@ flagRightCensored <- function(episodes, series_end, censor_tol_days = 73L) {
 #'   location_period_id, gid, country, ADM1, AFRO_region, admin_level,
 #'   min_seas, TL, TR, suspected_cases, pop.
 #' @param baseline character, climate baseline period, e.g. "1990_2019".
-#' @param enso_dat ENSO index table from fetchEnsoIndex(); NULL skips the join.
+#' @param enso_dat ENSO index table from fetch_enso_index(); NULL skips the join.
 #' @param enso_max_lead integer, ENSO lead columns enso_lead1..k to add
-#'   (joinEnsoLags(max_lead =); 0 = none, the prior behaviour).
+#'   (join_enso_lags(max_lead =); 0 = none, the prior behaviour).
 #' @param max_lag integer, climate lag columns to build (DLNM use at fit time).
-#' @param censor_tol_days passed to flagRightCensored().
-#' @param aggregated_ts_path,aggregated_adm_ts_path passed to deriveSeriesEnd().
+#' @param censor_tol_days passed to flag_right_censored().
+#' @param aggregated_ts_path,aggregated_adm_ts_path passed to derive_series_end().
 #' @param long_episode_days integer. Episodes longer than this are WARNED about,
-#'   never dropped -- see the guardOutbreakEpisodes() note in this file's header.
+#'   never dropped -- see the guard_outbreak_episodes() note in this file's header.
 #' @return the active-month panel.
-makeDurationPanel <- function(episodes,
-                              baseline,
-                              enso_dat               = NULL,
-                              enso_max_lead          = 0L,
-                              max_lag                = 11L,
-                              censor_tol_days        = 73L,
-                              aggregated_ts_path     = makeAggTsFile(),
-                              aggregated_adm_ts_path = makeAggAdmTsFile(),
-                              long_episode_days      = 730L,
-                              censor_col             = "location_period_id") {
-
-  need <- c("uid", "location_period_id", "gid", "country", "TL", "TR", "min_seas",
-            censor_col)
+make_duration_panel <- function(
+  episodes,
+  baseline,
+  enso_dat = NULL,
+  enso_max_lead = 0L,
+  max_lag = 11L,
+  censor_tol_days = 73L,
+  aggregated_ts_path = make_agg_ts_file(),
+  aggregated_adm_ts_path = make_agg_adm_ts_file(),
+  long_episode_days = 730L,
+  censor_col = "location_period_id"
+) {
+  need <- c(
+    "uid",
+    "location_period_id",
+    "gid",
+    "country",
+    "TL",
+    "TR",
+    "min_seas",
+    censor_col
+  )
   miss <- setdiff(need, names(episodes))
-  if (length(miss))
-    stop("makeDurationPanel: `episodes` is missing: ",
-         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "make_duration_panel: `episodes` is missing: ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   # --- 1. episode identity ------------------------------------------------
   # (uid, TL, TR) is unique on the current corpus (1582/1582). Asserted rather
@@ -323,9 +372,14 @@ makeDurationPanel <- function(episodes,
     dplyr::mutate(TL = as.Date(TL), TR = as.Date(TR)) %>%
     dplyr::mutate(episode_id = sprintf("%s|%s|%s", uid, format(TL), format(TR)))
 
-  if (anyDuplicated(ep$episode_id))
-    stop("makeDurationPanel: (uid, TL, TR) is not unique -- ",
-         sum(duplicated(ep$episode_id)), " duplicate episode_id(s).", call. = FALSE)
+  if (anyDuplicated(ep$episode_id)) {
+    stop(
+      "make_duration_panel: (uid, TL, TR) is not unique -- ",
+      sum(duplicated(ep$episode_id)),
+      " duplicate episode_id(s).",
+      call. = FALSE
+    )
+  }
 
   # --- 2. censoring -------------------------------------------------------
   # `censor_col`: which location period's record decides censoring. Under
@@ -334,30 +388,44 @@ makeDurationPanel <- function(episodes,
   # 03_prepare_dur.R passes `censor_lp_id` (utils/footprint.R) instead. The
   # default is the identity.
   lp_orig <- ep$location_period_id
-  if (!identical(censor_col, "location_period_id"))
+  if (!identical(censor_col, "location_period_id")) {
     ep$location_period_id <- as.character(ep[[censor_col]])
-  ser <- deriveSeriesEnd(ep, aggregated_ts_path, aggregated_adm_ts_path)
-  ep  <- flagRightCensored(ep, ser, censor_tol_days = censor_tol_days)
-  if (!identical(censor_col, "location_period_id"))
+  }
+  ser <- derive_series_end(ep, aggregated_ts_path, aggregated_adm_ts_path)
+  ep <- flag_right_censored(ep, ser, censor_tol_days = censor_tol_days)
+  if (!identical(censor_col, "location_period_id")) {
     ep$location_period_id <- as.character(lp_orig)
+  }
 
   message(sprintf(
     "[dur/censor] %d / %d episode(s) right-censored (%.1f%%), tol = %d days.",
-    sum(ep$censored), nrow(ep), 100 * mean(ep$censored), censor_tol_days))
+    sum(ep$censored),
+    nrow(ep),
+    100 * mean(ep$censored),
+    censor_tol_days
+  ))
 
   # --- 3. long-episode report (warn, never drop) --------------------------
   dur_days <- as.numeric(ep$TR - ep$TL)
   long <- which(dur_days > long_episode_days)
   if (length(long)) {
-    warning(sprintf(
-      "makeDurationPanel: %d episode(s) exceed %d days and are KEPT (max %.0f d). %s",
-      length(long), long_episode_days, max(dur_days),
-      paste(sprintf("%s (%.0f d)", ep$uid[long], dur_days[long]),
-            collapse = "; ")), call. = FALSE)
+    warning(
+      sprintf(
+        "make_duration_panel: %d episode(s) exceed %d days and are KEPT (max %.0f d). %s",
+        length(long),
+        long_episode_days,
+        max(dur_days),
+        paste(
+          sprintf("%s (%.0f d)", ep$uid[long], dur_days[long]),
+          collapse = "; "
+        )
+      ),
+      call. = FALSE
+    )
   }
 
   # --- 4. expand to active months -----------------------------------------
-  panel <- .expandActiveMonths(ep)
+  panel <- .expand_active_months(ep)
 
   # `ended` is the response: 1 on the last active month of an OBSERVED
   # cessation. Censored episodes are all-zero, which is precisely the
@@ -366,12 +434,14 @@ makeDurationPanel <- function(episodes,
   panel <- panel %>%
     dplyr::left_join(
       ep %>% dplyr::select(episode_id, censored, series_end, series_end_source),
-      by = "episode_id") %>%
+      by = "episode_id"
+    ) %>%
     dplyr::mutate(
       ended = as.integer(mso == n_months & !censored),
       # pmax mirrors 04_fit_occ_brms.R:124 -- log(0) would be -Inf and drop the
       # row's contribution entirely.
-      log_offset = log(pmax(exposure, 1)))
+      log_offset = log(pmax(exposure, 1))
+    )
 
   # --- 5. carry episode-level metadata ------------------------------------
   # `duration_days` / `duration_months` are episode constants carried onto every
@@ -386,19 +456,40 @@ makeDurationPanel <- function(episodes,
   # go through `intersect()`, so a panel built before P1 (or under
   # `--pop_source legacy`, which emits none of them) is unaffected.
   meta_cols <- intersect(
-    c("episode_id", "uid", "location", "location_period_id", "gid", "seas_gid",
-      "country", "ADM1", "AFRO_region", "admin_level", "min_seas",
-      "suspected_cases", "pop", "pop_footprint", "pop_gid", "pop_cover",
-      "year_seas", "time_to_last_outbreak",
-      "TL", "TR"),
-    names(ep))
+    c(
+      "episode_id",
+      "uid",
+      "location",
+      "location_period_id",
+      "gid",
+      "seas_gid",
+      "country",
+      "ADM1",
+      "AFRO_region",
+      "admin_level",
+      "min_seas",
+      "suspected_cases",
+      "pop",
+      "pop_footprint",
+      "pop_gid",
+      "pop_cover",
+      "year_seas",
+      "time_to_last_outbreak",
+      "TL",
+      "TR"
+    ),
+    names(ep)
+  )
 
   panel <- panel %>%
-    dplyr::left_join(ep %>% dplyr::select(dplyr::all_of(meta_cols)),
-                     by = "episode_id") %>%
+    dplyr::left_join(
+      ep %>% dplyr::select(dplyr::all_of(meta_cols)),
+      by = "episode_id"
+    ) %>%
     dplyr::mutate(
-      duration_days   = as.numeric(TR - TL),
-      duration_months = n_months)
+      duration_days = as.numeric(TR - TL),
+      duration_months = n_months
+    )
 
   # --- 6. seasonal time of the ACTIVE MONTH -------------------------------
   # Same rotation as the size/occurrence tracks (03_prepare_siz.R:286-293), but
@@ -407,41 +498,46 @@ makeDurationPanel <- function(episodes,
   # re-expressing the onset date.
   panel <- panel %>%
     dplyr::mutate(
-      t_start      = month,
-      t_end        = lubridate::ceiling_date(month, "month") - 1L,
-      t_start_seas = as.Date(applyOffsetMonths(month, -(min_seas - 1L))),
-      month_seas   = lubridate::month(t_start_seas),
-      mso_band     = bin_mso(mso))
+      t_start = month,
+      t_end = lubridate::ceiling_date(month, "month") - 1L,
+      t_start_seas = as.Date(apply_offset_months(month, -(min_seas - 1L))),
+      month_seas = lubridate::month(t_start_seas),
+      mso_band = bin_mso(mso)
+    )
 
   # --- 7. climate at the active month -------------------------------------
-  # .makeSizeClimStats() (siz_data.R:42) is the batched multi-gid form; the
-  # per-gid makeSizeData()/makeSurvData() helpers would issue one SQLite query
+  # .make_size_clim_stats() (siz_data.R:42) is the batched multi-gid form; the
+  # per-gid make_size_data()/make_surv_data() helpers would issue one SQLite query
   # per episode.
   #
   # Raw values (`precip`, `temp_daymean`, ...) are joined ALONGSIDE the derived
-  # mean_*/dev_* columns, not instead of them. Two reasons: guardMissingClimateData()
+  # mean_*/dev_* columns, not instead of them. Two reasons: guard_missing_climate_data()
   # (occ_data.R:112) tests `precip` and `temp_daymean` by name, and the other two
   # tracks both carry raw and derived, so a formula term means the same thing in
   # all three. The hlq_* extreme categories are NOT carried -- they belong to the
   # extreme-index sensitivity variants, which lost the CPO/WAIC comparison
   # (CLAUDE.md, "Preferred climate covariates"); add them here if that is revisited.
   gids <- unique(as.character(panel$gid))
-  clim_raw <- getStatsGid(gids) %>%
-    dplyr::mutate(gid   = as.character(gid),
-                  month = lubridate::floor_date(as.Date(month), "month"))
-  clim_der <- .makeSizeClimStats(gids, baseline = baseline) %>%
-    dplyr::mutate(gid   = as.character(gid),
-                  month = lubridate::floor_date(as.Date(month), "month"))
+  clim_raw <- get_stats_gid(gids) %>%
+    dplyr::mutate(
+      gid = as.character(gid),
+      month = lubridate::floor_date(as.Date(month), "month")
+    )
+  clim_der <- .make_size_clim_stats(gids, baseline = baseline) %>%
+    dplyr::mutate(
+      gid = as.character(gid),
+      month = lubridate::floor_date(as.Date(month), "month")
+    )
   clim <- dplyr::full_join(clim_raw, clim_der, by = c("gid", "month"))
 
   n_before <- nrow(panel)
   panel <- panel %>%
     dplyr::mutate(gid = as.character(gid)) %>%
     dplyr::left_join(clim, by = c("gid", "month"))
-  stopifnot(nrow(panel) == n_before)   # climate must be 1 row per (gid, month)
+  stopifnot(nrow(panel) == n_before) # climate must be 1 row per (gid, month)
 
   # --- 8. climate lags ----------------------------------------------------
-  # makeClimateLags(mode = "panel") lags within `uid` x season group and works
+  # make_climate_lags(mode = "panel") lags within `uid` x season group and works
   # on any monthly panel (occ_data.R:322-387) -- no new mode is needed.
   #
   # It is handed `episode_id` AS `uid` on purpose. Its season grouping keys on a
@@ -456,19 +552,24 @@ makeDurationPanel <- function(episodes,
     panel <- panel %>%
       dplyr::arrange(episode_id, mso) %>%
       dplyr::mutate(.uid_orig = uid, uid = episode_id)
-    panel <- makeClimateLags(panel, max_lag = max_lag, mode = "panel")
+    panel <- make_climate_lags(panel, max_lag = max_lag, mode = "panel")
     panel <- panel %>%
       dplyr::mutate(uid = .uid_orig) %>%
       dplyr::select(-.uid_orig)
   }
 
   # --- 9. ENSO at the active month ----------------------------------------
-  if (!is.null(enso_dat))
-    panel <- joinEnsoLags(panel, enso_dat, date_col = "t_start",
-                          max_lead = enso_max_lead)
+  if (!is.null(enso_dat)) {
+    panel <- join_enso_lags(
+      panel,
+      enso_dat,
+      date_col = "t_start",
+      max_lead = enso_max_lead
+    )
+  }
 
   # --- 10. missing-climate guard ------------------------------------------
-  panel <- guardMissingClimateData(panel)
+  panel <- guard_missing_climate_data(panel)
 
   dplyr::arrange(panel, episode_id, mso)
 }
@@ -478,7 +579,7 @@ makeDurationPanel <- function(episodes,
 # episode-level summaries for the policy stamp
 # ---------------------------------------------------------------------------
 
-#' durationSpanSummary
+#' duration_span_summary
 #'
 #' Episode length summaries stamped by 03_prepare_dur.R. The
 #' reference length is the whole-month SPAN: whole calendar months from the
@@ -493,24 +594,35 @@ makeDurationPanel <- function(episodes,
 #'   the panel's `duration_months`), `TL`, `TR`.
 #' @return list(median_span_months, span_months_q25, span_months_q75,
 #'   median_elapsed_months), numeric.
-durationSpanSummary <- function(ep_lvl) {
+duration_span_summary <- function(ep_lvl) {
   miss <- setdiff(c("n_months", "TL", "TR"), names(ep_lvl))
-  if (length(miss))
-    stop("durationSpanSummary: `ep_lvl` is missing: ",
-         paste(miss, collapse = ", "), call. = FALSE)
-  span    <- as.numeric(ep_lvl$n_months) - 1
+  if (length(miss)) {
+    stop(
+      "duration_span_summary: `ep_lvl` is missing: ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  span <- as.numeric(ep_lvl$n_months) - 1
   elapsed <- as.numeric(as.Date(ep_lvl$TR) - as.Date(ep_lvl$TL)) / 30.44
   q <- stats::quantile(span, c(0.25, 0.75), names = FALSE)
-  list(median_span_months    = stats::median(span),
-       span_months_q25       = q[1],
-       span_months_q75       = q[2],
-       median_elapsed_months = stats::median(elapsed))
+  list(
+    median_span_months = stats::median(span),
+    span_months_q25 = q[1],
+    span_months_q75 = q[2],
+    median_elapsed_months = stats::median(elapsed)
+  )
 }
 
-#' outbreakEpisodeGuardFlags
+# Deliberately NOT called: guard_outbreak_episodes() (occ_data.R). It has no
+# pipeline call site and its max_duration_days = 730 drop would truncate exactly
+# the tail the cessation hazard is meant to estimate. Long episodes are warned
+# about, never dropped; outbreak_episode_guard_flags() counts what the guard
+# WOULD drop, and 03_prepare_dur.R stamps those counts (n_guard_*).
+#' outbreak_episode_guard_flags
 #'
 #' Pure, per-episode version of the plausibility checks of
-#' occ_data.R::guardOutbreakEpisodes(), with the same thresholds and the same
+#' occ_data.R::guard_outbreak_episodes(), with the same thresholds and the same
 #' (disjoint) case classes: `cases_le0` = suspected_cases <= 0, `cases_lt50` =
 #' 0 < suspected_cases < min_cases, `gt730d` = TR - TL > max_duration_days
 #' (days), `any` = the rows the guard would drop. NA values never flag. Nothing
@@ -521,20 +633,32 @@ durationSpanSummary <- function(ep_lvl) {
 #' the rows the guard drops.
 #'
 #' @param dat episode-level data with `suspected_cases`, `TL`, `TR`.
-#' @param min_cases,max_duration_days as guardOutbreakEpisodes() (50, 730).
+#' @param min_cases,max_duration_days as guard_outbreak_episodes() (50, 730).
 #' @return tibble(cases_le0, cases_lt50, gt730d, any), one row per row of `dat`.
-outbreakEpisodeGuardFlags <- function(dat, min_cases = 50, max_duration_days = 730) {
+outbreak_episode_guard_flags <- function(
+  dat,
+  min_cases = 50,
+  max_duration_days = 730
+) {
   miss <- setdiff(c("suspected_cases", "TL", "TR"), names(dat))
-  if (length(miss))
-    stop("outbreakEpisodeGuardFlags: `dat` is missing: ",
-         paste(miss, collapse = ", "), call. = FALSE)
-  cases         <- dat$suspected_cases
+  if (length(miss)) {
+    stop(
+      "outbreak_episode_guard_flags: `dat` is missing: ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  cases <- dat$suspected_cases
   duration_days <- as.numeric(as.Date(dat$TR) - as.Date(dat$TL))
-  le0   <- !is.na(cases) & cases <= 0
-  lt50  <- !is.na(cases) & cases > 0 & cases < min_cases
+  le0 <- !is.na(cases) & cases <= 0
+  lt50 <- !is.na(cases) & cases > 0 & cases < min_cases
   gt730 <- !is.na(duration_days) & duration_days > max_duration_days
-  tibble::tibble(cases_le0 = le0, cases_lt50 = lt50, gt730d = gt730,
-                 any = le0 | lt50 | gt730)
+  tibble::tibble(
+    cases_le0 = le0,
+    cases_lt50 = lt50,
+    gt730d = gt730,
+    any = le0 | lt50 | gt730
+  )
 }
 
 
@@ -542,19 +666,19 @@ outbreakEpisodeGuardFlags <- function(dat, min_cases = 50, max_duration_days = 7
 # fit-time loader
 # ---------------------------------------------------------------------------
 
-#' durationEpisodeRows
+#' duration_episode_rows
 #'
 #' The duration track's row rule from `duration.admin_level`. Under
-#' "ADM1-ADM2" the panel goes through applyAdminLevelFilter() (gid.R), which
+#' "ADM1-ADM2" the panel goes through apply_admin_level_filter() (gid.R), which
 #' drops every coarse ADM1 episode whose ADM1 also carries ADM2 rows: the
 #' episode set of load_monthly_data(), the occurrence fit's load-time drop and
-#' the simulator frame (dropOverlappingADM1FromFrame()). Orphan parents leave
+#' the simulator frame (drop_overlapping_adm1_from_frame()). Orphan parents leave
 #' too; occurrence's `episodes.adm1_overlap: censor_orphan` has nothing to
 #' censor here, since an orphan has no overlapping child episode.
 #'
 #' "ADM1" / "ADM2" keep their historical meaning on this track -- the depth of
 #' the intercept RE, no row filter -- and are NOT passed to
-#' applyAdminLevelFilter(), whose "ADM1" would keep ADM1 rows only.
+#' apply_admin_level_filter(), whose "ADM1" would keep ADM1 rows only.
 #'
 #' Shared by load_duration_data() and the observed-duration readers (09 R1,
 #' 07c), so a raw panel and the fitted panel hold the same episodes.
@@ -562,18 +686,27 @@ outbreakEpisodeGuardFlags <- function(dat, min_cases = 50, max_duration_days = 7
 #' @param d duration panel rows (admin_level, ADM1).
 #' @param dur the duration config block (opt$duration); NULL = "ADM1".
 #' @return d, possibly with the overlapping ADM1 parent episodes removed.
-durationEpisodeRows <- function(d, dur) {
+duration_episode_rows <- function(d, dur) {
   lvl <- (dur %||% list())$admin_level %||% "ADM1"
-  if (!lvl %in% c("ADM1", "ADM2", "ADM1-ADM2"))
-    stop("duration.admin_level must be one of ADM1, ADM2, ADM1-ADM2; got '",
-         lvl, "'.", call. = FALSE)
-  if (identical(lvl, "ADM1-ADM2")) applyAdminLevelFilter(d, "ADM1-ADM2") else d
+  if (!lvl %in% c("ADM1", "ADM2", "ADM1-ADM2")) {
+    stop(
+      "duration.admin_level must be one of ADM1, ADM2, ADM1-ADM2; got '",
+      lvl,
+      "'.",
+      call. = FALSE
+    )
+  }
+  if (identical(lvl, "ADM1-ADM2")) {
+    apply_admin_level_filter(d, "ADM1-ADM2")
+  } else {
+    d
+  }
 }
 
 #' load_duration_data
 #'
 #' Read + filter + scale the duration panel for 04_fit_dur_brms.R. Mirrors
-#' readSizeData()'s column-class scaling (siz_data.R:114-125) so a coefficient
+#' read_size_data()'s column-class scaling (siz_data.R:114-125) so a coefficient
 #' on `dev_precip` means the same thing in all three tracks.
 #'
 #' The size track's population guards are deliberately absent: the cessation
@@ -583,28 +716,47 @@ durationEpisodeRows <- function(d, dur) {
 #' @param opt config list.
 #' @param path duration panel RDS; defaults to the configured baseline's file.
 load_duration_data <- function(opt, path = NULL) {
-
-  if (is.null(path)) path <- makeDurationDatFile(opt)
-  if (!file.exists(path))
-    stop("load_duration_data: missing input ", path,
-         " -- run analysis/03_prepare_dur.R first.", call. = FALSE)
+  if (is.null(path)) {
+    path <- make_duration_dat_file(opt)
+  }
+  if (!file.exists(path)) {
+    stop(
+      "load_duration_data: missing input ",
+      path,
+      " -- run analysis/03_prepare_dur.R first.",
+      call. = FALSE
+    )
+  }
 
   d <- readRDS(path)
-  ep_rec <- assertEpisodeKey(opt, path, "duration")
+  ep_rec <- assert_episode_key(opt, path, "duration")
 
   # P3 (geometry-derived admin level); default off -- see load_surv_data().
-  if (isTRUE((opt$duration %||% list())$canonical_admin_level))
-    d <- .applyP3(d, opt, "duration", tag = "load_duration_data/P3")
+  if (isTRUE((opt$duration %||% list())$canonical_admin_level)) {
+    d <- .apply_p3(d, opt, "duration", tag = "load_duration_data/P3")
+  }
 
-  cols          <- colnames(d)
-  precip_cols   <- setdiff(grep("precip|cum7", cols, value = TRUE), grep("hlq|^dev_sd_", cols, value = TRUE))
-  temp_all      <- setdiff(grep("temp", cols, value = TRUE),        grep("hlq", cols, value = TRUE))
-  temp_cols     <- setdiff(temp_all, grep("dev", temp_all, value = TRUE))
+  cols <- colnames(d)
+  precip_cols <- setdiff(
+    grep("precip|cum7", cols, value = TRUE),
+    grep("hlq|^dev_sd_", cols, value = TRUE)
+  )
+  temp_all <- setdiff(
+    grep("temp", cols, value = TRUE),
+    grep("hlq", cols, value = TRUE)
+  )
+  temp_cols <- setdiff(temp_all, grep("dev", temp_all, value = TRUE))
   temp_dev_cols <- intersect(temp_all, grep("dev", temp_all, value = TRUE))
 
-  if (length(precip_cols))   d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(precip_cols),   ~ . / 100))
-  if (length(temp_cols))     d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(temp_cols),     ~ . / 10))
-  if (length(temp_dev_cols)) d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(temp_dev_cols), ~ . / 1))
+  if (length(precip_cols)) {
+    d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(precip_cols), ~ . / 100))
+  }
+  if (length(temp_cols)) {
+    d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(temp_cols), ~ . / 10))
+  }
+  if (length(temp_dev_cols)) {
+    d <- dplyr::mutate(d, dplyr::across(dplyr::all_of(temp_dev_cols), ~ . / 1))
+  }
 
   ctry <- opt$country %||% "all"
   if (!identical(ctry, "all")) {
@@ -614,8 +766,8 @@ load_duration_data <- function(opt, path = NULL) {
 
   # Episode set and ADM2 leaf columns (same order as load_monthly_data(): after
   # P3 and the country filter).
-  d <- durationEpisodeRows(d, opt$duration)
-  d <- .leafColumnsFor(d, opt$duration, ep_rec, tag = "load_duration_data")
+  d <- duration_episode_rows(d, opt$duration)
+  d <- .leaf_columns_for(d, opt$duration, ep_rec, tag = "load_duration_data")
 
   # Rebuild the band from config so a basehaz_duration sensitivity run does not
   # require re-running 03_prepare_dur.R.
@@ -626,9 +778,9 @@ load_duration_data <- function(opt, path = NULL) {
   # four columns load_monthly_data() builds, on the active month's calendar
   # month. Off by default: nothing is added.
   if (identical(opt$duration[["seasonal_term"]] %||% "none", "harmonic2")) {
-    month_num    <- lubridate::month(d$month)
-    d$sin_month  <- sin(2 * pi * month_num / 12)
-    d$cos_month  <- cos(2 * pi * month_num / 12)
+    month_num <- lubridate::month(d$month)
+    d$sin_month <- sin(2 * pi * month_num / 12)
+    d$cos_month <- cos(2 * pi * month_num / 12)
     d$sin2_month <- sin(4 * pi * month_num / 12)
     d$cos2_month <- cos(4 * pi * month_num / 12)
   }
@@ -639,7 +791,9 @@ load_duration_data <- function(opt, path = NULL) {
   # duration.offset_baserate -- OFF by default, so every config that exists
   # today is bit-inert here. Built on the FULL corpus ahead of the country
   # subset above, so a per-group fit resolves against the global fallback tiers.
-  if (anchorEnabled(opt, "dur")) d <- attachBaseRate(d, opt, "dur")
+  if (anchor_enabled(opt, "dur")) {
+    d <- attach_base_rate(d, opt, "dur")
+  }
 
   attr(d, "episode_stamp") <- ep_rec
   d

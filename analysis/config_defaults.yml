@@ -79,8 +79,8 @@ grouping:
 # NOTE: keys here must mirror get_default_options()$population exactly —
 # analysis/tests/test_config_defaults_parity.R enforces it.
 population:
-  crosswalk_path:   ~              # null → makePopRunFile(opt, "pop_crosswalk")
-  gid_pop_path:     ~              # null → makePopRunFile(opt, "pop_gid")
+  crosswalk_path:   ~              # null → make_pop_run_file(opt, "pop_crosswalk")
+  gid_pop_path:     ~              # null → make_pop_run_file(opt, "pop_gid")
   years:            [2015, 2030]   # inclusive; WorldPop constrained coverage
   scaling:          "un_wpp2024"   # national-total rescale outside `years`
   wpp_table:        "generated_data/wpp2024_national_totals.csv"
@@ -98,11 +98,11 @@ population:
     tiling:          "derived"     # derived | corpus_label — which GADM tiling an LP
                                    # is read at. "derived": the frozen `lp_level`
                                    # column written by 02c (geometry-based; see
-                                   # deriveLpTilingLevel() in utils/population_core.R).
+                                   # derive_lp_tiling_level() in utils/population_core.R).
                                    # "corpus_label": the level from the outbreak
                                    # corpus's own `admin_level` string, whose admin
                                    # depth is NOT GADM's (kept for reproducibility).
-    tiebreak:        "tolerant"    # strict | tolerant — passed to deriveLpTilingLevel()
+    tiebreak:        "tolerant"    # strict | tolerant — passed to derive_lp_tiling_level()
                                    # as the area tie-break used when BOTH GADM levels are
                                    # population-admissible. "strict": bare
                                    # acov_ADM2 >= acov_ADM1, structurally biased
@@ -122,7 +122,7 @@ population:
     log_dir:           "logs"
 
 # Cross-track episode definition (shared) -- what ONE outbreak episode is, for
-# all four tracks at once (utils/footprint.R::buildCanonicalEpisodes()).
+# all four tracks at once (utils/footprint.R::build_canonical_episodes()).
 #   lp_season   historical: occurrence censors per location period and unions
 #               to gid afterwards; size/duration/monthly key on
 #               (gid, year_seas, admin_level) with first()-taken dates.
@@ -190,7 +190,7 @@ occurrence:
     ongoing_outbreak_tu_lag1:       true    # boolean, TU-level spillover lag-1
     # Distance-weighted neighbour contagion: adds
     # nbr_lag1_r{contagion.rho_km}[_rn] as a FE. false is load-bearing —
-    # makeOccRunFile()'s nbr_token is gated on it, so leaving it false keeps
+    # make_occ_run_file()'s nbr_token is gated on it, so leaving it false keeps
     # every pre-existing config's artefact names byte-identical.
     nbr_contagion_lag1:             false   # include nbr_lag1_r{contagion.rho_km} as FE
     enso:                           false   # include enso_lag{enso.lag_months} as FE
@@ -243,7 +243,7 @@ occurrence:
   # per-variable keys (max_lag, argvar, arglag, keep_linear_term, re_adm1_slope,
   # single_lag).
   # Special variable stem "enso" reuses the pre-built enso_lag* columns from
-  # joinEnsoLags() (no season-boundary reset).  All other stems are climate
+  # join_enso_lags() (no season-boundary reset).  All other stems are climate
   # covariates built with season-aware lagging (boundary cells → 0).
   dlnm:
     enable: false
@@ -476,11 +476,11 @@ size:
   min_pop:         10              # drop rows with pop < this (implausibly small extraction)
   max_attack_rate: 0.10            # drop rows with suspected_cases/pop > this (impossible incidence)
 
-  # Country x admin-level mean_rate table (buildMeanRateTable(), utils.R).
+  # Country x admin-level mean_rate table (build_mean_rate_table(), utils.R).
   # Resolved per-unit via a
   # provenance-tagged fallback ladder (own cell -> country/other-level ->
   # ENSO group -> global; hard error if nothing resolves). The sidecar path is
-  # a pure function of outdir/min_pop/max_attack_rate/estimator (makeSizeRunFile
+  # a pure function of outdir/min_pop/max_attack_rate/estimator (make_size_run_file
   # kind = "size_mean_rate"), so every fit config using these three values
   # resolves to the same table.
   mean_rate:
@@ -505,7 +505,7 @@ size:
     # Cross the cell/group/global tables over all three admin levels, including
     # any level the data does not occupy. TRUE (default) manufactures
     # those cells out of `level_factor` -- which is what gave the phantom ADM3
-    # stratum its rates, but is ALSO the fallback that lets resolveMeanRate()
+    # stratum its rates, but is ALSO the fallback that lets resolve_mean_rate()
     # answer a query at a level absent from training instead of hard-failing at
     # T5 (test_mean_rate_table.R exercises exactly that path). Set FALSE
     # together with `canonical_admin_level: true`, i.e. where the absent level
@@ -597,7 +597,7 @@ duration:
   family:      "poisson"
   link:        "log"
   # ADM1 | ADM2 = intercept-RE depth only, no row filter (historical);
-  # ADM1-ADM2 = the monthly episode set (dur_data.R::durationEpisodeRows()).
+  # ADM1-ADM2 = the monthly episode set (dur_data.R::duration_episode_rows()).
   admin_level: "ADM1"            # ADM1 | ADM2 | ADM1-ADM2
 
   # Baseline-rate anchor -- see occurrence.offset_baserate. The duration
@@ -632,7 +632,7 @@ duration:
   # re-run of 03_prepare_dur.R. All the structure is in months 1-3 (4-5, 6-8
   # and 9+ sit within noise of each other), so [1, 2, 3, 4, .inf] is the
   # natural parsimony variant. Non-default break sets are encoded into the
-  # artefact name by makeDurationRunFile().
+  # artefact name by make_duration_run_file().
   mso_breaks: [1, 2, 3, 4, 6, 9, .inf]
 
   # Which event resets time_to_last_outbreak in the v1 simulator kernel.
@@ -694,7 +694,7 @@ duration:
 # Fourth model track: per-calendar-month outbreak size (response cases_month),
 # a Bayesian hierarchical version of a validated negative-binomial GAM.
 # Data prep: analysis/01b_preprocess_outbreaks_monthly.R + utils/footprint.R +
-# analysis/03_prepare_mon.R -> makeMonthlyDatFile(opt). Offsets are pop (size's
+# analysis/03_prepare_mon.R -> make_monthly_dat_file(opt). Offsets are pop (size's
 # offset_pop key) x log_offset (duration's unconditional person-time offset,
 # already on the panel as log_offset = log(pmax(exposure, 1))).
 # ---------------------------------------------------------------------------
@@ -722,7 +722,7 @@ monthly:
   # so the two tracks cannot drift apart.
   #
   # Read `rate_denominator` as "which population base_rate_mon was built on" --
-  # mon's anchor (.monAnchorView(), utils/anchor.R) is the analogue of size's
+  # mon's anchor (.mon_anchor_view(), utils/anchor.R) is the analogue of size's
   # mean_rate table. mon has no mean_rate table at all; monthly.offset_meanrate
   # is refused outright (utils/config.R).
   #
@@ -837,7 +837,7 @@ simulator:
     enable:        false
     source:        ~               # registry name → analysis/groupings/<source>.csv
     fits_dir:      ~               # batch dir containing per-group fits
-    fits_baseline: ~               # baseline token for makeRunFile (default: top-level baseline)
+    fits_baseline: ~               # baseline token for make_run_file (default: top-level baseline)
     monthly_enable: false          # also load one mon fit per group from fits_dir
   # Step-3 rehydration sources — only consulted when the climate_panel itself
   # does not carry `min_seas` / `tu` / `pop` columns.
@@ -848,10 +848,10 @@ simulator:
     # Population year of the simulator / smoothing frame: an integer year, or
     # season_year (each month's population at its cholera season year, the
     # fits' year_seas convention) | calendar_year. Read only by
-    # simulator_core.R::simPopYearSpec().
+    # simulator_core.R::sim_pop_year_spec().
     pop_year:               2020
   # Forward horizon, CLOSED [start, end]: every month from start to end is
-  # simulated (utils/base.R::horizonMonths()).
+  # simulated (utils/base.R::horizon_month_seq()).
   horizon:
     start: "2024-01-01"
     end:   "2034-12-31"
@@ -906,7 +906,7 @@ simulator:
   #         last.
   #   half  the cessation is drawn before the monthly mean and a ceasing month
   #         gets half a month of exposure (on top of the onset month's half),
-  #         as the monthly and duration fits' panel does (.expandActiveMonths():
+  #         as the monthly and duration fits' panel does (.expand_active_months():
   #         the last month's exposure ends at TR). The
   #         cessation draw still reads the post-update lags, the monthly mean
   #         the pre-update ones. A non-default value is part of the 07b native
@@ -996,14 +996,14 @@ simulator:
     #     exact frame gid (`gid %in% frame$gid`) and masked on (gid, month). The
     #     simulator forecasts one admin level per region (ADM2 where nested
     #     children exist, coarse ADM1 only where they don't —
-    #     dropOverlappingADM1FromFrame), but the observed corpus reports the SAME
+    #     drop_overlapping_adm1_from_frame), but the observed corpus reports the SAME
     #     geography at a mix of ADM1/ADM2/ADM3. So a coarse observed report whose
     #     gid is not itself a frame gid is silently dropped — the cross-level
     #     resolution blindspot. For NGA this zeroed ~40% of in-window observed case mass.
     #   region_key = footprint-reconciled. Map every gid to its ADM1
     #     region (ISO3 prefix makes "NGA_20" globally unique); keep observed
     #     reports whose region the sim forecasts; dedupe observed to the finest
-    #     admin level present (applyAdminLevelFilter, unchanged); mask on
+    #     admin level present (apply_admin_level_filter, unchanged); mask on
     #     (region_key, month). Recovers the coarse-reported observed mass the
     #     exact-gid join drops. Mirrors notebooks/hindcast_skill.qmd §4d.
     #     Geo attribution then comes from the observed metadata's own
@@ -1040,7 +1040,7 @@ simulator:
                                           # native-or-assembled handoff as enso_region.
     partition_source:  ""                 # registry name for partition_by: registry (ignored otherwise)
     # Filter window, HALF-OPEN [start, end): end = the handoff month, which the
-    # forward arm simulates (utils/base.R::filterWindowMonths()).
+    # forward arm simulates (utils/base.R::filter_window_months()).
     warmup_window:
       start: "2021-07-01"             # filter window start (obs against which we weight)
       end:   "2023-05-01"             # filter window end, excluded (= forecast horizon start)
@@ -1123,7 +1123,7 @@ simulator:
       allow_adm1_blocks: false           # true = tempered split across ADM1 blocks (sensitivity only; warns)
       # Per-country scale. fixed = multiplier scale / who_f; estimated = scale_c calibrated per country on the months
       # the WHO table and the database both observe in [scale_est.start,
-      # scale_est.end) (who_dashboard.R::whoScaleEstimate()): scale_c = (W_c +
+      # scale_est.end) (who_dashboard.R::estimate_who_scale()): scale_c = (W_c +
       # shrink_cases * s0) / (D_c / who_f_c + shrink_cases), s0 the pooled ratio;
       # countries with < min_db_cases DB cases or < min_months overlap months take
       # the fallback (pooled = s0 | fixed = `scale`); clamped. Written by 08a to
@@ -1190,7 +1190,7 @@ simulator:
     # training max and is held beyond. 0 = hold exactly at the knots.
     clamp_margin: 0.25
     # ENSO past the last CFSv2 target month (utils/enso.R::
-    # sampleEnsoCFSv2Trajectories()), reached when a unit mixing fit groups runs
+    # sample_enso_cfsv2_trajectories()), reached when a unit mixing fit groups runs
     # to its longest member horizon:
     #   neutral: ONI = 0 past the span; the last span month's ONI averages the
     #            months that exist.
@@ -1233,7 +1233,7 @@ simulator:
       # Seam of the analog continuation: last_cfsv2
       # (the last CFSv2 month, whose ONI is a 2-month mean) | last_full_oni (the
       # month before, the last full 3-month CFSv2 mean; the continuation then
-      # fills the last CFSv2 month). Firm horizons follow it (ensoSeamMonth()).
+      # fills the last CFSv2 month). Firm horizons follow it (enso_seam_month()).
       seam: last_cfsv2
     # c3s_plume: <path to PNG>      # per-config only; required when forecast_source: c3s
     #
@@ -1251,8 +1251,8 @@ simulator:
     # Effective default lives at analysis/utils/simulations.R (both the grouped and
     # non-grouped Lenssen branches): `analog_set = sim$enso$counterfactual$analog_set
     # %||% "all"`. Set names are validated against ENSO_ANALOG_SETS (analysis/utils.R)
-    # and resolved to trajectory rows by ensoAnalogSetRows(); labels come from
-    # classifyEnsoAnalogSets() and are baked into the analog cache by
+    # and resolved to trajectory rows by enso_analog_set_rows(); labels come from
+    # classify_enso_analog_sets() and are baked into the analog cache by
     # analysis/03_prepare_lenssen_analogs.R.
   scenario:
     climate: "factual"              # factual | counterfactual | ssp245 | ssp585
@@ -1485,7 +1485,7 @@ results:
     # Supplement fig. SE (seasonality step): per ENSO group and calendar month,
     # the observed onset rate (survival panel), cessation rate (duration
     # panel) and cases per active episode-month (monthly panel) on the rows the
-    # fits keep under admin_level (gid.R::applyAdminLevelFilter()), against
+    # fits keep under admin_level (gid.R::apply_admin_level_filter()), against
     # rain_enso's rainfall climatology and rainy season. A month with fewer than
     # min_n events (cases: episode-months) is sparse and takes no part in the
     # peak; intervals at `interval`.
@@ -1534,7 +1534,7 @@ results:
     # ENSO phase rule of report_smoothing's by-phase table (11's smoothing
     # table): "threshold" = monthly ONI at +/-0.5 with no persistence (legacy),
     # "episode" = the NOAA CPC episodes of the oni artefact (the runs Figures 1
-    # and 3 shade). utils/enso.R::ensoPhase().
+    # and 3 shade). utils/enso.R::classify_enso_phase().
     enso_phase:
       smoothing: "threshold"
     # Lag averaging over the single-lag fits (09 step lag_averaging, from the 05

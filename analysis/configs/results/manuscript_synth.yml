@@ -265,7 +265,7 @@ results:
     # Supplement fig. SE (seasonality step): per ENSO group and calendar month,
     # the observed onset rate (survival panel), cessation rate (duration
     # panel) and cases per active episode-month (monthly panel) on the rows the
-    # fits keep under admin_level (gid.R::applyAdminLevelFilter()), against
+    # fits keep under admin_level (gid.R::apply_admin_level_filter()), against
     # rain_enso's rainfall climatology and rainy season. A month with fewer than
     # min_n events (cases: episode-months) is sparse and takes no part in the
     # peak; intervals at `interval`.

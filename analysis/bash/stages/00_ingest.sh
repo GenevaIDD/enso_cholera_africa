@@ -2,7 +2,7 @@
 # stages/00_ingest.sh — submit 00_ingest_outbreakextractr.R as one Slurm job.
 #
 # Reads the OutbreakExtractR outputs of the outbreak vintage
-# (paths.R::defaultOutbreakDataDir(), or --indir) and writes the legacy RDS
+# (paths.R::default_outbreak_data_dir(), or --indir) and writes the legacy RDS
 # files into the same folder. The vintage folder must be on the cluster first.
 #
 # Usage:

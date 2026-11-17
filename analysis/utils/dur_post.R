@@ -1,31 +1,31 @@
-# ===========================================================================
-# dur_post.R -- outbreak-DURATION track postprocessing adapters
-# ===========================================================================
+# dur_post.R — duration-track postprocessing: the posterior predictive check
+#   of the cessation hazard and duration-ratio draws.
 #
-# Sibling of occ_post.R / siz_post.R. The duration track reuses the OCCURRENCE
-# RE-stats adapter unchanged (computeNestedSurvReStatsBrms -- same Poisson
-# cessation hazard, same AFRO_region/country/ADM1 nesting), so nothing here
-# duplicates that. What DOES need its own implementation is the posterior
-# predictive check, because the duration response is not a quantity you can
-# scatter against a prediction.
+# Provides:
+#   make_duration_pp_check_tbl()   hazard calibration + implied durations
+#   duration_ratio_draws()         per-draw duration ratios
+#   duration_ratio_summary()       their summary
 #
-# WHY THE SIZE PP_CHECK DOES NOT TRANSFER. makeSizePpCheckTbl() (siz_post.R:3)
-# is a predicted-vs-observed scatter of `suspected_cases` -- meaningful because
-# the size response IS the endpoint of interest. The duration response is
-# `y = as.integer(ended)`, a 0/1 cessation indicator on one row per ACTIVE
-# MONTH (dur_data.R:9-13). Scattering predicted against observed 0/1 per
-# month answers nothing: the endpoint the model is fitted FOR -- how long an
-# outbreak lasts -- is a DERIVED quantity, obtained by pushing the per-month
-# hazards through to a duration.
-#
-# So this PPC checks the two things that actually matter, both on the scale the
-# model is used at:
+# Details:
+#   RE stats reuse the occurrence adapter (compute_nested_surv_re_stats_brms;
+#   same Poisson cessation hazard), so only the PPC lives here.
+#   The caller passes the duration panel filtered to the SAME rows the fit saw
+#   (under grouping mode: resolve the group's countries into opt$country first).
+
+# Why the size pp_check does not transfer. make_size_pp_check_tbl()
+# (siz_post.R) is a predicted-vs-observed scatter of `suspected_cases` --
+# meaningful because the size response IS the endpoint of interest. The
+# duration response is `y = as.integer(ended)`, a 0/1 cessation indicator on
+# one row per ACTIVE MONTH (dur_data.R). Scattering predicted against observed
+# 0/1 per month answers nothing: the endpoint -- how long an outbreak lasts --
+# is DERIVED by pushing the per-month hazards through to a duration. So this
+# PPC checks two things, both on the scale the model is used at:
 #
 #   1. HAZARD CALIBRATION -- observed monthly cessation hazard (events /
 #      at-risk) against the posterior-predictive hazard, by months-since-onset.
 #      This is the direct check on the `mso_band` baseline hazard, which spans
-#      a ~492x range across bands (dur_data.R:50-57) and is therefore the part
-#      of the model most able to be wrong in a visible way.
+#      a ~492x range across bands and is therefore the part of the model most
+#      able to be wrong in a visible way.
 #
 #   2. IMPLIED DURATION DISTRIBUTION -- the endpoint. For every posterior
 #      draw, each episode's implied duration is the first month its replicated
@@ -35,7 +35,7 @@
 #      what unmodelled episode-level frailty does), so panel 2 is not implied
 #      by panel 1.
 #
-# HOW TO READ PANEL 2 (do not over-read the totals). The panel is a FIXED
+# How to read panel 2 (do not over-read the totals). The panel is a FIXED
 # at-risk window: an episode observed to last 4 months contributes exactly 4
 # rows, and for an uncensored episode the last of those rows carries y = 1 BY
 # CONSTRUCTION. The replicate gets no such conditioning -- it simply asks
@@ -49,25 +49,21 @@
 # Simulating past the observed window would need covariates (climate, ENSO) at
 # months the panel does not contain, so it is deliberately not attempted here.
 #
-# ROW ALIGNMENT (load-bearing). `fit$data` carries only formula variables --
+# Row alignment (load-bearing). `fit$data` carries only formula variables --
 # y, the crossbasis columns, mso_band, country, ADM1, log_offset -- and NOT
 # episode_id / mso, so durations cannot be derived from the fit alone. The
 # panel must be re-loaded and matched positionally, and because brms drops any
 # row with an NA in a model variable, the panel is first screened by complete
-# cases over those same variables. This is NOT hypothetical: 41 of the 2710
-# enso_west rows carry a missing ADM1 label, which the (1 | country/ADM1)
-# grouping term removes. brms preserves row ORDER, so the survivors align
-# positionally. Both the row count AND the response vector are still asserted
-# after that screen, so a formula change which breaks the correspondence
-# becomes a hard error here instead of a silently mislabelled figure.
+# cases over those same variables (real: rows with a missing ADM1 label are
+# removed by the (1 | country/ADM1) term). brms preserves row ORDER, so the
+# survivors align positionally. Both the row count AND the response vector are
+# still asserted after that screen, so a formula change which breaks the
+# correspondence becomes a hard error here instead of a mislabelled figure.
 #
-# The caller is responsible for passing a panel filtered to the SAME rows the
-# fit saw. Under grouping mode that means resolving the group's countries into
-# opt$country first (config.R:695 resolve_group_countries) -- the raw config
-# leaves opt$country = "all", which would hand over the full 9062-row panel.
-# ===========================================================================
-
-
+# The caller passes a panel filtered to the SAME rows the fit saw. Under
+# grouping mode that means resolving the group's countries into opt$country
+# first (config.R::resolve_group_countries()) -- the raw config leaves
+# opt$country = "all", which would hand over the full panel.
 #' Posterior-predictive check table for the duration cessation hazard.
 #'
 #' @param fit      brmsfit from 04_fit_dur_brms.R / 04_fit_dur_brms_cb.R.
@@ -80,13 +76,21 @@
 #' @return list(hazard, duration, meta). Both tibbles are pre-summarised to
 #'   median + 95% intervals so the saved artefact stays small, mirroring the
 #'   compactness of the size pp_check table.
-makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
-
+make_duration_pp_check_tbl <- function(
+  fit,
+  dur_dat,
+  ndraws = 200L,
+  seed = 1234L
+) {
   req <- c("episode_id", "mso", "y", "mso_band")
   miss <- setdiff(req, names(dur_dat))
-  if (length(miss))
-    stop("makeDurationPpCheckTbl: duration panel missing column(s): ",
-         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "make_duration_pp_check_tbl: duration panel missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
   # --- align the panel to the rows brms actually fitted -------------------
   #
@@ -108,25 +112,45 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
   # The two assertions below VERIFY this filter -- if a future formula change breaks the
   # correspondence, this still fails loudly rather than mislabelling a figure.
   model_vars <- intersect(all.vars(fit$formula$formula), names(dur_dat))
-  keep       <- stats::complete.cases(dur_dat[, model_vars, drop = FALSE])
+  keep <- stats::complete.cases(dur_dat[, model_vars, drop = FALSE])
   if (any(!keep)) {
-    message(sprintf(paste0("makeDurationPpCheckTbl: dropping %d of %d panel row(s) ",
-                           "with NA in a model variable (%s) -- brms dropped the same."),
-                    sum(!keep), nrow(dur_dat),
-                    paste(model_vars[colSums(is.na(dur_dat[, model_vars, drop = FALSE])) > 0],
-                          collapse = ", ")))
+    message(sprintf(
+      paste0(
+        "make_duration_pp_check_tbl: dropping %d of %d panel row(s) ",
+        "with NA in a model variable (%s) -- brms dropped the same."
+      ),
+      sum(!keep),
+      nrow(dur_dat),
+      paste(
+        model_vars[colSums(is.na(dur_dat[, model_vars, drop = FALSE])) > 0],
+        collapse = ", "
+      )
+    ))
     dur_dat <- dur_dat[keep, , drop = FALSE]
   }
 
-  if (nrow(dur_dat) != nrow(fit$data))
-    stop(sprintf(paste0("makeDurationPpCheckTbl: row mismatch -- panel has %d rows ",
-                        "after NA screening, fit has %d. Pass the panel filtered to ",
-                        "the fit's countries (resolve_group_countries() under ",
-                        "grouping mode)."),
-                 nrow(dur_dat), nrow(fit$data)), call. = FALSE)
-  if (!identical(as.integer(dur_dat$y), as.integer(fit$data$y)))
-    stop("makeDurationPpCheckTbl: response vectors differ between panel and fit ",
-         "-- positional alignment is not valid, refusing to guess.", call. = FALSE)
+  if (nrow(dur_dat) != nrow(fit$data)) {
+    stop(
+      sprintf(
+        paste0(
+          "make_duration_pp_check_tbl: row mismatch -- panel has %d rows ",
+          "after NA screening, fit has %d. Pass the panel filtered to ",
+          "the fit's countries (resolve_group_countries() under ",
+          "grouping mode)."
+        ),
+        nrow(dur_dat),
+        nrow(fit$data)
+      ),
+      call. = FALSE
+    )
+  }
+  if (!identical(as.integer(dur_dat$y), as.integer(fit$data$y))) {
+    stop(
+      "make_duration_pp_check_tbl: response vectors differ between panel and fit ",
+      "-- positional alignment is not valid, refusing to guess.",
+      call. = FALSE
+    )
+  }
 
   set.seed(seed)
   ndraws <- min(as.integer(ndraws), brms::ndraws(fit))
@@ -136,7 +160,7 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
   # discrete-time Bernoulli hazard, so counts >1 are possible and all mean
   # "ceased this month".)
   yrep <- brms::posterior_predict(fit, ndraws = ndraws)
-  ev   <- yrep >= 1
+  ev <- yrep >= 1
 
   epi <- as.character(dur_dat$episode_id)
   mso <- as.integer(dur_dat$mso)
@@ -145,31 +169,38 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
   # --- 1. cessation hazard by months-since-onset -------------------------
 
   mso_lev <- sort(unique(mso))
-  mso_f   <- factor(mso, levels = mso_lev)
+  mso_f <- factor(mso, levels = mso_lev)
 
   at_risk <- as.integer(table(mso_f))
-  obs_ev  <- as.integer(tapply(obs, mso_f, sum))
+  obs_ev <- as.integer(tapply(obs, mso_f, sum))
 
   # (draws x mso-levels) replicated event counts
-  rep_ev <- t(vapply(seq_len(nrow(ev)),
-                     function(i) as.numeric(tapply(ev[i, ], mso_f, sum)),
-                     numeric(length(mso_lev))))
+  rep_ev <- t(vapply(
+    seq_len(nrow(ev)),
+    function(i) as.numeric(tapply(ev[i, ], mso_f, sum)),
+    numeric(length(mso_lev))
+  ))
   rep_haz <- sweep(rep_ev, 2, at_risk, "/")
-  haz_q   <- apply(rep_haz, 2, stats::quantile,
-                   probs = c(0.025, 0.5, 0.975), names = FALSE)
+  haz_q <- apply(
+    rep_haz,
+    2,
+    stats::quantile,
+    probs = c(0.025, 0.5, 0.975),
+    names = FALSE
+  )
 
   # One band label per mso level (the band is a function of mso).
   band_by_mso <- as.character(dur_dat$mso_band)[match(mso_lev, mso)]
 
   hazard <- tibble::tibble(
-    mso         = mso_lev,
-    mso_band    = band_by_mso,
-    at_risk     = at_risk,
-    obs_events  = obs_ev,
-    obs_hazard  = obs_ev / at_risk,
-    rep_lo      = haz_q[1, ],
-    rep_med     = haz_q[2, ],
-    rep_hi      = haz_q[3, ]
+    mso = mso_lev,
+    mso_band = band_by_mso,
+    at_risk = at_risk,
+    obs_events = obs_ev,
+    obs_hazard = obs_ev / at_risk,
+    rep_lo = haz_q[1, ],
+    rep_med = haz_q[2, ],
+    rep_hi = haz_q[3, ]
   )
 
   # --- 2. implied duration distribution ----------------------------------
@@ -178,40 +209,48 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
   # Right-censored episodes never fire and so contribute no observed duration;
   # they are counted in meta rather than silently folded into the histogram.
 
-  grid    <- seq_len(max(mso_lev))
+  grid <- seq_len(max(mso_lev))
   obs_dur <- tapply(mso[obs], epi[obs], min)
   obs_cnt <- as.integer(table(factor(as.integer(obs_dur), levels = grid)))
 
   rep_cnt <- matrix(0L, nrow = nrow(ev), ncol = length(grid))
   n_nofire <- integer(nrow(ev))
-  n_epi    <- length(unique(epi))
+  n_epi <- length(unique(epi))
   for (i in seq_len(nrow(ev))) {
     hit <- ev[i, ]
-    if (!any(hit)) { n_nofire[i] <- n_epi; next }
+    if (!any(hit)) {
+      n_nofire[i] <- n_epi
+      next
+    }
     dur_i <- tapply(mso[hit], epi[hit], min)
     rep_cnt[i, ] <- as.integer(table(factor(as.integer(dur_i), levels = grid)))
-    n_nofire[i]  <- n_epi - length(dur_i)
+    n_nofire[i] <- n_epi - length(dur_i)
   }
-  dur_q <- apply(rep_cnt, 2, stats::quantile,
-                 probs = c(0.025, 0.5, 0.975), names = FALSE)
+  dur_q <- apply(
+    rep_cnt,
+    2,
+    stats::quantile,
+    probs = c(0.025, 0.5, 0.975),
+    names = FALSE
+  )
 
   duration <- tibble::tibble(
     duration_months = grid,
-    obs_n           = obs_cnt,
-    rep_lo          = dur_q[1, ],
-    rep_med         = dur_q[2, ],
-    rep_hi          = dur_q[3, ]
+    obs_n = obs_cnt,
+    rep_lo = dur_q[1, ],
+    rep_med = dur_q[2, ],
+    rep_hi = dur_q[3, ]
   )
 
   list(
-    hazard   = hazard,
+    hazard = hazard,
     duration = duration,
-    meta     = list(
-      ndraws            = nrow(ev),
-      n_rows            = nrow(dur_dat),
-      n_episodes        = n_epi,
-      n_obs_cessations  = sum(obs),
-      n_censored        = n_epi - sum(obs),
+    meta = list(
+      ndraws = nrow(ev),
+      n_rows = nrow(dur_dat),
+      n_episodes = n_epi,
+      n_obs_cessations = sum(obs),
+      n_censored = n_epi - sum(obs),
       # episodes with no replicated cessation inside follow-up, per draw
       rep_nofire_median = stats::median(n_nofire)
     )
@@ -239,7 +278,7 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
 # The honest estimand is the ratio of RESTRICTED mean durations (RMD) over an
 # explicit horizon K, computed per posterior draw and then summarised. This is
 # the closed-form cousin of the simulation-based implied-duration machinery in
-# makeDurationPpCheckTbl() above.
+# make_duration_pp_check_tbl() above.
 #
 # CONTRAST SEMANTICS. For an ENSO contrast this is a *scenario* statement: the
 # covariate is held at one value for the whole episode (which no real episode
@@ -268,13 +307,16 @@ makeDurationPpCheckTbl <- function(fit, dur_dat, ndraws = 200L, seed = 1234L) {
 #'   identified from the observed window -- warn and keep it restricted.
 #'
 #' @return list(ratio, rmd_hi, rmd_lo, horizon, tail_mass). `ratio` is a vector
-#'   of per-draw RMD ratios; summarise it with durationRatioSummary().
-durationRatioDraws <- function(fit, newdata_hi, newdata_lo,
-                               horizon    = 24L,
-                               days_ref   = 30.4375,
-                               re_formula = NA,
-                               tail_tol   = 0.05) {
-
+#'   of per-draw RMD ratios; summarise it with duration_ratio_summary().
+duration_ratio_draws <- function(
+  fit,
+  newdata_hi,
+  newdata_lo,
+  horizon = 24L,
+  days_ref = 30.4375,
+  re_formula = NA,
+  tail_tol = 0.05
+) {
   stopifnot(nrow(newdata_hi) == horizon, nrow(newdata_lo) == horizon)
 
   # --- per-draw monthly cessation RATE on the fitted scale -----------------
@@ -283,7 +325,7 @@ durationRatioDraws <- function(fit, newdata_hi, newdata_lo,
   rate <- function(nd) {
     nd$log_offset <- log(days_ref)
     exp(brms::posterior_linpred(fit, newdata = nd, re_formula = re_formula))
-  }                                      # draws x horizon
+  } # draws x horizon
 
   mu_hi <- rate(newdata_hi)
   mu_lo <- rate(newdata_lo)
@@ -292,7 +334,7 @@ durationRatioDraws <- function(fit, newdata_hi, newdata_lo,
   # Poisson-with-offset is the cloglog discrete hazard (Holford 1980):
   #   h(k) = 1 - exp(-mu(k)),  S(t) = prod_{k<=t}(1-h(k)) = exp(-cumsum(mu))
   # so the survival curve needs no product at all.
-  surv <- function(mu) exp(-t(apply(mu, 1, cumsum)))     # draws x horizon, S(1..K)
+  surv <- function(mu) exp(-t(apply(mu, 1, cumsum))) # draws x horizon, S(1..K)
 
   S_hi <- surv(mu_hi)
   S_lo <- surv(mu_lo)
@@ -304,31 +346,46 @@ durationRatioDraws <- function(fit, newdata_hi, newdata_lo,
   rmd_lo <- rmd(S_lo)
 
   tail_mass <- stats::median(pmax(S_hi[, horizon], S_lo[, horizon]))
-  if (tail_mass > tail_tol)
-    warning(sprintf(paste("durationRatioDraws: median S(%d) = %.3f > %.3f --",
-                          "report this as a %d-month RESTRICTED mean duration ratio;",
-                          "the unrestricted mean is not identified over this window."),
-                    horizon, tail_mass, tail_tol, horizon))
+  if (tail_mass > tail_tol) {
+    warning(sprintf(
+      paste(
+        "duration_ratio_draws: median S(%d) = %.3f > %.3f --",
+        "report this as a %d-month RESTRICTED mean duration ratio;",
+        "the unrestricted mean is not identified over this window."
+      ),
+      horizon,
+      tail_mass,
+      tail_tol,
+      horizon
+    ))
+  }
 
   # Ratio PER DRAW, then summarise -- never a ratio of posterior summaries.
-  list(ratio     = rmd_hi / rmd_lo,
-       rmd_hi    = rmd_hi,
-       rmd_lo    = rmd_lo,
-       horizon   = horizon,
-       tail_mass = tail_mass)
+  list(
+    ratio = rmd_hi / rmd_lo,
+    rmd_hi = rmd_hi,
+    rmd_lo = rmd_lo,
+    horizon = horizon,
+    tail_mass = tail_mass
+  )
 }
 
-#' Median + CrI summary of a durationRatioDraws() result, ready for a sentence.
+#' Median + CrI summary of a duration_ratio_draws() result, ready for a sentence.
 #'
-#' @param dr    list returned by durationRatioDraws().
+#' @param dr    list returned by duration_ratio_draws().
 #' @param probs quantile probs (default 2.5% / 50% / 97.5%).
 #' @return one-row tibble with ratio_lo/med/hi, median RMDs, horizon, tail_mass,
 #'   and prob_longer = P(ratio > 1).
-durationRatioSummary <- function(dr, probs = c(0.025, 0.5, 0.975)) {
+duration_ratio_summary <- function(dr, probs = c(0.025, 0.5, 0.975)) {
   q <- stats::quantile(dr$ratio, probs, names = FALSE)
-  tibble::tibble(ratio_lo = q[1], ratio_med = q[2], ratio_hi = q[3],
-                 rmd_hi_med = stats::median(dr$rmd_hi),
-                 rmd_lo_med = stats::median(dr$rmd_lo),
-                 horizon = dr$horizon, tail_mass = dr$tail_mass,
-                 prob_longer = mean(dr$ratio > 1))
+  tibble::tibble(
+    ratio_lo = q[1],
+    ratio_med = q[2],
+    ratio_hi = q[3],
+    rmd_hi_med = stats::median(dr$rmd_hi),
+    rmd_lo_med = stats::median(dr$rmd_lo),
+    horizon = dr$horizon,
+    tail_mass = dr$tail_mass,
+    prob_longer = mean(dr$ratio > 1)
+  )
 }

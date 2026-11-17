@@ -1,30 +1,45 @@
-# run_all.R
+# run_all.R — runs the test harness; any HARD failure makes the exit status 1.
 #
-# Runs the validation harness. Every test runs; a hard failure makes the exit
-# status 1 at the end (response_invariant, offset_wellformed,
-# postprocessing_adapter, ...), a soft failure (diagnostics) only shows in the
-# report. Writes SUMMARY.md and the per-test timings.csv.
+# Usage:
+#   Rscript analysis/tests/run_all.R
+#   Rscript analysis/tests/run_all.R --quick --jobs 4
+#   Rscript analysis/tests/run_all.R --baseline 1990_2019
 #
-# CLI:
-#   Rscript analysis/tests/run_all.R [--quick] [--baseline 1990_2019] [--jobs N]
-#
-# --jobs 1 (default) runs the tests in registration order with their output
-# streamed. --jobs N > 1 runs them on N worker processes, longest first by the
-# last run's timings.csv, each test's output in test_reports/logs/<test>.log
-# (the tail of a failing test's log is printed at the end). The tests write
-# only to their own temp dirs and report files, so the order does not matter.
+# Details:
+#   Every test runs; a hard failure makes the exit status 1 at the end, a soft
+#   failure only shows in the report. Writes SUMMARY.md and timings.csv.
+#   --jobs 1 (default) runs the tests in registration order with their output
+#   streamed; --jobs N > 1 runs them on N worker processes, longest first by
+#   the last run's timings.csv, each test's output in
+#   test_reports/logs/<test>.log (a failing test's log tail is printed at the
+#   end). The tests write only to their own temp dirs and report files, so the
+#   order does not matter.
 
 suppressPackageStartupMessages({
   library(optparse)
 })
 
-opt <- parse_args(OptionParser(option_list = list(
-  make_option(c("-b", "--baseline"), default = "1990_2019", type = "character"),
-  make_option(c("--quick"), action = "store_true", default = FALSE,
-              help = "skip slow tests (diagnostics)"),
-  make_option(c("-j", "--jobs"), default = 1L, type = "integer",
-              help = "tests run in parallel; 1 = in order, output streamed [default: %default]")
-)))
+opt <- parse_args(OptionParser(
+  option_list = list(
+    make_option(
+      c("-b", "--baseline"),
+      default = "1990_2019",
+      type = "character"
+    ),
+    make_option(
+      c("--quick"),
+      action = "store_true",
+      default = FALSE,
+      help = "skip slow tests (diagnostics)"
+    ),
+    make_option(
+      c("-j", "--jobs"),
+      default = 1L,
+      type = "integer",
+      help = "tests run in parallel; 1 = in order, output streamed [default: %default]"
+    )
+  )
+))
 
 report_dir <- "generated_data/test_reports"
 dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
@@ -46,9 +61,13 @@ exec_one <- function(job, log = NULL) {
   } else {
     system(paste(cmd, ">", shQuote(log), "2>&1"))
   }
-  list(script = job$script, args = paste(job$args, collapse = " "),
-       status = status, hard_fail = job$hard_fail,
-       elapsed = proc.time()[["elapsed"]] - t0)
+  list(
+    script = job$script,
+    args = paste(job$args, collapse = " "),
+    status = status,
+    hard_fail = job$hard_fail,
+    elapsed = proc.time()[["elapsed"]] - t0
+  )
 }
 
 # Precondition: the deployed run's fit batches (prod_run) are deploy-generated
@@ -56,9 +75,17 @@ exec_one <- function(job, log = NULL) {
 # regenerates them first, so the config-scanning gates (formula / prior goldens,
 # deployed model terms) see the configs their goldens were captured on.
 if (!dir.exists("analysis/configs/prod_run_occ_grouped_enso_singlelag")) {
-  message("run_all: generating the prod_run fit batches (deploy_prod_run.R --stage gen_batches)")
-  if (system("Rscript analysis/utils/deploy_prod_run.R -C analysis/configs/deploy/prod_run.yml --stage gen_batches > /dev/null 2>&1") != 0)
+  message(
+    "run_all: generating the prod_run fit batches (deploy_prod_run.R --stage gen_batches)"
+  )
+  if (
+    system(
+      "Rscript analysis/utils/deploy_prod_run.R -C analysis/configs/deploy/prod_run.yml --stage gen_batches > /dev/null 2>&1"
+    ) !=
+      0
+  ) {
     stop("run_all: gen_batches of prod_run failed")
+  }
 }
 
 results <- list()
@@ -88,7 +115,7 @@ results$config_block_registry <- run_one(
 # shipped config stops restating every get_default_options()$results key, the
 # missing decision is silently supplied from config_defaults.yml and the file
 # no longer documents what produced a figure. Also gates artefact-path
-# collisions between tracks/set-lists in makeResultsRunFile().
+# collisions between tracks/set-lists in make_results_run_file().
 results$results_config_coverage <- run_one(
   "analysis/tests/test_results_config_coverage.R",
   hard_fail = TRUE
@@ -115,7 +142,7 @@ results$hardcoded_default_parity <- run_one(
 )
 
 # One outbreak-database vintage for the data leg: every numbered script's --indir
-# defaults to utils/paths.R::defaultOutbreakDataDir() (outbreak_data_Nov_2026), no
+# defaults to utils/paths.R::default_outbreak_data_dir() (outbreak_data_Nov_2026), no
 # numbered script or maintained bash driver holds its own outbreak_data_<Mon>_<YYYY>
 # literal, and 00/01/02 stamp the indir into prep_counts (report_cascade() unchanged
 # with or without it). HARD, quick-safe: two vintages mixed by default drop
@@ -126,7 +153,7 @@ results$data_vintage_default <- run_one(
 )
 
 # population.lp_shapefiles (read by 02a/02b) defaults to the same vintage
-# directory as defaultOutbreakDataDir(), in get_default_options() and
+# directory as default_outbreak_data_dir(), in get_default_options() and
 # config_defaults.yml. HARD, quick-safe: config.R cannot source paths.R, so
 # the default is a literal that would otherwise drift silently.
 results$lp_shapefiles_vintage <- run_one(
@@ -135,7 +162,7 @@ results$lp_shapefiles_vintage <- run_one(
 )
 
 # Every artefact and config name the builders emit for analysis/configs/ fits
-# NAME_MAX (255 bytes; paths.R::assertBasenameLength() / checkRunFileNames()).
+# NAME_MAX (255 bytes; paths.R::assert_basename_length() / check_run_file_names()).
 # HARD, quick-safe (pure path algebra, ~100 s): a name over the limit cannot be
 # written, and the post-fit kinds are the longest, so it fails after the MCMC.
 results$basename_length <- run_one(
@@ -187,7 +214,7 @@ results$results_step_registry <- run_one(
 )
 
 # Shared best-lag / grouped-config helpers the figure scripts and drivers use
-# (utils/loo_lags.R::best_lags_by_group(), paths.R::groupedLagConfigPath(),
+# (utils/loo_lags.R::best_lags_by_group(), paths.R::grouped_lag_config_path(),
 # config.R::detect_model_from_yaml()). HARD: a wrong lag pick does not error, it
 # silently pictures a different fit than the deployed/manuscript one.
 results$loo_lags_helpers <- run_one(
@@ -216,7 +243,7 @@ results$national_zero_months <- run_one(
 )
 
 # National zero-fill of the occurrence panel (episodes.national_zero_fill,
-# 03_prepare_occ.R --national_zero_fill): which rows nationalZeroSurvRows()
+# 03_prepare_occ.R --national_zero_fill): which rows national_zero_surv_rows()
 # adds (never at/after an onset, never a duplicate), the "_nz" artefact token,
 # the loader stamp guard and the sim-config flag. HARD: a wrong row adds
 # exposure no report supports; the default panel must stay unchanged.
@@ -446,7 +473,7 @@ results$enso_continuation_skill <- run_one(
   hard_fail = TRUE
 )
 
-# One ENSO phase function: ensoPhase() equals the five frozen
+# One ENSO phase function: classify_enso_phase() equals the five frozen
 # reference code paths bit for bit; only the episode rule is "CPC"; no +/-0.5
 # literal outside the constants; report_smoothing's phase rule. HARD, quick.
 results$enso_phase <- run_one(
@@ -457,7 +484,7 @@ results$enso_phase <- run_one(
 # One horizon-end convention: closed forward horizons,
 # half-open filter windows; build_climate_panel_for_tu(end_mode=) identical to
 # the frozen slice; assert_arm_launch end check; config-time panel coverage;
-# ensoSeamMonth(). HARD, quick.
+# enso_seam_month(). HARD, quick.
 results$horizon_convention <- run_one(
   "analysis/tests/test_horizon_convention.R",
   hard_fail = TRUE
@@ -680,6 +707,21 @@ results$script_header_names <- run_one(
   hard_fail = TRUE
 )
 
+# Every R file's header follows the README.md "Code style" template, and
+# numbered scripts use numbered sections starting with 1. Preamble.
+# HARD: a new or edited file would drift from the documented layout.
+results$script_header_layout <- run_one(
+  "analysis/tests/test_script_header_layout.R",
+  hard_fail = TRUE
+)
+
+# The R code is formatted as air formats it (air.toml; skips without air).
+# HARD: an unformatted file would reformat on the next style.sh --fix.
+results$style_air <- run_one(
+  "analysis/tests/test_style_air.R",
+  hard_fail = TRUE
+)
+
 # random_effects.re_adm2_leaf_scope (size/monthly): the ADM2-only leaf term and
 # the simulator's read-back into its adm2 bucket. HARD: a mis-parsed leaf is a
 # silent RE of 0 at replay.
@@ -795,8 +837,8 @@ results$results_rain_enso <- run_one(
   hard_fail = TRUE
 )
 
-# Climate column plumbing: dev_sd_* never rescaled, .climDevWide(), the opt-in
-# getStatsGid(). HARD, quick-safe.
+# Climate column plumbing: dev_sd_* never rescaled, .clim_dev_wide(), the opt-in
+# get_stats_gid(). HARD, quick-safe.
 results$climate_column_plumbing <- run_one(
   "analysis/tests/test_climate_column_plumbing.R",
   hard_fail = TRUE
@@ -902,7 +944,7 @@ results$simulator_kernel <- run_one(
 
 # Golden characterization of simulate_one_tu() and its step helpers
 # (evaluate_lp, update_lags, advance_ttlo, compute_phi_vec, basehaz_dur_eval,
-# monthlyLogMu) over four synthetic worlds that reach every deployed kernel
+# monthly_log_mu) over four synthetic worlds that reach every deployed kernel
 # branch. HARD: the kernel speed-up rewrites these internals and must stay
 # bit-identical at a fixed seed (same draws, same order).
 results$simulator_kernel_golden <- run_one(
@@ -946,11 +988,11 @@ results$duration_config_merge <- run_one(
   hard_fail = TRUE
 )
 
-# makeDurationRunFile() collision gate. HARD: every fit script early-exits when
+# make_duration_run_file() collision gate. HARD: every fit script early-exits when
 # its output path already exists, so two configs that differ in a load-bearing
 # field but resolve to one filename neither overwrite nor error -- the second
 # run reports success and leaves the FIRST one's fit on disk under its name.
-# This has already happened on the size track (see .sizeEstimandPathToken()).
+# This has already happened on the size track (see .size_estimand_path_token()).
 results$duration_filename_roundtrip <- run_one(
   "analysis/tests/test_duration_filename_roundtrip.R",
   hard_fail = TRUE
@@ -1003,9 +1045,9 @@ results$smoothing_cache_schema <- run_one(
   hard_fail = TRUE
 )
 
-# buildAdm1DistKm() cache coverage: a country requested at build time but with
+# build_adm1_dist_km() cache coverage: a country requested at build time but with
 # no ADM1 rows is covered via the sidecar's iso3 (only a sidecar written with
-# gidAdm1() keying), so the simulator never rebuilds from the geopackage (needs
+# gid_to_adm1() keying), so the simulator never rebuilds from the geopackage (needs
 # `sf`, absent on some clusters). HARD: an uncoverable country made every enso_west
 # smoothing task fail on the cluster.
 results$adm1_dist_cache <- run_one(
@@ -1013,7 +1055,7 @@ results$adm1_dist_cache <- run_one(
   hard_fail = TRUE
 )
 
-# ADM1 key from a gid (gid.R::gidAdm1() + its inlined copies): GADM 4.1's
+# ADM1 key from a gid (gid.R::gid_to_adm1() + its inlined copies): GADM 4.1's
 # dot-less Ghana gids ("GHA5_2", "GHA14_13_2") map to GHA_<n>, and an
 # unparseable gid is an error. HARD: the NA ADM1 dropped Ghana from every fit.
 results$gid_adm1 <- run_one(
@@ -1054,7 +1096,7 @@ results$population_crosswalk <- run_one(
   hard_fail = TRUE
 )
 
-# computeGidCover() in isolation from geometry -- composite detection and
+# compute_gid_cover() in isolation from geometry -- composite detection and
 # cover_threshold boundary behaviour. Complementary to population_crosswalk
 # above, which drives the same derivation through the full geometry pipeline.
 results$composite_detection <- run_one(
@@ -1062,7 +1104,7 @@ results$composite_detection <- run_one(
   hard_fail = TRUE
 )
 
-# buildLpObservationOperator() / expectedLpFromGidRates() (analysis/utils.R) --
+# build_lp_observation_operator() / expected_lp_from_gid_rates() (analysis/utils.R) --
 # the coverage-weighted operator that maps simulated gid cases into LP space
 # for validation (Stage 6). HARD: a wrong operator silently mis-attributes
 # simulated cases rather than erroring.
@@ -1078,7 +1120,7 @@ results$lp_observation_operator <- run_one(
 # they cover produces numbers that look entirely reasonable.
 # ---------------------------------------------------------------------------
 
-# apportionCompositeCases() -- splitting a composite LP's cases across its
+# apportion_composite_cases() -- splitting a composite LP's cases across its
 # member gids by population share w = H/P_l. HARD: the failure is CONSERVATION.
 # If the split does not sum back to the original, cases are created or
 # destroyed silently, and the totals stay plausible either way. Includes the
@@ -1089,8 +1131,8 @@ results$case_apportionment <- run_one(
   hard_fail = TRUE
 )
 
-# lpCompositeStatus() / collapseCompositeLPs() -- the REDUCING counterpart to
-# apportionCompositeCases(), selected by --composite_policy. HARD, and for a
+# lp_composite_status() / collapse_composite_lps() -- the REDUCING counterpart to
+# apportion_composite_cases(), selected by --composite_policy. HARD, and for a
 # different reason than conservation: the two coexisting definitions of
 # "composite" (DOMINANCE gid_cover < 0.90 vs MULTIPLICITY n_members > 1) select
 # 22% of LPs and 97% of rows respectively, so keying `drop` on the wrong one
@@ -1101,7 +1143,7 @@ results$composite_policy <- run_one(
   hard_fail = TRUE
 )
 
-# reconcileFootprintPop() -- the pop = min(sum_l H, Q_g) denominator replacing
+# reconcile_footprint_pop() -- the pop = min(sum_l H, Q_g) denominator replacing
 # `pop = sum(pop, na.rm = TRUE)` (03_prepare_siz.R). HARD: the sum rule
 # aggregated a STOCK with a flow rule; it doubled NGA_19_1 to 209M against
 # Nigeria's ~220M and returned pop = 0 for the empty group COD_4_6_1. A wrong
@@ -1111,7 +1153,7 @@ results$footprint_pop_reconciliation <- run_one(
   hard_fail = TRUE
 )
 
-# popProvenanceStamp() / assertPopProvenance() -- the mean_rate ordering guard.
+# pop_provenance_stamp() / assert_pop_provenance() -- the mean_rate ordering guard.
 # HARD: the mean_rate table is suspected_cases / pop, so changing pop
 # invalidates every cell of it, and the simulator reads that table as a frozen
 # sidecar (mu = pop * mean_rate * exp(LP), the two factors multiply). New
@@ -1124,7 +1166,7 @@ results$pop_provenance_guard <- run_one(
 )
 
 # RMD duration-ratio estimand (analysis/utils/dur_post.R:
-# durationRatioDraws()/durationRatioSummary()). HARD: the manuscript "XX times
+# duration_ratio_draws()/duration_ratio_summary()). HARD: the manuscript "XX times
 # longer" claim is a ratio of restricted mean durations, NOT 1/HR, and the two
 # agree only in the K -> inf limit. A regression that quietly returned 1/HR at a
 # finite horizon would produce a plausible-but-wrong duration ratio with no
@@ -1152,7 +1194,7 @@ results$sim_metrics_golden <- run_one(
   hard_fail = TRUE
 )
 
-# Golden characterization of resolveGidPopulation() (all four tiers) and
+# Golden characterization of resolve_gid_population() (all four tiers) and
 # censor_sim_by_country() on one synthetic fixture. HARD: guards the vectorised
 # T2 rescale and the per-unique-gid ISO3 of the hindcast-postprocess speed-up --
 # a population or a censored row that drifts fails here. Regenerate only on a
@@ -1294,7 +1336,7 @@ results$kl_stan_patch <- run_one(
   hard_fail = TRUE
 )
 
-# Monthly-track (mon) makeMonthlyRunFile() collision gate -- sibling of
+# Monthly-track (mon) make_monthly_run_file() collision gate -- sibling of
 # duration_filename_roundtrip above, same failure mode (silent second-run
 # success that leaves the FIRST config's fit on disk under the second one's
 # name).
@@ -1346,9 +1388,9 @@ results$mon_measurement_enum <- run_one(
 )
 
 # Monthly-track (mon) P0-P4 denominator/elasticity apparatus: estimand
-# resolution + validation, resolveSizePopColumn()'s asymmetric fallback (gid
+# resolution + validation, resolve_size_pop_column()'s asymmetric fallback (gid
 # must HARD-ERROR rather than silently hand back a footprint population),
-# .addLogPopCentred()'s within-level nesting invariant, the `mon_estimand`
+# .add_log_pop_centred()'s within-level nesting invariant, the `mon_estimand`
 # stamp round-trip into .recover_log_pop_centres(), and the _estnd- filename
 # separation. HARD: this is the apparatus that fixes the CMR ~76x monthly
 # overestimate, and every one of its failure modes is a silent multiplicative
@@ -1439,8 +1481,8 @@ results$cessation_exposure <- run_one(
   hard_fail = TRUE
 )
 
-# Golden for the shared monthly-mean / monthly-draw helpers (monthlyLogMu(),
-# drawMonthlyCases(), simulator_core.R): v1 grouped/ungrouped and the
+# Golden for the shared monthly-mean / monthly-draw helpers (monthly_log_mu(),
+# draw_monthly_cases(), simulator_core.R): v1 grouped/ungrouped and the
 # smoothing post-hoc draw on C-kernel bpfilter trajectories, all uncapped, captured
 # before the four inline copies were routed through them. HARD: a drift is a
 # silent change of every simulated case count.
@@ -1507,7 +1549,7 @@ results$ttlo_none_level <- run_one(
 # The duration policy stamp's episode-span fields
 # and guard counts, 03_prepare_dur.R --restamp on a synthetic panel
 # in a temp dir, loo_lags.R::check_occ_floor_offset(), and no caller of
-# guardOutbreakEpisodes() outside scratchpads. HARD, quick-safe (synthetic
+# guard_outbreak_episodes() outside scratchpads. HARD, quick-safe (synthetic
 # only, ~4 s): a wrong span misstates the lag floor's reference silently.
 results$duration_span_stamp <- run_one(
   "analysis/tests/test_duration_span_stamp.R",
@@ -1563,15 +1605,25 @@ if (!opt$quick) {
   # C-kernel smoke/structural checks, unit-order invariance and the detected feed. Each
   # compiles Csnippets (slow), so full suite only.
   results$spatpomp_c_variant <- run_one(
-    "analysis/tests/test_spatpomp_c_variant.R", hard_fail = TRUE)
+    "analysis/tests/test_spatpomp_c_variant.R",
+    hard_fail = TRUE
+  )
   results$spatpomp_c_variant_dur <- run_one(
-    "analysis/tests/test_spatpomp_c_variant_dur.R", hard_fail = TRUE)
+    "analysis/tests/test_spatpomp_c_variant_dur.R",
+    hard_fail = TRUE
+  )
   results$spatpomp_unit_order <- run_one(
-    "analysis/tests/test_spatpomp_unit_order.R", hard_fail = TRUE)
+    "analysis/tests/test_spatpomp_unit_order.R",
+    hard_fail = TRUE
+  )
   results$spatpomp_detected_feed <- run_one(
-    "analysis/tests/test_spatpomp_detected_feed.R", hard_fail = TRUE)
+    "analysis/tests/test_spatpomp_detected_feed.R",
+    hard_fail = TRUE
+  )
   results$spatpomp_who_obs <- run_one(
-    "analysis/tests/test_spatpomp_who_obs.R", hard_fail = TRUE)
+    "analysis/tests/test_spatpomp_who_obs.R",
+    hard_fail = TRUE
+  )
   results$spatpomp_filter_forecast <- run_one(
     "analysis/tests/test_spatpomp_filter_forecast.R",
     hard_fail = TRUE
@@ -1607,7 +1659,7 @@ results$cb_singlelag <- run_one(
   hard_fail = FALSE
 )
 
-# ENSO lead columns for the -11..11 single-lag sweep (joinEnsoLags max_lead) — soft gate.
+# ENSO lead columns for the -11..11 single-lag sweep (join_enso_lags max_lead) — soft gate.
 results$enso_leads <- run_one(
   "analysis/tests/test_enso_leads.R",
   hard_fail = FALSE
@@ -1620,7 +1672,7 @@ results$simulator_enso_leads <- run_one(
   hard_fail = TRUE
 )
 
-# makeFigureDir()/06_fit_figures.R collision ratchet. SOFT: 0
+# make_figure_dir()/06_fit_figures.R collision ratchet. SOFT: 0
 # collisions across all configs; a regression here is a
 # silent figure overwrite, not a fit-breaking error, so it's tracked but does
 # not halt the suite.
@@ -1665,48 +1717,104 @@ if (opt$jobs <= 1L) {
   dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
   # Longest first, so a slow test does not start last; a test without a
   # previous timing counts as the longest.
-  prev <- if (file.exists(timings_path))
-    tryCatch(utils::read.csv(timings_path, stringsAsFactors = FALSE), error = function(e) NULL)
-  est <- if (is.null(prev)) rep(NA_real_, length(results)) else
+  prev <- if (file.exists(timings_path)) {
+    tryCatch(
+      utils::read.csv(timings_path, stringsAsFactors = FALSE),
+      error = function(e) NULL
+    )
+  }
+  est <- if (is.null(prev)) {
+    rep(NA_real_, length(results))
+  } else {
     prev$elapsed[match(names(results), prev$test)]
+  }
   est[is.na(est)] <- Inf
   ord <- names(results)[order(-est)]
-  message(sprintf("run_all: %d test(s) on %d worker(s); per-test logs in %s",
-                  length(results), opt$jobs, log_dir))
-  done <- parallel::mclapply(ord, function(nm)
-    exec_one(results[[nm]], file.path(log_dir, paste0(nm, ".log"))),
-    mc.cores = opt$jobs, mc.preschedule = FALSE)
+  message(sprintf(
+    "run_all: %d test(s) on %d worker(s); per-test logs in %s",
+    length(results),
+    opt$jobs,
+    log_dir
+  ))
+  done <- parallel::mclapply(
+    ord,
+    function(nm) {
+      exec_one(results[[nm]], file.path(log_dir, paste0(nm, ".log")))
+    },
+    mc.cores = opt$jobs,
+    mc.preschedule = FALSE
+  )
   names(done) <- ord
-  for (nm in ord) if (!is.list(done[[nm]]))   # a worker that died returns an error object
-    done[[nm]] <- list(script = results[[nm]]$script,
-                       args = paste(results[[nm]]$args, collapse = " "), status = -1L,
-                       hard_fail = results[[nm]]$hard_fail, elapsed = NA_real_)
+  for (nm in ord) {
+    if (!is.list(done[[nm]])) {
+      # a worker that died returns an error object
+      done[[nm]] <- list(
+        script = results[[nm]]$script,
+        args = paste(results[[nm]]$args, collapse = " "),
+        status = -1L,
+        hard_fail = results[[nm]]$hard_fail,
+        elapsed = NA_real_
+      )
+    }
+  }
   results <- done[names(results)]
-  for (nm in names(results)) if (results[[nm]]$status != 0) {
-    log <- file.path(log_dir, paste0(nm, ".log"))
-    message("\n--- FAIL ", nm, " (", log, "), last lines:")
-    if (file.exists(log)) message(paste(utils::tail(readLines(log, warn = FALSE), 30), collapse = "\n"))
+  for (nm in names(results)) {
+    if (results[[nm]]$status != 0) {
+      log <- file.path(log_dir, paste0(nm, ".log"))
+      message("\n--- FAIL ", nm, " (", log, "), last lines:")
+      if (file.exists(log)) {
+        message(paste(
+          utils::tail(readLines(log, warn = FALSE), 30),
+          collapse = "\n"
+        ))
+      }
+    }
   }
 }
 t_wall <- proc.time()[["elapsed"]] - t_start
-utils::write.csv(data.frame(test = names(results),
-                            elapsed = vapply(results, function(r) r$elapsed, numeric(1))),
-                 timings_path, row.names = FALSE)
+utils::write.csv(
+  data.frame(
+    test = names(results),
+    elapsed = vapply(results, function(r) r$elapsed, numeric(1))
+  ),
+  timings_path,
+  row.names = FALSE
+)
 
 # Summary ----------------------------------------------------------------
 
-con <- file(summary_path, "w"); on.exit(close(con), add = TRUE)
+con <- file(summary_path, "w")
+on.exit(close(con), add = TRUE)
 cat("# Test harness summary\n\n", file = con)
-cat(sprintf("Generated: %s (jobs %d, wall %.0f s)\n\n", Sys.time(), opt$jobs, t_wall), file = con)
+cat(
+  sprintf(
+    "Generated: %s (jobs %d, wall %.0f s)\n\n",
+    Sys.time(),
+    opt$jobs,
+    t_wall
+  ),
+  file = con
+)
 cat("| test | status | hard_fail | result | elapsed_s |\n", file = con)
 cat("|------|--------|-----------|--------|-----------|\n", file = con)
 hard_failed <- FALSE
 for (nm in names(results)) {
   r <- results[[nm]]
   res <- if (r$status == 0) "PASS" else "FAIL"
-  if (r$status != 0 && r$hard_fail) hard_failed <- TRUE
-  cat(sprintf("| %s | %d | %s | %s | %.1f |\n",
-              nm, r$status, r$hard_fail, res, r$elapsed), file = con)
+  if (r$status != 0 && r$hard_fail) {
+    hard_failed <- TRUE
+  }
+  cat(
+    sprintf(
+      "| %s | %d | %s | %s | %.1f |\n",
+      nm,
+      r$status,
+      r$hard_fail,
+      res,
+      r$elapsed
+    ),
+    file = con
+  )
 }
 
 if (hard_failed) {

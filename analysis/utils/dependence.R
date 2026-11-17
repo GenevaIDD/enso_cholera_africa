@@ -1,19 +1,18 @@
-# dependence.R — size <-> duration posterior-dependence helpers (Phase 5)
+# dependence.R — size <-> duration posterior-dependence helpers for
+#   05_fit_postprocess_dependence.R.
 #
-# Companion library for analysis/05_fit_postprocess_dependence.R. Recipe:
+# Provides:
+#   pit_size_nb()                randomized (Dunn-Smyth) PIT of the size NB
+#   pit_duration_episode()       censoring-aware chained-hazard PIT, per episode
+#   paired_kendall_tau()         Kendall's tau of paired PITs, per draw
+#   re_intercept_correlation()   ADM1-level intercept correlation
 #
-#   1. Randomized (Dunn-Smyth) PIT for the size fit's NB response, per episode.
-#   2. Randomized, right-censoring-aware chained-hazard PIT for the duration
-#      fit, per episode (one PIT per episode, computed from its LAST active-
-#      month row).
-#   3. Kendall's tau between the two paired PIT sequences, computed PER
-#      POSTERIOR DRAW (not on posterior means) so the result is a distribution
-#      over tau rather than a point estimate.
-#   4. A schema-agnostic ADM1-level intercept correlation helper, for the
-#      decomposition step (do episode-level PITs correlate because ADM1s that
-#      run big also run long?).
-#
-# Design decisions are documented inline at the point they are made.
+# Details:
+#   One PIT per episode (duration: from its LAST active-month row). Tau is
+#   computed PER POSTERIOR DRAW (not on posterior means), so the result is a
+#   distribution over tau. The ADM1 intercept correlation is the decomposition
+#   step: do episode PITs correlate because ADM1s that run big also run long?
+#   Design decisions are documented inline where they are made.
 
 # ---------------------------------------------------------------------------
 # 1. Size-side PIT (negative-binomial response, one row per episode)
@@ -28,7 +27,7 @@
 #' correlate the PIT noise across draws and bias the propagated tau toward 0.
 #'
 #' @param fit brms fit (size / brms / negbinomial backend).
-#' @param dat the exact data frame `fit` was trained on (e.g. `readSizeData(opt)`
+#' @param dat the exact data frame `fit` was trained on (e.g. `read_size_data(opt)`
 #'   re-run against the same config) — supplies `episode_id`, which is not a
 #'   covariate and so is never retained in `fit$data`. Row order must match
 #'   `fit$data` 1:1 (asserted below); size fitting drops no rows via NA in
@@ -39,23 +38,31 @@ pit_size_nb <- function(fit, dat, response_var = "suspected_cases") {
   n_obs_dat <- nrow(dat)
   n_obs_fit <- nrow(fit$data)
   if (n_obs_dat != n_obs_fit) {
-    stop(sprintf(
-      "pit_size_nb: nrow(dat) = %d != nrow(fit$data) = %d -- `dat` is not the ",
-      n_obs_dat, n_obs_fit),
+    stop(
+      sprintf(
+        "pit_size_nb: nrow(dat) = %d != nrow(fit$data) = %d -- `dat` is not the ",
+        n_obs_dat,
+        n_obs_fit
+      ),
       "exact training data (brms silently dropped NA rows?). Re-derive `dat` ",
       "from the same config used to produce `fit` and re-check for NAs.",
-      call. = FALSE)
+      call. = FALSE
+    )
   }
   if (!"episode_id" %in% names(dat)) {
-    stop("pit_size_nb: `dat` has no `episode_id` column -- readSizeData() ",
-         "must be run on a repo state that includes the Phase-5 episode_id add.",
-         call. = FALSE)
+    stop(
+      "pit_size_nb: `dat` has no `episode_id` column -- read_size_data() ",
+      "must be run on a repo state that includes the Phase-5 episode_id add.",
+      call. = FALSE
+    )
   }
 
-  mu  <- brms::posterior_epred(fit)                       # n_draws x n_obs, response scale (offsets included)
-  phi <- brms::posterior_epred(fit, dpar = "shape")        # n_draws x n_obs (replicated across cols if phi_re == "constant")
-  y   <- dat[[response_var]]
-  if (is.null(y)) stop("pit_size_nb: response_var '", response_var, "' not found in `dat`.")
+  mu <- brms::posterior_epred(fit) # n_draws x n_obs, response scale (offsets included)
+  phi <- brms::posterior_epred(fit, dpar = "shape") # n_draws x n_obs (replicated across cols if phi_re == "constant")
+  y <- dat[[response_var]]
+  if (is.null(y)) {
+    stop("pit_size_nb: response_var '", response_var, "' not found in `dat`.")
+  }
 
   list(u = .pit_nb_from_draws(mu, phi, y), episode_id = dat$episode_id)
 }
@@ -74,14 +81,17 @@ pit_size_nb <- function(fit, dat, response_var = "suspected_cases") {
 #' @return matrix [n_draws x n_obs] of PIT values in (0, 1).
 .pit_nb_from_draws <- function(mu, phi, y) {
   n_draws <- nrow(mu)
-  n_obs   <- ncol(mu)
-  if (is.null(dim(phi))) phi <- matrix(phi, nrow = n_draws, ncol = n_obs)
+  n_obs <- ncol(mu)
+  if (is.null(dim(phi))) {
+    phi <- matrix(phi, nrow = n_draws, ncol = n_obs)
+  }
   y_mat <- matrix(y, nrow = n_draws, ncol = n_obs, byrow = TRUE)
 
   lower <- stats::pnbinom(y_mat - 1, size = phi, mu = mu)
-  upper <- stats::pnbinom(y_mat,     size = phi, mu = mu)
+  upper <- stats::pnbinom(y_mat, size = phi, mu = mu)
 
-  lower + matrix(stats::runif(n_draws * n_obs), n_draws, n_obs) * (upper - lower)
+  lower +
+    matrix(stats::runif(n_draws * n_obs), n_draws, n_obs) * (upper - lower)
 }
 
 # ---------------------------------------------------------------------------
@@ -130,24 +140,33 @@ pit_size_nb <- function(fit, dat, response_var = "suspected_cases") {
 #'   the episode_id vector).
 pit_duration_episode <- function(fit, dat) {
   if ("climate_missing" %in% names(dat)) {
-    dat <- dat[which(!dat$climate_missing), , drop = FALSE]  # keep iff FALSE (NA treated as "not kept")
+    dat <- dat[which(!dat$climate_missing), , drop = FALSE] # keep iff FALSE (NA treated as "not kept")
   }
   n_obs_dat <- nrow(dat)
   n_obs_fit <- nrow(fit$data)
   if (n_obs_dat != n_obs_fit) {
-    stop(sprintf(
-      "pit_duration_episode: nrow(dat) = %d != nrow(fit$data) = %d after ",
-      n_obs_dat, n_obs_fit),
+    stop(
+      sprintf(
+        "pit_duration_episode: nrow(dat) = %d != nrow(fit$data) = %d after ",
+        n_obs_dat,
+        n_obs_fit
+      ),
       "dropping climate_missing rows -- `dat` is not the exact training data. ",
       "Re-derive `dat` from the same config used to produce `fit`.",
-      call. = FALSE)
+      call. = FALSE
+    )
   }
   need <- c("episode_id", "mso", "ended")
   miss <- setdiff(need, names(dat))
-  if (length(miss)) stop("pit_duration_episode: `dat` missing column(s): ",
-                         paste(miss, collapse = ", "), call. = FALSE)
+  if (length(miss)) {
+    stop(
+      "pit_duration_episode: `dat` missing column(s): ",
+      paste(miss, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
-  lambda <- brms::posterior_epred(fit)          # n_draws x n_rows, response scale (offset included)
+  lambda <- brms::posterior_epred(fit) # n_draws x n_rows, response scale (offset included)
 
   .pit_duration_from_draws(lambda, dat$episode_id, dat$mso, dat$ended)
 }
@@ -170,10 +189,10 @@ pit_duration_episode <- function(fit, dat) {
 #' @return list(u = matrix [n_draws x n_episodes], episode_id = chr vector,
 #'   ended = integer vector), aligned to the (sorted, deduplicated) episode order.
 .pit_duration_from_draws <- function(lambda, episode_id, mso, ended) {
-  ord        <- order(episode_id, mso)
+  ord <- order(episode_id, mso)
   lambda_ord <- lambda[, ord, drop = FALSE]
   episode_id_ord <- episode_id[ord]
-  ended_ord      <- ended[ord]
+  ended_ord <- ended[ord]
 
   n_draws <- nrow(lambda_ord)
 
@@ -182,30 +201,30 @@ pit_duration_episode <- function(fit, dat) {
   # "cumsum through row 0"). This lets any group's within-episode cumsum be
   # read off as a difference of two G0 lookups -- no per-episode loop, no
   # per-row re-basing.
-  G  <- t(apply(-lambda_ord, 1, cumsum))        # n_draws x n_rows
-  G0 <- cbind(0, G)                              # n_draws x (n_rows + 1)
+  G <- t(apply(-lambda_ord, 1, cumsum)) # n_draws x n_rows
+  G0 <- cbind(0, G) # n_draws x (n_rows + 1)
 
-  rl        <- rle(episode_id_ord)
-  ep_ids    <- rl$values
+  rl <- rle(episode_id_ord)
+  ep_ids <- rl$values
   grp_sizes <- rl$lengths
-  last_idx  <- cumsum(grp_sizes)                 # position of each episode's last row
-  first_idx <- last_idx - grp_sizes + 1L          # position of each episode's first row
+  last_idx <- cumsum(grp_sizes) # position of each episode's last row
+  first_idx <- last_idx - grp_sizes + 1L # position of each episode's first row
 
-  W_end   <- G0[, last_idx + 1L,  drop = FALSE] - G0[, first_idx, drop = FALSE]  # within-episode cumsum through last row
+  W_end <- G0[, last_idx + 1L, drop = FALSE] - G0[, first_idx, drop = FALSE] # within-episode cumsum through last row
   lambda_last <- lambda_ord[, last_idx, drop = FALSE]
-  W_start <- W_end + lambda_last                 # within-episode cumsum through second-to-last row
+  W_start <- W_end + lambda_last # within-episode cumsum through second-to-last row
 
-  S_end   <- exp(W_end)
+  S_end <- exp(W_end)
   S_start <- exp(W_start)
-  F_start <- 1 - S_start   # F(k-1)
-  F_end   <- 1 - S_end     # F(k)
+  F_start <- 1 - S_start # F(k-1)
+  F_end <- 1 - S_end # F(k)
 
-  ended_last <- ended_ord[last_idx]               # 1 = uncensored event at last row, 0 = censored
-  n_ep       <- length(ep_ids)
-  ended_mat  <- matrix(ended_last, nrow = n_draws, ncol = n_ep, byrow = TRUE)
+  ended_last <- ended_ord[last_idx] # 1 = uncensored event at last row, 0 = censored
+  n_ep <- length(ep_ids)
+  ended_mat <- matrix(ended_last, nrow = n_draws, ncol = n_ep, byrow = TRUE)
 
   lo <- ifelse(ended_mat == 1, F_start, F_end)
-  hi <- ifelse(ended_mat == 1, F_end,   1)
+  hi <- ifelse(ended_mat == 1, F_end, 1)
 
   u <- lo + matrix(stats::runif(n_draws * n_ep), n_draws, n_ep) * (hi - lo)
 
@@ -247,9 +266,14 @@ pit_duration_episode <- function(fit, dat) {
 paired_kendall_tau <- function(pit_a, pit_b, group = NULL, min_n = 5L) {
   common <- intersect(pit_a$episode_id, pit_b$episode_id)
   if (length(common) < min_n) {
-    stop("paired_kendall_tau: only ", length(common),
-         " episode(s) in common between the two PIT sets (need >= ", min_n, ").",
-         call. = FALSE)
+    stop(
+      "paired_kendall_tau: only ",
+      length(common),
+      " episode(s) in common between the two PIT sets (need >= ",
+      min_n,
+      ").",
+      call. = FALSE
+    )
   }
   idx_a <- match(common, pit_a$episode_id)
   idx_b <- match(common, pit_b$episode_id)
@@ -259,15 +283,19 @@ paired_kendall_tau <- function(pit_a, pit_b, group = NULL, min_n = 5L) {
   .tau_summary <- function(cols_a, cols_b) {
     ua <- pit_a$u[seq_len(n_draws), cols_a, drop = FALSE]
     ub <- pit_b$u[seq_len(n_draws), cols_b, drop = FALSE]
-    tau_draws <- vapply(seq_len(n_draws), function(d) {
-      stats::cor(ua[d, ], ub[d, ], method = "kendall")
-    }, numeric(1))
+    tau_draws <- vapply(
+      seq_len(n_draws),
+      function(d) {
+        stats::cor(ua[d, ], ub[d, ], method = "kendall")
+      },
+      numeric(1)
+    )
     list(
-      tau_draws  = tau_draws,
-      mean       = mean(tau_draws, na.rm = TRUE),
-      sd         = stats::sd(tau_draws, na.rm = TRUE),
-      q025       = unname(stats::quantile(tau_draws, 0.025, na.rm = TRUE)),
-      q975       = unname(stats::quantile(tau_draws, 0.975, na.rm = TRUE)),
+      tau_draws = tau_draws,
+      mean = mean(tau_draws, na.rm = TRUE),
+      sd = stats::sd(tau_draws, na.rm = TRUE),
+      q025 = unname(stats::quantile(tau_draws, 0.025, na.rm = TRUE)),
+      q975 = unname(stats::quantile(tau_draws, 0.975, na.rm = TRUE)),
       n_episodes = length(cols_a)
     )
   }
@@ -278,15 +306,22 @@ paired_kendall_tau <- function(pit_a, pit_b, group = NULL, min_n = 5L) {
   if (!is.null(group)) {
     grp_labels <- unname(group[common])
     if (any(is.na(grp_labels))) {
-      message(sprintf("paired_kendall_tau: %d/%d common episode(s) have no group label; excluded from by_group.",
-                      sum(is.na(grp_labels)), length(common)))
+      message(sprintf(
+        "paired_kendall_tau: %d/%d common episode(s) have no group label; excluded from by_group.",
+        sum(is.na(grp_labels)),
+        length(common)
+      ))
     }
     by_group <- list()
     for (g in sort(unique(stats::na.omit(grp_labels)))) {
       sel <- which(grp_labels == g)
       if (length(sel) < min_n) {
-        message(sprintf("paired_kendall_tau: group '%s' has only %d paired episode(s) (< min_n = %d); skipped.",
-                        g, length(sel), min_n))
+        message(sprintf(
+          "paired_kendall_tau: group '%s' has only %d paired episode(s) (< min_n = %d); skipped.",
+          g,
+          length(sel),
+          min_n
+        ))
         next
       }
       by_group[[g]] <- .tau_summary(idx_a[sel], idx_b[sel])
@@ -325,17 +360,32 @@ re_intercept_correlation <- function(adm1_a, adm1_b, method = "pearson") {
   need <- c("country", "adm1_unit", "value")
   miss_a <- setdiff(need, names(adm1_a))
   miss_b <- setdiff(need, names(adm1_b))
-  if (length(miss_a)) stop("re_intercept_correlation: adm1_a missing: ", paste(miss_a, collapse = ", "))
-  if (length(miss_b)) stop("re_intercept_correlation: adm1_b missing: ", paste(miss_b, collapse = ", "))
+  if (length(miss_a)) {
+    stop(
+      "re_intercept_correlation: adm1_a missing: ",
+      paste(miss_a, collapse = ", ")
+    )
+  }
+  if (length(miss_b)) {
+    stop(
+      "re_intercept_correlation: adm1_b missing: ",
+      paste(miss_b, collapse = ", ")
+    )
+  }
 
   joined <- merge(
-    adm1_a[, need], adm1_b[, need],
-    by = c("country", "adm1_unit"), suffixes = c("_a", "_b")
+    adm1_a[, need],
+    adm1_b[, need],
+    by = c("country", "adm1_unit"),
+    suffixes = c("_a", "_b")
   )
 
   if (nrow(joined) < 3L) {
-    warning("re_intercept_correlation: only ", nrow(joined),
-            " ADM1 unit(s) in common -- correlation is unreliable.")
+    warning(
+      "re_intercept_correlation: only ",
+      nrow(joined),
+      " ADM1 unit(s) in common -- correlation is unreliable."
+    )
   }
 
   r <- if (nrow(joined) >= 2L) {

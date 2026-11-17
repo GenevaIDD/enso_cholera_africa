@@ -1,16 +1,19 @@
-# 00_ingest_outbreakextractr.R — converter: OutbreakExtractR stage2 outputs → legacy format
+# 00_ingest_outbreakextractr.R — convert OutbreakExtractR stage-2 outputs to
+#   the legacy outbreak files.
 #
-# Reshapes combined_outbreaks_cholera.csv (+ stage1_geo_*.geojson) produced by
-# the OutbreakExtractR HPC pipeline into the three legacy files that
-# 01_preprocess_outbreaks.R and 02_preprocess_climate.R already consume:
-#   - time_series_preoutbreak_extraction.rds
-#   - time_series_outbreak_extraction.rds
-#   - outbreak_shapefiles.rds
+# Usage:
+#   Rscript analysis/00_ingest_outbreakextractr.R
+#   Rscript analysis/00_ingest_outbreakextractr.R --indir <dir> --outdir <dir>
 #
-# Run BEFORE 01_preprocess_outbreaks.R.
+# Details:
+#   Reshapes combined_outbreaks_cholera.csv (+ stage1_geo_*.geojson) from the
+#   OutbreakExtractR HPC pipeline into the three files that
+#   01_preprocess_outbreaks.R and 02_preprocess_climate.R consume:
+#   time_series_preoutbreak_extraction.rds, time_series_outbreak_extraction.rds,
+#   outbreak_shapefiles.rds. --indir defaults to default_outbreak_data_dir(),
+#   --outdir to --indir. Run before 01_preprocess_outbreaks.R.
 
-
-# Preamble ----------------------------------------------------------------
+# 1. Preamble ------------------------------------------------------------------
 
 library(dplyr)
 library(stringr)
@@ -21,21 +24,22 @@ library(sf)
 library(optparse)
 
 source("analysis/utils/base.R")
-source("analysis/utils/paths.R")        # defaultOutbreakDataDir()
-source("analysis/utils/provenance.R")   # writeStepCounts() (processing cascade, table S1)
+source("analysis/utils/paths.R") # default_outbreak_data_dir()
+source("analysis/utils/provenance.R") # write_step_counts() (processing cascade, table S1)
 
+# 2. Options -------------------------------------------------------------------
 option_list <- list(
   make_option(
     c("--indir"),
-    default = defaultOutbreakDataDir(),   # utils/paths.R, the one data vintage
-    type    = "character",
-    help    = "Folder containing combined_outbreaks_cholera.csv and stage1_geo/ sub-folder [default: %default]"
+    default = default_outbreak_data_dir(), # utils/paths.R, the one data vintage
+    type = "character",
+    help = "Folder containing combined_outbreaks_cholera.csv and stage1_geo/ sub-folder [default: %default]"
   ),
   make_option(
     c("--outdir"),
     default = NULL,
-    type    = "character",
-    help    = "Output folder for legacy RDS files [default: same as --indir]"
+    type = "character",
+    help = "Output folder for legacy RDS files [default: same as --indir]"
   )
 )
 
@@ -48,46 +52,79 @@ if (is.null(opt$outdir)) {
 stopifnot(dir.exists(opt$indir))
 dir.create(opt$outdir, showWarnings = FALSE, recursive = TRUE)
 
-cat("---- indir :", opt$indir,  "\n")
+cat("---- indir :", opt$indir, "\n")
 cat("---- outdir:", opt$outdir, "\n")
 
-
-# Legacy columns expected by 01_preprocess_outbreaks.R ----------------------
+# 3. Legacy columns expected by 01_preprocess_outbreaks.R ----------------------
 
 # Population provenance columns: allow downstream QC/gates to distinguish
 # pop_source, duplicate-geometry clusters, and the UN-adjustment inputs when the
 # extraction emits them.
 POP_PROVENANCE_COLS <- c(
-  "pop_source", "pop_geom_dup_n", "pop_geom_dup_class",
-  "pop_year_obs", "pop_year_raster", "pop_natl_ref", "adj_factor_flag"
+  "pop_source",
+  "pop_geom_dup_n",
+  "pop_geom_dup_class",
+  "pop_year_obs",
+  "pop_year_raster",
+  "pop_natl_ref",
+  "adj_factor_flag"
 )
 
 PREOUTBREAK_COLS <- c(
-  "location", "TL", "TR", "sCh", "cCh", "deaths", "epiweek",
-  "start_weekday", "spatial_scale", "composite_loc", "date_range",
-  "who_region", "country", "admin1", "admin2", "admin3", "admin4",
-  "admin5", "phantom", "original_location_name",
-  "observation_collection_id", "location_period_id", "pop",
-  "adj_factors", POP_PROVENANCE_COLS
+  "location",
+  "TL",
+  "TR",
+  "sCh",
+  "cCh",
+  "deaths",
+  "epiweek",
+  "start_weekday",
+  "spatial_scale",
+  "composite_loc",
+  "date_range",
+  "who_region",
+  "country",
+  "admin1",
+  "admin2",
+  "admin3",
+  "admin4",
+  "admin5",
+  "phantom",
+  "original_location_name",
+  "observation_collection_id",
+  "location_period_id",
+  "pop",
+  "adj_factors",
+  POP_PROVENANCE_COLS
 )
 
 # Columns consumed by 01_preprocess_outbreaks.R from the outbreak file
 OUTBREAK_COLS <- c(
-  "location", "outbreak_number", "location_period_id", "country",
-  "TL", "TR", "sCh", "cCh", "pop", "threshold", POP_PROVENANCE_COLS
+  "location",
+  "outbreak_number",
+  "location_period_id",
+  "country",
+  "TL",
+  "TR",
+  "sCh",
+  "cCh",
+  "pop",
+  "threshold",
+  POP_PROVENANCE_COLS
 )
 
-
-# 1. Read combined stage2 CSV ---------------------------------------------
+# 4a. Read combined stage2 CSV -------------------------------------------------
 
 csv_path <- file.path(opt$indir, "combined_outbreaks_cholera.csv")
 stopifnot(file.exists(csv_path))
 
 cat("---- Reading", csv_path, "\n")
 
-raw <- readr::read_csv(csv_path,
-                       col_types = readr::cols(location_period_id = readr::col_character()),
-                       show_col_types = FALSE) %>%
+raw <- readr::read_csv(
+  csv_path,
+  col_types = readr::cols(location_period_id = readr::col_character()),
+  show_col_types = FALSE
+) %>%
   mutate(
     TL = as.Date(TL),
     TR = as.Date(TR)
@@ -96,8 +133,7 @@ raw <- readr::read_csv(csv_path,
 cat("     Rows read:", nrow(raw), "\n")
 n_rows_read <- nrow(raw)
 
-
-# 2. Filter to AFR + EMR --------------------------------------------------
+# 4b. Filter to AFR + EMR ------------------------------------------------------
 
 raw <- raw %>%
   filter(who_region %in% c("AFR", "EMR"))
@@ -105,8 +141,7 @@ raw <- raw %>%
 cat("     Rows after AFR/EMR filter:", nrow(raw), "\n")
 n_rows_afr_emr <- nrow(raw)
 
-
-# 3. Country-scale location / country fix ---------------------------------
+# 4c. Country-scale location / country fix -------------------------------------
 # Country-level rows carry "AFR::AGO.Angola" style names.  Apply the Step2
 # fix: strip to the code prefix only, and set country to country_iso3 for all.
 
@@ -121,21 +156,18 @@ raw <- raw %>%
     country = str_extract(country_iso3, "^[A-Z]{3}")
   )
 
-
-# 4. Rename adj_factor → adj_factors (legacy column name) ----------------
+# 4d. Rename adj_factor → adj_factors (legacy column name) ---------------------
 
 if ("adj_factor" %in% names(raw) && !("adj_factors" %in% names(raw))) {
   raw <- raw %>% rename(adj_factors = adj_factor)
 }
 
-
-# 5. Ensure location_period_id is character (legacy expectation) ----------
+# 4e. Ensure location_period_id is character (legacy expectation) --------------
 
 raw <- raw %>%
   mutate(location_period_id = as.character(location_period_id))
 
-
-# 6. Preoutbreak file -----------------------------------------------------
+# 5. Preoutbreak file ----------------------------------------------------------
 
 cat("---- Building time_series_preoutbreak_extraction.rds\n")
 
@@ -150,7 +182,11 @@ preoutbreak <- raw %>%
   {
     missing <- setdiff(PREOUTBREAK_COLS, names(.))
     if (length(missing) > 0) {
-      cat("  Note: columns absent in source (will be NA):", paste(missing, collapse = ", "), "\n")
+      cat(
+        "  Note: columns absent in source (will be NA):",
+        paste(missing, collapse = ", "),
+        "\n"
+      )
       for (col in missing) {
         .[[col]] <- NA
       }
@@ -161,13 +197,18 @@ preoutbreak <- raw %>%
 
 cat("     Rows:", nrow(preoutbreak), " | Cols:", ncol(preoutbreak), "\n")
 
-saveRDS(preoutbreak,
-        file = file.path(opt$outdir, "time_series_preoutbreak_extraction.rds"))
+saveRDS(
+  preoutbreak,
+  file = file.path(opt$outdir, "time_series_preoutbreak_extraction.rds")
+)
 
-cat("     Saved →", file.path(opt$outdir, "time_series_preoutbreak_extraction.rds"), "\n")
+cat(
+  "     Saved →",
+  file.path(opt$outdir, "time_series_preoutbreak_extraction.rds"),
+  "\n"
+)
 
-
-# 7. Outbreak file --------------------------------------------------------
+# 6. Outbreak file -------------------------------------------------------------
 
 cat("---- Building time_series_outbreak_extraction.rds\n")
 
@@ -177,7 +218,11 @@ outbreaks <- raw %>%
   {
     missing <- setdiff(OUTBREAK_COLS, names(.))
     if (length(missing) > 0) {
-      cat("  Note: columns absent in source (will be NA):", paste(missing, collapse = ", "), "\n")
+      cat(
+        "  Note: columns absent in source (will be NA):",
+        paste(missing, collapse = ", "),
+        "\n"
+      )
       for (col in missing) {
         .[[col]] <- NA
       }
@@ -188,27 +233,39 @@ outbreaks <- raw %>%
 
 cat("     Rows:", nrow(outbreaks), " | Cols:", ncol(outbreaks), "\n")
 
-saveRDS(outbreaks,
-        file = file.path(opt$outdir, "time_series_outbreak_extraction.rds"))
+saveRDS(
+  outbreaks,
+  file = file.path(opt$outdir, "time_series_outbreak_extraction.rds")
+)
 
-cat("     Saved →", file.path(opt$outdir, "time_series_outbreak_extraction.rds"), "\n")
+cat(
+  "     Saved →",
+  file.path(opt$outdir, "time_series_outbreak_extraction.rds"),
+  "\n"
+)
 
-
-# 8. Shapefile file -------------------------------------------------------
+# 7. Shapefile file ------------------------------------------------------------
 
 cat("---- Building outbreak_shapefiles.rds\n")
 
 geo_dir <- file.path(opt$indir, "stage1_geo")
 
 if (dir.exists(geo_dir)) {
-  geojson_files <- list.files(geo_dir, pattern = "stage1_geo_.*\\.geojson$",
-                               full.names = TRUE)
+  geojson_files <- list.files(
+    geo_dir,
+    pattern = "stage1_geo_.*\\.geojson$",
+    full.names = TRUE
+  )
   # Restrict to AFR/EMR files only — non-AFR/EMR LPs are not in the outbreak
   # data after the who_region filter, so their geometries are never used.
   geojson_files <- geojson_files[
     grepl("stage1_geo_(AFR|EMR)_", basename(geojson_files))
   ]
-  cat("     Found", length(geojson_files), "AFR/EMR stage1_geo_*.geojson files\n")
+  cat(
+    "     Found",
+    length(geojson_files),
+    "AFR/EMR stage1_geo_*.geojson files\n"
+  )
 
   if (length(geojson_files) == 0L) {
     stop("No AFR/EMR stage1_geo_*.geojson files found in ", geo_dir)
@@ -231,7 +288,9 @@ if (dir.exists(geo_dir)) {
     # First row per LP within the file: the global first-row dedup below keeps
     # the same row, and the duplicates never travel back to the parent.
     sf::st_read(f, quiet = TRUE) %>%
-      dplyr::transmute(location_period_id = as.character(location_period_id)) %>%
+      dplyr::transmute(
+        location_period_id = as.character(location_period_id)
+      ) %>%
       dplyr::filter(!duplicated(location_period_id))
   }) %>%
     # Filter to unique location periods FIRST, then validate: each LP maps to
@@ -256,13 +315,13 @@ if (dir.exists(geo_dir)) {
     dplyr::mutate(lctn_pr = as.character(location_period_id)) %>%
     dplyr::select(lctn_pr, area_per_1km2, geometry)
   plan(sequential)
-
 } else {
   # Fallback: accept a single pre-merged gpkg named stage1_geo.gpkg
   gpkg_path <- file.path(opt$indir, "stage1_geo.gpkg")
   if (!file.exists(gpkg_path)) {
     stop(
-      "No stage1_geo/ sub-folder and no stage1_geo.gpkg found in ", opt$indir,
+      "No stage1_geo/ sub-folder and no stage1_geo.gpkg found in ",
+      opt$indir,
       "\nStage geometry into one of those forms."
     )
   }
@@ -274,7 +333,7 @@ if (dir.exists(geo_dir)) {
     dplyr::ungroup() %>%
     st_make_valid() %>%
     mutate(
-      lctn_pr       = as.character(location_period_id),
+      lctn_pr = as.character(location_period_id),
       area_per_1km2 = as.numeric(st_area(geometry)) / 1e6
     ) %>%
     select(lctn_pr, area_per_1km2, geometry)
@@ -282,28 +341,35 @@ if (dir.exists(geo_dir)) {
 
 cat("     LPs in shapefile:", nrow(ob_shp), "\n")
 
-saveRDS(ob_shp,
-        file = file.path(opt$outdir, "outbreak_shapefiles.rds"))
+saveRDS(ob_shp, file = file.path(opt$outdir, "outbreak_shapefiles.rds"))
 
 cat("     Saved →", file.path(opt$outdir, "outbreak_shapefiles.rds"), "\n")
 
+# 8. Processing cascade (table S1) ---------------------------------------------
 # Processing cascade (table S1): counts at each output of this step. Distinct
 # counts only where the column exists in the source.
 n_dist <- function(d, ...) {
   cols <- c(...)
-  if (!all(cols %in% names(d))) return(NA_integer_)
+  if (!all(cols %in% names(d))) {
+    return(NA_integer_)
+  }
   nrow(dplyr::distinct(d, dplyr::across(dplyr::all_of(cols))))
 }
-writeStepCounts("00_ingest_outbreakextractr", list(
-  n_rows_read            = n_rows_read,
-  n_rows_afr_emr         = n_rows_afr_emr,
-  n_rows_preoutbreak     = nrow(preoutbreak),
-  n_lp_preoutbreak       = n_dist(preoutbreak, "location_period_id"),
-  n_countries_preoutbreak = n_dist(preoutbreak, "country"),
-  n_rows_outbreak        = nrow(outbreaks),
-  n_outbreaks            = n_dist(outbreaks, "location", "outbreak_number"),
-  n_lp_outbreak          = n_dist(outbreaks, "location_period_id"),
-  n_countries_outbreak   = n_dist(outbreaks, "country"),
-  n_lp_shapefile         = nrow(ob_shp)), indir = opt$indir)
+write_step_counts(
+  "00_ingest_outbreakextractr",
+  list(
+    n_rows_read = n_rows_read,
+    n_rows_afr_emr = n_rows_afr_emr,
+    n_rows_preoutbreak = nrow(preoutbreak),
+    n_lp_preoutbreak = n_dist(preoutbreak, "location_period_id"),
+    n_countries_preoutbreak = n_dist(preoutbreak, "country"),
+    n_rows_outbreak = nrow(outbreaks),
+    n_outbreaks = n_dist(outbreaks, "location", "outbreak_number"),
+    n_lp_outbreak = n_dist(outbreaks, "location_period_id"),
+    n_countries_outbreak = n_dist(outbreaks, "country"),
+    n_lp_shapefile = nrow(ob_shp)
+  ),
+  indir = opt$indir
+)
 
 cat("---- Done. Legacy files written to", opt$outdir, "\n")

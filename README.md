@@ -153,6 +153,22 @@ cluster; the results phase (09-11) `R/4.3.2` with GDAL 3.7.1. Each fit records t
 versions of brms, rstan, cmdstanr and CmdStan it ran with, and phase 09 collects
 them (`report_software`).
 
+## Code style
+
+- Functions and variables are `snake_case`.
+- R code is formatted with [air](https://posit-dev.github.io/air/) at 80
+  columns (settings in `air.toml`; `analysis/scratchpads/` excluded):
+  `bash analysis/bash/tools/style.sh --check` reports, `--fix` rewrites.
+- Every `.R` file opens with a header: `# <file>.R — <what it does>`, then
+  `Usage:` (runnable scripts, tools, tests) or `Provides:` (sourced `utils/`
+  modules), `Details:` (at most 8 lines) and optionally `See:`, separated by a
+  bare `#`. A test's description starts with its gate class (`HARD:` / `SOFT:`).
+- Numbered pipeline scripts are split into numbered sections
+  (`# 1. Preamble ----`, which holds every package and utils load, then one
+  section per step).
+- Both are HARD gates: `analysis/tests/test_style_air.R` (skipped when air is
+  not installed) and `analysis/tests/test_script_header_layout.R`.
+
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE).

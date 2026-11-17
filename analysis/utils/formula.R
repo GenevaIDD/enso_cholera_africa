@@ -1,30 +1,27 @@
-# utils/formula.R — model-term assembly for all four tracks
+# formula.R — model-term assembly (fixed, random, crossbasis and offset terms)
+#   for every track.
 #
-# Sourced-only library (no numeric prefix; see analysis/utils/README.md §5).
-#
-# Public entry points:
-#   build_formula_terms()                         occurrence (brms)
-#   build_size_formula_parts() / build_size_formula()
-#   build_duration_formula_parts() / build_duration_formula()
-#   build_monthly_formula_parts() / build_monthly_formula()
+# Provides:
+#   build_formula_terms()                          occurrence (brms)
+#   build_duration_formula_parts(), build_duration_formula()
+#   build_monthly_formula_parts(), build_monthly_formula()
+#   build_size_formula_parts(), build_size_formula()
+#   integrate_cb_terms()                           crossbasis terms
 #   re_group_by_level(), nested_slope_re_terms(), filter_re_terms_for_data(),
-#   filter_fixed_factor_terms_for_data()          RE/fixed-term helpers (also used by the _cb fit scripts)
-#   validate_size_options(), resolve_slopes()     slope/convention resolution
-#   .OFFSET_SPEC / .offset_terms() / .offset_spec() / .anchor_gate_on()   offsets + base-rate anchor gate
-#   .occ_basehaz()                                occurrence basehaz label (also read by utils/priors.R)
+#   filter_fixed_factor_terms_for_data()           RE / fixed-term helpers
+#   validate_size_options(), resolve_slopes()      slope / convention resolution
 #
-# Dependencies (caller-sourced; this module never source()s another):
-#   base.R   (`%||%`)
-#   paths.R  call-time only: build_formula_terms() -> nbrCovariateName();
-#            .leaf_scope_of() -> .leafScopeOf() (only when the leaf scope is not "all")
-#   config.R call-time only: .build_count_track_parts() -> get_default_options()
-#            (only when the size / monthly block has no backend)
-# Golden gate: analysis/tests/test_formula_builder_golden.R.
+# Details:
+#   Internal but shared: .OFFSET_SPEC / .offset_terms() / .anchor_gate_on()
+#   (offsets + base-rate anchor gate), .occ_basehaz() (also read by priors.R).
+#   Callers source base.R; at call time paths.R (nbr_covariate_name(),
+#   .leaf_scope_tag() when the leaf scope is not "all") and config.R
+#   (get_default_options() when a size / monthly block has no backend).
+#   Golden gate: analysis/tests/test_formula_builder_golden.R.
 
 # ---------------------------------------------------------------------------
 # Occurrence basehaz label (shared with utils/priors.R)
 # ---------------------------------------------------------------------------
-
 
 #' .occ_basehaz
 #'
@@ -42,7 +39,7 @@
 #' Deliberately NOT folded in here:
 #'   - `.validate_basehaz()` (line ~95) reads the RAW value per backend and
 #'     needs the un-normalised string for its error messages.
-#'   - `makeRunFile()`'s basehaz token (utils/paths.R:228-235) tokenises the RAW
+#'   - `make_run_file()`'s basehaz token (utils/paths.R:228-235) tokenises the RAW
 #'     value: "seasonal" and "cyclic" are the same model but must stay distinct
 #'     artefact names, since configs in the repo use both spellings.
 #'   - build_formula_terms()'s / build_formula_terms_legacy()'s
@@ -70,10 +67,11 @@
 #' @param ms_basis the M-spline basis matrix (only read when basehaz == "ms")
 #' @return character(1) formula fragment
 .occ_baseline_block <- function(basehaz, ms_basis = NULL) {
-  switch(basehaz,
+  switch(
+    basehaz,
     factor = "factor(months)",
     cyclic = "s(t_start_seas, bs = 'cc', k = 8)",
-    ms     = paste(colnames(ms_basis), collapse = " + ")
+    ms = paste(colnames(ms_basis), collapse = " + ")
   )
 }
 
@@ -96,18 +94,29 @@
 #' @param drop_region TRUE in grouping mode (slopes collapse to country/ADM1)
 #' @param linear_vars dlnm variables whose columns enter the linear predictor
 #' @return `terms` with fixed_terms / re_terms updated
-integrate_cb_terms <- function(terms, dlnm_cfg, cb_cols, cb_meta, re_sep,
-                               drop_region, linear_vars = names(cb_meta)) {
-  if (length(cb_cols) == 0) return(terms)
+integrate_cb_terms <- function(
+  terms,
+  dlnm_cfg,
+  cb_cols,
+  cb_meta,
+  re_sep,
+  drop_region,
+  linear_vars = names(cb_meta)
+) {
+  if (length(cb_cols) == 0) {
+    return(terms)
+  }
   dlnm_defaults <- dlnm_cfg$defaults %||% list()
 
   # Drop linear FE + RE for CB variables with keep_linear_term: false
   for (v in names(dlnm_cfg$variables)) {
     var_spec <- dlnm_cfg$variables[[v]] %||% list()
-    klt <- var_spec$keep_linear_term %||% dlnm_defaults$keep_linear_term %||% FALSE
+    klt <- var_spec$keep_linear_term %||%
+      dlnm_defaults$keep_linear_term %||%
+      FALSE
     if (!isTRUE(klt)) {
       terms$fixed_terms <- terms$fixed_terms[terms$fixed_terms != v]
-      terms$re_terms    <- terms$re_terms[
+      terms$re_terms <- terms$re_terms[
         !grepl(sprintf("^\\(%s[[:space:]]", v), terms$re_terms)
       ]
     }
@@ -122,13 +131,21 @@ integrate_cb_terms <- function(terms, dlnm_cfg, cb_cols, cb_meta, re_sep,
   # them to country/ADM1.
   cb_groups <- re_group_by_level("gid", drop_region = isTRUE(drop_region))
   for (v in intersect(names(dlnm_cfg$variables), linear_vars)) {
-    var_spec   <- dlnm_cfg$variables[[v]] %||% list()
-    re_slope   <- var_spec$re_adm1_slope %||% dlnm_defaults$re_adm1_slope %||% FALSE
-    if (!isTRUE(re_slope)) next
+    var_spec <- dlnm_cfg$variables[[v]] %||% list()
+    re_slope <- var_spec$re_adm1_slope %||%
+      dlnm_defaults$re_adm1_slope %||%
+      FALSE
+    if (!isTRUE(re_slope)) {
+      next
+    }
     v_cb_names <- cb_meta[[v]]$cb_col_names
-    if (is.null(v_cb_names)) next
-    terms$re_terms <- c(terms$re_terms,
-                        nested_slope_re_terms(v_cb_names, cb_groups, re_sep))
+    if (is.null(v_cb_names)) {
+      next
+    }
+    terms$re_terms <- c(
+      terms$re_terms,
+      nested_slope_re_terms(v_cb_names, cb_groups, re_sep)
+    )
   }
   terms
 }
@@ -158,17 +175,17 @@ integrate_cb_terms <- function(terms, dlnm_cfg, cb_cols, cb_meta, re_sep,
 re_group_by_level <- function(adm2_col = "gid", drop_region = FALSE) {
   if (isTRUE(drop_region)) {
     list(
-      region  = NULL,
+      region = NULL,
       country = "country",
-      adm1    = "country:ADM1",
-      adm2    = sprintf("country:ADM1:%s", adm2_col)
+      adm1 = "country:ADM1",
+      adm2 = sprintf("country:ADM1:%s", adm2_col)
     )
   } else {
     list(
-      region  = "AFRO_region",
+      region = "AFRO_region",
       country = "AFRO_region:country",
-      adm1    = "AFRO_region:country:ADM1",
-      adm2    = sprintf("AFRO_region:country:ADM1:%s", adm2_col)
+      adm1 = "AFRO_region:country:ADM1",
+      adm2 = sprintf("AFRO_region:country:ADM1:%s", adm2_col)
     )
   }
 }
@@ -187,14 +204,22 @@ re_group_by_level <- function(adm2_col = "gid", drop_region = FALSE) {
 #' @param re_sep  "||" (uncorrelated) or "|"
 #' @param levels  character vector of group levels to emit
 #' @return character vector of RE term strings
-nested_slope_re_terms <- function(cols, groups, re_sep,
-                                   levels = c("region", "country", "adm1")) {
-  if (length(cols) == 0) return(character(0))
+nested_slope_re_terms <- function(
+  cols,
+  groups,
+  re_sep,
+  levels = c("region", "country", "adm1")
+) {
+  if (length(cols) == 0) {
+    return(character(0))
+  }
   terms <- character(0)
   for (cn in cols) {
     for (lvl in levels) {
       grp <- groups[[lvl]]
-      if (is.null(grp)) next
+      if (is.null(grp)) {
+        next
+      }
       terms <- c(terms, sprintf("(%s - 1 %s %s)", cn, re_sep, grp))
     }
   }
@@ -237,7 +262,9 @@ nested_slope_re_terms <- function(cols, groups, re_sep,
 #' @param keep     grouping columns exempt from the <2-levels rule
 #' @return filtered (and possibly trimmed) character vector
 filter_re_terms_for_data <- function(re_terms, dat, keep = character(0)) {
-  if (length(re_terms) == 0L) return(re_terms)
+  if (length(re_terms) == 0L) {
+    return(re_terms)
+  }
 
   result <- character(0)
 
@@ -250,26 +277,38 @@ filter_re_terms_for_data <- function(re_terms, dat, keep = character(0)) {
       # Slash notation: intercept nesting hierarchy.
       # Each component is its own column; check individually.
       components <- strsplit(grp_str, "/", fixed = TRUE)[[1]]
-      valid <- vapply(components, function(comp) {
-        if (!comp %in% names(dat)) return(TRUE)      # unknown col — keep
-        if (comp %in% keep) return(TRUE)             # exempt (single-country fit)
-        dplyr::n_distinct(dat[[comp]], na.rm = TRUE) >= 2L
-      }, logical(1))
+      valid <- vapply(
+        components,
+        function(comp) {
+          if (!comp %in% names(dat)) {
+            return(TRUE)
+          } # unknown col — keep
+          if (comp %in% keep) {
+            return(TRUE)
+          } # exempt (single-country fit)
+          dplyr::n_distinct(dat[[comp]], na.rm = TRUE) >= 2L
+        },
+        logical(1)
+      )
 
       if (!any(valid)) {
         message(sprintf(
           "[filter_re] Dropping intercept RE (all nesting levels have <2 distinct values): %s",
-          term))
+          term
+        ))
         next
       }
       kept <- components[valid]
       if (length(kept) < length(components)) {
         dropped <- components[!valid]
-        new_grp  <- paste(kept, collapse = "/")
+        new_grp <- paste(kept, collapse = "/")
         new_term <- sub(grp_str, new_grp, term, fixed = TRUE)
         message(sprintf(
           "[filter_re] Trimmed intercept RE (removed sparse level(s): %s): %s  ->  %s",
-          paste(dropped, collapse = ", "), term, new_term))
+          paste(dropped, collapse = ", "),
+          term,
+          new_term
+        ))
         result <- c(result, new_term)
       } else {
         result <- c(result, term)
@@ -277,17 +316,21 @@ filter_re_terms_for_data <- function(re_terms, dat, keep = character(0)) {
     } else {
       # Colon notation: slope RE compound group key (or single variable).
       # Drop the term only when the *compound* key has <2 distinct values.
-      cols       <- strsplit(grp_str, ":", fixed = TRUE)[[1]]
+      cols <- strsplit(grp_str, ":", fixed = TRUE)[[1]]
       known_cols <- cols[cols %in% names(dat)]
       if (length(known_cols) == 0L || all(known_cols %in% keep)) {
-        result <- c(result, term)   # cannot check, or exempt — keep
+        result <- c(result, term) # cannot check, or exempt — keep
         next
       }
-      combo <- do.call(paste, c(lapply(known_cols, function(cc) dat[[cc]]),
-                                list(sep = ":")))
+      combo <- do.call(
+        paste,
+        c(lapply(known_cols, function(cc) dat[[cc]]), list(sep = ":"))
+      )
       if (dplyr::n_distinct(combo, na.rm = TRUE) < 2L) {
         message(sprintf(
-          "[filter_re] Dropping slope RE (group has <2 distinct values): %s", term))
+          "[filter_re] Dropping slope RE (group has <2 distinct values): %s",
+          term
+        ))
         next
       }
       result <- c(result, term)
@@ -305,7 +348,7 @@ filter_re_terms_for_data <- function(re_terms, dat, keep = character(0)) {
 #' slope terms that reference the same column.
 #'
 #' Context: `time_to_last_outbreak` is stored as a factor (bins from
-#' `makeTimeToLastOutbreakCat()`).  In a country-grouped fit whose subset
+#' `make_time_to_last_outbreak_cat()`).  In a country-grouped fit whose subset
 #' contains outbreaks from only one time-to-last-outbreak bin (e.g. all
 #' Southern-Africa outbreaks in the "[6,Inf]" category), the factor has a
 #' single level and brms raises "contrasts can be applied only to factors with
@@ -321,31 +364,52 @@ filter_re_terms_for_data <- function(re_terms, dat, keep = character(0)) {
 #' @param dat         data.frame on which the model will be fit
 #' @return list(fixed_terms, re_terms) after filtering
 filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
-  if (length(fixed_terms) == 0L) return(list(fixed_terms = fixed_terms, re_terms = re_terms))
+  if (length(fixed_terms) == 0L) {
+    return(list(fixed_terms = fixed_terms, re_terms = re_terms))
+  }
 
-  keep <- vapply(fixed_terms, function(col) {
-    if (!col %in% names(dat)) return(TRUE)             # unknown col — keep
-    v <- dat[[col]]
-    if (!is.factor(v) && !is.character(v)) return(TRUE) # numeric — keep
-    dplyr::n_distinct(v, na.rm = TRUE) >= 2L
-  }, logical(1))
+  keep <- vapply(
+    fixed_terms,
+    function(col) {
+      if (!col %in% names(dat)) {
+        return(TRUE)
+      } # unknown col — keep
+      v <- dat[[col]]
+      if (!is.factor(v) && !is.character(v)) {
+        return(TRUE)
+      } # numeric — keep
+      dplyr::n_distinct(v, na.rm = TRUE) >= 2L
+    },
+    logical(1)
+  )
 
   dropped <- fixed_terms[!keep]
   if (length(dropped) > 0L) {
     for (col in dropped) {
       message(sprintf(
         "[filter_fixed] Dropping fixed term '%s': factor/character with <2 distinct levels.",
-        col))
+        col
+      ))
     }
     # Cascade: drop RE slope terms whose LHS references the dropped column.
     if (length(re_terms) > 0L) {
-      drop_re <- vapply(re_terms, function(t) {
-        any(vapply(dropped, function(col) grepl(col, t, fixed = TRUE), logical(1)))
-      }, logical(1))
+      drop_re <- vapply(
+        re_terms,
+        function(t) {
+          any(vapply(
+            dropped,
+            function(col) grepl(col, t, fixed = TRUE),
+            logical(1)
+          ))
+        },
+        logical(1)
+      )
       if (any(drop_re)) {
         for (t in re_terms[drop_re]) {
           message(sprintf(
-            "[filter_fixed] Dropping RE term (references dropped fixed term): %s", t))
+            "[filter_fixed] Dropping RE term (references dropped fixed term): %s",
+            t
+          ))
         }
         re_terms <- re_terms[!drop_re]
       }
@@ -389,22 +453,33 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' @return list(slopes, slope_covs, fixed_covs) -- fixed_covs excludes the
 #'   leading "1" intercept term; callers prepend it.
 .resolve_fixed_covariates <- function(block, admin_level, enso_lag) {
-  slopes     <- resolve_slopes(block$random_effects, admin_level)
+  slopes <- resolve_slopes(block$random_effects, admin_level)
   slope_covs <- names(slopes)
 
   enso_on <- isTRUE(block$covariates$enso)
-  if (!enso_on) slope_covs <- slope_covs[!grepl("^enso_lag\\d+$", slope_covs)]
+  if (!enso_on) {
+    slope_covs <- slope_covs[!grepl("^enso_lag\\d+$", slope_covs)]
+  }
 
   covs_map <- block$covariates %||% list()
-  covs_on  <- names(covs_map)[vapply(names(covs_map),
-                                     function(k) isTRUE(covs_map[[k]]),
-                                     logical(1))]
-  covs_on    <- covs_on[covs_on != "enso"]
-  covs_on    <- sub("^time_to_last_outbreak_cat$", "time_to_last_outbreak", covs_on)
+  covs_on <- names(covs_map)[vapply(
+    names(covs_map),
+    function(k) isTRUE(covs_map[[k]]),
+    logical(1)
+  )]
+  covs_on <- covs_on[covs_on != "enso"]
+  covs_on <- sub(
+    "^time_to_last_outbreak_cat$",
+    "time_to_last_outbreak",
+    covs_on
+  )
   fixed_covs <- unique(c(covs_on, slope_covs))
 
   if (enso_on) {
-    fixed_covs <- unique(c(fixed_covs, sprintf("enso_lag%d", as.integer(enso_lag))))
+    fixed_covs <- unique(c(
+      fixed_covs,
+      sprintf("enso_lag%d", as.integer(enso_lag))
+    ))
   }
 
   list(slopes = slopes, slope_covs = slope_covs, fixed_covs = fixed_covs)
@@ -432,9 +507,13 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
   out <- character(0)
   for (cov in covs) {
     for (lvl in levels) {
-      if (!isTRUE(slopes[[cov]][[lvl]])) next
+      if (!isTRUE(slopes[[cov]][[lvl]])) {
+        next
+      }
       grp <- gbl[[lvl]]
-      if (is.null(grp)) next
+      if (is.null(grp)) {
+        next
+      }
       out <- c(out, sprintf("(%s - 1 %s %s)", cov, re_sep, grp))
     }
   }
@@ -459,7 +538,9 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
   out <- character(0)
   for (lvl in levels) {
     grp <- gbl[[lvl]]
-    if (is.null(grp)) next
+    if (is.null(grp)) {
+      next
+    }
     out <- c(out, sprintf("(%s - 1 %s %s)", col, re_sep, grp))
   }
   out
@@ -486,9 +567,17 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' @param label       appended to the warning message (e.g. " (size model)");
 #'                    "" for occurrence
 #' @return character vector of length 0 or 1
-.intercept_re_term <- function(re_flags, admin_level, gbl, re_sep, label = "",
-                               leaf_scope = "all") {
-  if (!isTRUE(re_flags$re_region_country_adm1_intercept)) return(character(0))
+.intercept_re_term <- function(
+  re_flags,
+  admin_level,
+  gbl,
+  re_sep,
+  label = "",
+  leaf_scope = "all"
+) {
+  if (!isTRUE(re_flags$re_region_country_adm1_intercept)) {
+    return(character(0))
+  }
   re_adm2i <- isTRUE(re_flags$re_adm2_intercept)
   if (re_adm2i && identical(admin_level, "ADM1")) {
     warning("re_adm2_intercept forced FALSE: admin_level == ADM1", label)
@@ -501,11 +590,18 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
   # inform sd(leaf) as if they were ADM2 units. Here the nested intercept stops
   # at ADM1 and the leaf is a separate term whose design column `is_adm2` is 0
   # for ADM1-only rows (their single shared "none" level is prior-only). `gbl`
-  # must then come from re_group_by_level("gid_leaf") -- see .leafColumns().
-  if (re_adm2i && identical(leaf_scope, "adm2_only"))
-    return(c(sprintf("(1 %s %s)", re_sep, gsub(":", "/", gbl$adm1)),
-             sprintf("(0 + is_adm2 %s %s)", re_sep, gbl$adm2)))
-  int_grp <- if (re_adm2i) gsub(":", "/", gbl$adm2) else gsub(":", "/", gbl$adm1)
+  # must then come from re_group_by_level("gid_leaf") -- see .leaf_columns().
+  if (re_adm2i && identical(leaf_scope, "adm2_only")) {
+    return(c(
+      sprintf("(1 %s %s)", re_sep, gsub(":", "/", gbl$adm1)),
+      sprintf("(0 + is_adm2 %s %s)", re_sep, gbl$adm2)
+    ))
+  }
+  int_grp <- if (re_adm2i) {
+    gsub(":", "/", gbl$adm2)
+  } else {
+    gsub(":", "/", gbl$adm1)
+  }
   sprintf("(1 %s %s)", re_sep, int_grp)
 }
 
@@ -522,26 +618,42 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' @param drop_region grouping mode (AFRO_region dropped).
 #' @param label appended to .intercept_re_term()'s warning.
 #' @return character vector of intercept RE terms.
-.scoped_intercept_re_terms <- function(cfg, admin_level, gbl, drop_region, label = "") {
+.scoped_intercept_re_terms <- function(
+  cfg,
+  admin_level,
+  gbl,
+  drop_region,
+  label = ""
+) {
   leaf_scope <- .leaf_scope_of(cfg)
-  int_gbl <- if (identical(leaf_scope, "adm2_only"))
-    re_group_by_level("gid_leaf", drop_region = drop_region) else gbl
-  .intercept_re_term(cfg$random_effects, admin_level, int_gbl, "|", label,
-                     leaf_scope = leaf_scope)
+  int_gbl <- if (identical(leaf_scope, "adm2_only")) {
+    re_group_by_level("gid_leaf", drop_region = drop_region)
+  } else {
+    gbl
+  }
+  .intercept_re_term(
+    cfg$random_effects,
+    admin_level,
+    int_gbl,
+    "|",
+    label,
+    leaf_scope = leaf_scope
+  )
 }
 
 #' .leaf_scope_of
 #'
 #' `random_effects.re_adm2_leaf_scope` for a size / monthly / duration block. The default
 #' "all" is returned without touching utils/paths.R (where the validating
-#' `.leafScopeOf()` lives), so the default formula path keeps its existing
+#' `.leaf_scope_tag()` lives), so the default formula path keeps its existing
 #' source closure.
 .leaf_scope_of <- function(blk) {
-  s <- ((blk %||% list())$random_effects %||% list())$re_adm2_leaf_scope %||% "all"
-  if (identical(s, "all")) "all" else .leafScopeOf(blk)
+  s <- ((blk %||% list())$random_effects %||% list())$re_adm2_leaf_scope %||%
+    "all"
+  if (identical(s, "all")) "all" else .leaf_scope_tag(blk)
 }
 
-#' .leafColumns
+#' .leaf_columns
 #'
 #' Data side of `re_adm2_leaf_scope: adm2_only`: `is_adm2` (1 on canonical
 #' ADM2 rows) and `gid_leaf` (the gid on ADM2 rows, "none" elsewhere). Needs
@@ -549,12 +661,17 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' mislabels whole-state LPs "ADM2" -- so it refuses unless P3 has run
 #' (`canonical_admin_level`) or the panel was prepped under
 #' `episodes.key: gid_season`, whose admin_level is canonical by construction.
-.leafColumns <- function(d, canonical_ok, tag = "leaf") {
-  if (!isTRUE(canonical_ok))
-    stop(tag, ": random_effects.re_adm2_leaf_scope = 'adm2_only' needs the ",
-         "geometry-derived admin level. Set canonical_admin_level: true (or ",
-         "prep under --episode_key gid_season).", call. = FALSE)
-  d$is_adm2  <- as.integer(as.character(d$admin_level) == "ADM2")
+.leaf_columns <- function(d, canonical_ok, tag = "leaf") {
+  if (!isTRUE(canonical_ok)) {
+    stop(
+      tag,
+      ": random_effects.re_adm2_leaf_scope = 'adm2_only' needs the ",
+      "geometry-derived admin level. Set canonical_admin_level: true (or ",
+      "prep under --episode_key gid_season).",
+      call. = FALSE
+    )
+  }
+  d$is_adm2 <- as.integer(as.character(d$admin_level) == "ADM2")
   d$gid_leaf <- ifelse(d$is_adm2 == 1L, as.character(d$gid), "none")
   d
 }
@@ -583,14 +700,34 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
   # `pop_gate`   — config key under the track's block toggling `offset(log(pop))`
   # `anchor_gate`— config key toggling the empirical baseline-rate anchor
   # `anchor_col` — the joined column name (utils/anchor.R `.ANCHOR_SPEC$column`)
-  occ = list(block = "occurrence", pop_gate = NULL,         time = TRUE,
-             anchor_gate = "offset_baserate", anchor_col = "base_rate_occ"),
-  siz = list(block = "size",       pop_gate = "offset_pop", time = FALSE,
-             anchor_gate = "offset_meanrate", anchor_col = "mean_rate"),
-  dur = list(block = "duration",   pop_gate = NULL,         time = TRUE,
-             anchor_gate = "offset_baserate", anchor_col = "base_rate_dur"),
-  mon = list(block = "monthly",    pop_gate = "offset_pop", time = TRUE,
-             anchor_gate = "offset_baserate", anchor_col = "base_rate_mon")
+  occ = list(
+    block = "occurrence",
+    pop_gate = NULL,
+    time = TRUE,
+    anchor_gate = "offset_baserate",
+    anchor_col = "base_rate_occ"
+  ),
+  siz = list(
+    block = "size",
+    pop_gate = "offset_pop",
+    time = FALSE,
+    anchor_gate = "offset_meanrate",
+    anchor_col = "mean_rate"
+  ),
+  dur = list(
+    block = "duration",
+    pop_gate = NULL,
+    time = TRUE,
+    anchor_gate = "offset_baserate",
+    anchor_col = "base_rate_dur"
+  ),
+  mon = list(
+    block = "monthly",
+    pop_gate = "offset_pop",
+    time = TRUE,
+    anchor_gate = "offset_baserate",
+    anchor_col = "base_rate_mon"
+  )
 )
 
 #' .offset_terms
@@ -602,7 +739,7 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' through `<track>.offset_baserate` (off by default, so every pre-existing
 #' config emits exactly the offsets it emitted before).
 #'
-#' Deliberately reads `opt` directly rather than calling `anchorEnabled()`:
+#' Deliberately reads `opt` directly rather than calling `anchor_enabled()`:
 #' `utils/config.R` is sourced by everything and must not depend on
 #' `utils/anchor.R`, which itself depends on `paths.R` / `provenance.R` /
 #' `occ_data.R`. The two gates are kept in step by
@@ -612,18 +749,21 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' @param track "occ" | "siz" | "dur" | "mon".
 #' @return character vector of `offset(...)` strings, possibly length 0.
 .offset_terms <- function(opt, track) {
-  spec      <- .offset_spec(track)
-  block     <- opt[[spec$block]] %||% list()
+  spec <- .offset_spec(track)
+  block <- opt[[spec$block]] %||% list()
   off_terms <- character(0)
 
-  if (!is.null(spec$pop_gate) && isTRUE(block[[spec$pop_gate]]))
+  if (!is.null(spec$pop_gate) && isTRUE(block[[spec$pop_gate]])) {
     off_terms <- c(off_terms, "offset(log(pop))")
+  }
 
-  if (isTRUE(spec$time))
+  if (isTRUE(spec$time)) {
     off_terms <- c(off_terms, "offset(log_offset)")
+  }
 
-  if (isTRUE(block[[spec$anchor_gate]]))
+  if (isTRUE(block[[spec$anchor_gate]])) {
     off_terms <- c(off_terms, sprintf("offset(log(%s))", spec$anchor_col))
+  }
 
   off_terms
 }
@@ -631,10 +771,16 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #' Look up a track's offset spec, with an actionable error on a typo.
 .offset_spec <- function(track) {
   spec <- .OFFSET_SPEC[[track]]
-  if (is.null(spec))
-    stop(".offset_spec: unknown track '", paste(track, collapse = ","),
-         "' (expected one of ", paste(names(.OFFSET_SPEC), collapse = ", "), ")",
-         call. = FALSE)
+  if (is.null(spec)) {
+    stop(
+      ".offset_spec: unknown track '",
+      paste(track, collapse = ","),
+      "' (expected one of ",
+      paste(names(.OFFSET_SPEC), collapse = ", "),
+      ")",
+      call. = FALSE
+    )
+  }
   spec
 }
 
@@ -661,18 +807,28 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #'
 #' @return logical(1)
 .anchor_gate_on <- function(opt, track) {
-  spec  <- .offset_spec(track)
+  spec <- .offset_spec(track)
   block <- opt[[spec$block]] %||% list()
-  on    <- isTRUE(block$offset_baserate)
+  on <- isTRUE(block$offset_baserate)
 
   # An anchored intercept with no anchor offset is the same double-counting bug
   # in the other direction: the prior would sit at residual scale while the
   # linear predictor still has to span the full offset scale.
-  if (on && !isTRUE(block[[spec$anchor_gate]]))
-    stop(spec$block, ".offset_baserate is TRUE but ", spec$block, ".",
-         spec$anchor_gate, " is not, so the Intercept prior would move to a ",
-         "residual scale with no offset(log(", spec$anchor_col, ")) term in ",
-         "the formula to justify it. Set both, or neither.", call. = FALSE)
+  if (on && !isTRUE(block[[spec$anchor_gate]])) {
+    stop(
+      spec$block,
+      ".offset_baserate is TRUE but ",
+      spec$block,
+      ".",
+      spec$anchor_gate,
+      " is not, so the Intercept prior would move to a ",
+      "residual scale with no offset(log(",
+      spec$anchor_col,
+      ")) term in ",
+      "the formula to justify it. Set both, or neither.",
+      call. = FALSE
+    )
+  }
   on
 }
 
@@ -720,10 +876,10 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 #'                    existing call site that must keep pre-filter behaviour
 #'                    can rely on the default.
 build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
-  occ    <- opt$occurrence
-  covs   <- occ$covariates      %||% list()
-  re_raw <- occ$random_effects  %||% list()
-  be     <- occ$backend         %||% "brms_cb"
+  occ <- opt$occurrence
+  covs <- occ$covariates %||% list()
+  re_raw <- occ$random_effects %||% list()
+  be <- occ$backend %||% "brms_cb"
   re_sep <- if (isTRUE(occ[[be]]$re_uncorrelated)) "||" else "|"
 
   # --- Resolve slopes via the canonical resolver (size convention) ---
@@ -739,29 +895,46 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   #                           re_{region_country,adm1}_nbr_contagion_slope, not
   #                           the covariates$ toggle name — same shape as
   #                           "ongoing" above.
-  skip_covs    <- c("time_to_last_outbreak", "ongoing",
-                    "ongoing_country", "ongoing_tu", "nbr_contagion",
-                    grep("^enso_lag", names(slopes), value = TRUE))
+  skip_covs <- c(
+    "time_to_last_outbreak",
+    "ongoing",
+    "ongoing_country",
+    "ongoing_tu",
+    "nbr_contagion",
+    grep("^enso_lag", names(slopes), value = TRUE)
+  )
   climate_covs <- setdiff(names(slopes), skip_covs)
 
   # --- Fixed-effect terms ---
   fixed_terms <- character(0)
-  if (isTRUE(covs$time_to_last_outbreak_cat))    fixed_terms <- c(fixed_terms, "time_to_last_outbreak")
-  if (isTRUE(covs$ongoing_outbreak_lag1))         fixed_terms <- c(fixed_terms, "ongoing_outbreak_lag1")
-  if (isTRUE(covs$ongoing_outbreak_country_lag1)) fixed_terms <- c(fixed_terms, "ongoing_outbreak_country_lag1")
-  if (isTRUE(covs$ongoing_outbreak_tu_lag1))      fixed_terms <- c(fixed_terms, "ongoing_outbreak_tu_lag1")
+  if (isTRUE(covs$time_to_last_outbreak_cat)) {
+    fixed_terms <- c(fixed_terms, "time_to_last_outbreak")
+  }
+  if (isTRUE(covs$ongoing_outbreak_lag1)) {
+    fixed_terms <- c(fixed_terms, "ongoing_outbreak_lag1")
+  }
+  if (isTRUE(covs$ongoing_outbreak_country_lag1)) {
+    fixed_terms <- c(fixed_terms, "ongoing_outbreak_country_lag1")
+  }
+  if (isTRUE(covs$ongoing_outbreak_tu_lag1)) {
+    fixed_terms <- c(fixed_terms, "ongoing_outbreak_tu_lag1")
+  }
 
   # Convention 2: active climate slope flags imply climate fixed effects
   fixed_terms <- c(fixed_terms, climate_covs)
 
   # Calendar escape hatch
-  if (isTRUE(covs$months))  fixed_terms <- c(fixed_terms, "months")
-  if (isTRUE(covs$quarter)) fixed_terms <- c(fixed_terms, "quarter")
+  if (isTRUE(covs$months)) {
+    fixed_terms <- c(fixed_terms, "months")
+  }
+  if (isTRUE(covs$quarter)) {
+    fixed_terms <- c(fixed_terms, "quarter")
+  }
 
   # ENSO fixed effect — driven by covariates$enso toggle
   enso_col <- NULL
   if (isTRUE(covs$enso)) {
-    lag_n    <- as.integer(opt$enso$lag_months)
+    lag_n <- as.integer(opt$enso$lag_months)
     enso_col <- sprintf("enso_lag%d", lag_n)
     fixed_terms <- c(fixed_terms, enso_col)
   }
@@ -772,9 +945,12 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   # materialised (nbr_lag1_r<rho>[_rn]).
   nbr_col <- NULL
   if (isTRUE(covs$nbr_contagion_lag1)) {
-    nbr_col <- nbrCovariateName(opt$contagion$rho_km, opt$contagion$scale,
-                                opt$contagion$partition,
-                                opt$contagion$partition_source)
+    nbr_col <- nbr_covariate_name(
+      opt$contagion$rho_km,
+      opt$contagion$scale,
+      opt$contagion$partition,
+      opt$contagion$partition_source
+    )
     fixed_terms <- c(fixed_terms, nbr_col)
   }
 
@@ -788,49 +964,90 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   re_terms <- character(0)
 
   # Intercept RE — keep nested-slash form (same as size model)
-  re_terms <- c(re_terms, .intercept_re_term(re_raw, occ$admin_level, gbl, re_sep))
+  re_terms <- c(
+    re_terms,
+    .intercept_re_term(re_raw, occ$admin_level, gbl, re_sep)
+  )
 
   # Climate slope REs — explicit per-level terms (size convention)
-  re_terms <- c(re_terms,
-                .slope_re_terms(climate_covs, slopes, gbl, re_sep,
-                                 c("region", "country", "adm1")))
+  re_terms <- c(
+    re_terms,
+    .slope_re_terms(
+      climate_covs,
+      slopes,
+      gbl,
+      re_sep,
+      c("region", "country", "adm1")
+    )
+  )
 
   # ttlo slope RE — explicit per-level (region + country), via resolve_slopes()
-  re_terms <- c(re_terms,
-                .slope_re_terms("time_to_last_outbreak", slopes, gbl, re_sep,
-                                 c("region", "country")))
+  re_terms <- c(
+    re_terms,
+    .slope_re_terms(
+      "time_to_last_outbreak",
+      slopes,
+      gbl,
+      re_sep,
+      c("region", "country")
+    )
+  )
 
   # Ongoing slope RE — special-cased (data column = ongoing_outbreak_lag1)
-  if (isTRUE(re_raw$re_region_country_ongoing_slope) &&
-      isTRUE(covs$ongoing_outbreak_lag1)) {
-    re_terms <- c(re_terms,
-                  .re_terms_for_column("ongoing_outbreak_lag1", c("region", "country"), gbl, re_sep))
+  if (
+    isTRUE(re_raw$re_region_country_ongoing_slope) &&
+      isTRUE(covs$ongoing_outbreak_lag1)
+  ) {
+    re_terms <- c(
+      re_terms,
+      .re_terms_for_column(
+        "ongoing_outbreak_lag1",
+        c("region", "country"),
+        gbl,
+        re_sep
+      )
+    )
   }
 
   # Spillover slope REs — special-cased (column name mismatch with resolve_slopes() decoding)
-  for (.new_col in c("ongoing_outbreak_country_lag1", "ongoing_outbreak_tu_lag1")) {
-    .flag <- if (.new_col == "ongoing_outbreak_country_lag1")
-               "re_region_country_ongoing_country_slope"
-             else
-               "re_region_country_ongoing_tu_slope"
+  for (.new_col in c(
+    "ongoing_outbreak_country_lag1",
+    "ongoing_outbreak_tu_lag1"
+  )) {
+    .flag <- if (.new_col == "ongoing_outbreak_country_lag1") {
+      "re_region_country_ongoing_country_slope"
+    } else {
+      "re_region_country_ongoing_tu_slope"
+    }
     if (isTRUE(re_raw[[.flag]]) && isTRUE(covs[[.new_col]])) {
-      re_terms <- c(re_terms,
-                    .re_terms_for_column(.new_col, c("region", "country"), gbl, re_sep))
+      re_terms <- c(
+        re_terms,
+        .re_terms_for_column(.new_col, c("region", "country"), gbl, re_sep)
+      )
     }
   }
 
   # ENSO slope REs — special-cased (dynamic column; requires covariates$enso = TRUE)
   if (!is.null(enso_col)) {
-    lag_n       <- as.integer(opt$enso$lag_months)
+    lag_n <- as.integer(opt$enso$lag_months)
     shallow_key <- sprintf("re_region_country_enso_lag%d_slope", lag_n)
-    deep_key    <- sprintf("re_adm1_enso_lag%d_slope", lag_n)
+    deep_key <- sprintf("re_adm1_enso_lag%d_slope", lag_n)
     if (isTRUE(re_raw[[shallow_key]])) {
-      re_terms <- c(re_terms,
-                    .re_terms_for_column(enso_col, c("region", "country"), gbl, re_sep))
+      re_terms <- c(
+        re_terms,
+        .re_terms_for_column(enso_col, c("region", "country"), gbl, re_sep)
+      )
     }
     if (isTRUE(re_raw[[deep_key]])) {
-      re_terms <- c(re_terms,
-                    .re_terms_for_column(enso_col, c("region", "country", "adm1"), gbl, re_sep))
+      re_terms <- c(
+        re_terms,
+        .re_terms_for_column(
+          enso_col,
+          c("region", "country", "adm1"),
+          gbl,
+          re_sep
+        )
+      )
     }
   }
 
@@ -840,22 +1057,33 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   # deep terms exactly once each rather than duplicating region/country.
   if (!is.null(nbr_col)) {
     if (isTRUE(re_raw$re_region_country_nbr_contagion_slope)) {
-      re_terms <- c(re_terms,
-                    .re_terms_for_column(nbr_col, c("region", "country"), gbl, re_sep))
+      re_terms <- c(
+        re_terms,
+        .re_terms_for_column(nbr_col, c("region", "country"), gbl, re_sep)
+      )
     }
     if (isTRUE(re_raw$re_adm1_nbr_contagion_slope)) {
-      re_terms <- c(re_terms,
-                    .re_terms_for_column(nbr_col, "adm1", gbl, re_sep))
+      re_terms <- c(
+        re_terms,
+        .re_terms_for_column(nbr_col, "adm1", gbl, re_sep)
+      )
     }
   }
 
   # Basehaz group-varying seasonality — special-cased (factor basehaz only)
-  occ_bh <- if (be == "brms")       occ$brms$basehaz_poisson %||% "seasonal"
-              else NULL
-  if (isTRUE(re_raw$re_region_country_basehaz_slope) &&
-      identical(occ_bh, "factor")) {
-    re_terms <- c(re_terms,
-                  .re_terms_for_column("months", c("region", "country"), gbl, re_sep))
+  occ_bh <- if (be == "brms") {
+    occ$brms$basehaz_poisson %||% "seasonal"
+  } else {
+    NULL
+  }
+  if (
+    isTRUE(re_raw$re_region_country_basehaz_slope) &&
+      identical(occ_bh, "factor")
+  ) {
+    re_terms <- c(
+      re_terms,
+      .re_terms_for_column("months", c("region", "country"), gbl, re_sep)
+    )
   }
 
   # Data-aware pruning — opt-in via dat, same order size/duration
@@ -863,10 +1091,13 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   # filter below sees the surviving terms), then the RE-group filter. NULL
   # (the default) skips both.
   if (!is.null(dat)) {
-    fft         <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
+    fft <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
     fixed_terms <- fft$fixed_terms
-    re_terms    <- filter_re_terms_for_data(fft$re_terms, dat,
-                                            keep = .single_country_keep(opt, dat))
+    re_terms <- filter_re_terms_for_data(
+      fft$re_terms,
+      dat,
+      keep = .single_country_keep(opt, dat)
+    )
   }
 
   # Offsets — shared with the other three tracks (.offset_terms()). With the
@@ -875,7 +1106,9 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
 
   .flag_single_country(
     list(fixed_terms = fixed_terms, re_terms = re_terms, off_terms = off_terms),
-    opt, dat)
+    opt,
+    dat
+  )
 }
 
 #' .single_country_keep
@@ -890,9 +1123,16 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
 #' map, so those REs were dropped at replay without a warning.
 #' @noRd
 .single_country_keep <- function(opt, dat) {
-  if (!isTRUE(opt$grouping$enable) || is.null(dat) || !"country" %in% names(dat))
+  if (
+    !isTRUE(opt$grouping$enable) || is.null(dat) || !"country" %in% names(dat)
+  ) {
     return(character(0))
-  if (dplyr::n_distinct(dat$country, na.rm = TRUE) == 1L) "country" else character(0)
+  }
+  if (dplyr::n_distinct(dat$country, na.rm = TRUE) == 1L) {
+    "country"
+  } else {
+    character(0)
+  }
 }
 
 #' .flag_single_country -- `single_country = TRUE` on a parts/terms list when
@@ -900,7 +1140,9 @@ build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
 #' element, so multi-country outputs are byte-identical).
 #' @noRd
 .flag_single_country <- function(parts, opt, dat) {
-  if (length(.single_country_keep(opt, dat))) parts$single_country <- TRUE
+  if (length(.single_country_keep(opt, dat))) {
+    parts$single_country <- TRUE
+  }
   parts
 }
 
@@ -917,24 +1159,35 @@ validate_size_options <- function(opt) {
   # silently via resolve_slopes()).
   stopifnot(!is.null(opt$size))
 
-  valid_phi_re <- c("constant", "region", "region_country", "region_country_adm1")
+  valid_phi_re <- c(
+    "constant",
+    "region",
+    "region_country",
+    "region_country_adm1"
+  )
   phi_re <- opt$size$phi_re %||% "constant"
-  if (!phi_re %in% valid_phi_re)
+  if (!phi_re %in% valid_phi_re) {
     stop(sprintf(
       "size.phi_re must be one of: %s (got '%s')",
-      paste(valid_phi_re, collapse = ", "), phi_re
+      paste(valid_phi_re, collapse = ", "),
+      phi_re
     ))
+  }
 
-  slopes    <- resolve_slopes(opt$size$random_effects, opt$size$admin_level)
+  slopes <- resolve_slopes(opt$size$random_effects, opt$size$admin_level)
   size_covs <- opt$size$covariates %||% list()
-  enso_on   <- isTRUE(opt$size$covariates$enso)
+  enso_on <- isTRUE(opt$size$covariates$enso)
 
   for (cov in names(slopes)) {
     if (grepl("^enso_lag\\d+$", cov)) {
       if (!enso_on) {
-        warning(sprintf(
-          "size.random_effects slope on %s requested but size.covariates$enso is FALSE. ",
-          cov), "Set size.covariates.enso: true to enable.")
+        warning(
+          sprintf(
+            "size.random_effects slope on %s requested but size.covariates$enso is FALSE. ",
+            cov
+          ),
+          "Set size.covariates.enso: true to enable."
+        )
       }
       next
     }
@@ -942,7 +1195,9 @@ validate_size_options <- function(opt) {
     if (!is_cov_on) {
       warning(sprintf(
         "size.random_effects slope on %s requested but size.covariates$%s is FALSE.",
-        cov, cov))
+        cov,
+        cov
+      ))
     }
   }
   invisible(opt)
@@ -958,7 +1213,7 @@ validate_size_options <- function(opt) {
 #' @param re_block    the random_effects list (e.g. opt$size$random_effects)
 #' @param admin_level "ADM1" | "ADM2"
 resolve_slopes <- function(re_block, admin_level = "ADM1") {
-  re  <- re_block %||% list()
+  re <- re_block %||% list()
   out <- list()
 
   # Guard against typo'd flags. Slope keys are decoded by regex below, so a
@@ -966,38 +1221,53 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
   # dropped without a trace -- taking with it the implied fixed effect under
   # Convention 2. The model then fits without the covariate at all.
   nms <- names(re) %||% character(0)
-  known_re_keys <- c("re_region_country_adm1_intercept", "re_adm2_intercept",
-                     "re_adm2_leaf_scope", "slopes")
+  known_re_keys <- c(
+    "re_region_country_adm1_intercept",
+    "re_adm2_intercept",
+    "re_adm2_leaf_scope",
+    "slopes"
+  )
   unknown <- setdiff(
-    nms[!grepl("^re_adm1_.*_slope$", nms) &
-        !grepl("^re_region_country_.*_slope$", nms)],
+    nms[
+      !grepl("^re_adm1_.*_slope$", nms) &
+        !grepl("^re_region_country_.*_slope$", nms)
+    ],
     known_re_keys
   )
   if (length(unknown) > 0L) {
-    warning("resolve_slopes(): ignoring unrecognised random_effects key(s): ",
-            paste(unknown, collapse = ", "),
-            ". Expected re_adm1_<cov>_slope, re_region_country_<cov>_slope, or one of: ",
-            paste(known_re_keys, collapse = ", "),
-            ". A typo here silently drops both the random slope and the ",
-            "fixed effect it implies.",
-            call. = FALSE)
+    warning(
+      "resolve_slopes(): ignoring unrecognised random_effects key(s): ",
+      paste(unknown, collapse = ", "),
+      ". Expected re_adm1_<cov>_slope, re_region_country_<cov>_slope, or one of: ",
+      paste(known_re_keys, collapse = ", "),
+      ". A typo here silently drops both the random slope and the ",
+      "fixed effect it implies.",
+      call. = FALSE
+    )
   }
 
   legacy_adm1_levels <- c("region", "country", "adm1")
-  if (identical(admin_level, "ADM2"))
+  if (identical(admin_level, "ADM2")) {
     legacy_adm1_levels <- c(legacy_adm1_levels, "adm2")
+  }
 
-  norm_cov <- function(c) if (identical(c, "ttlo")) "time_to_last_outbreak" else c
+  norm_cov <- function(c) {
+    if (identical(c, "ttlo")) "time_to_last_outbreak" else c
+  }
 
   for (nm in names(re)) {
-    if (!isTRUE(re[[nm]])) next
+    if (!isTRUE(re[[nm]])) {
+      next
+    }
     if (grepl("^re_adm1_.*_slope$", nm)) {
       cov <- norm_cov(sub("^re_adm1_(.*)_slope$", "\\1", nm))
       out[[cov]] <- .lvl_set(legacy_adm1_levels)
     } else if (grepl("^re_region_country_.*_slope$", nm)) {
       cov <- norm_cov(sub("^re_region_country_(.*)_slope$", "\\1", nm))
       # Skip non-covariate slopes (intercept, basehaz, ongoing, ttlo, adm1_intercept)
-      if (cov %in% c("adm1_intercept", "basehaz")) next
+      if (cov %in% c("adm1_intercept", "basehaz")) {
+        next
+      }
       out[[cov]] <- .lvl_set(c("region", "country"))
     }
   }
@@ -1006,7 +1276,7 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
   if (!is.null(re$slopes) && is.list(re$slopes)) {
     for (cov in names(re$slopes)) {
       spec <- re$slopes[[cov]] %||% list()
-      cur  <- out[[cov]] %||% .lvl_set(character(0))
+      cur <- out[[cov]] %||% .lvl_set(character(0))
       for (lvl in c("region", "country", "adm1", "adm2")) {
         if (!is.null(spec[[lvl]])) cur[[lvl]] <- isTRUE(spec[[lvl]])
       }
@@ -1015,9 +1285,11 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
   }
 
   # Drop entries with no active level
-  keep <- vapply(out,
-                 function(s) any(vapply(s, isTRUE, logical(1))),
-                 logical(1))
+  keep <- vapply(
+    out,
+    function(s) any(vapply(s, isTRUE, logical(1))),
+    logical(1)
+  )
   out[keep]
 }
 
@@ -1025,7 +1297,9 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #' levels named in `active`.
 .lvl_set <- function(active) {
   out <- list(region = FALSE, country = FALSE, adm1 = FALSE, adm2 = FALSE)
-  for (lvl in active) out[[lvl]] <- TRUE
+  for (lvl in active) {
+    out[[lvl]] <- TRUE
+  }
   out
 }
 
@@ -1038,11 +1312,12 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #' @param label appended to the "Unknown seasonal_term" warning for caller context
 #' @return character vector of term strings (character(0) for "none")
 .seasonal_terms <- function(term, label = "") {
-  switch(term %||% "none",
-    "none"         = character(0),
+  switch(
+    term %||% "none",
+    "none" = character(0),
     "factor_month" = "factor(month)",
-    "cyclic"       = "s(month, bs = 'cc', k = 6)",
-    "harmonic2"    = c("sin_month", "cos_month", "sin2_month", "cos2_month"),
+    "cyclic" = "s(month, bs = 'cc', k = 6)",
+    "harmonic2" = c("sin_month", "cos_month", "sin2_month", "cos2_month"),
     {
       warning("Unknown seasonal_term", label, ": ", term)
       character(0)
@@ -1064,25 +1339,31 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #'         character(0) if phi_re == "constant" or all candidate levels are
 #'         sparse (<2 distinct values) in `dat`.
 .phi_re_term <- function(phi_re, drop_region, dat, keep = character(0)) {
-  if (identical(phi_re, "constant") || is.null(phi_re)) return(character(0))
+  if (identical(phi_re, "constant") || is.null(phi_re)) {
+    return(character(0))
+  }
 
   phi_rhs_str <- if (isTRUE(drop_region)) {
-    switch(phi_re,
-      region              = "(1 | country)",
-      region_country      = "(1 | country)",
+    switch(
+      phi_re,
+      region = "(1 | country)",
+      region_country = "(1 | country)",
       region_country_adm1 = "(1 | country/ADM1)"
     )
   } else {
-    switch(phi_re,
-      region              = "(1 | AFRO_region)",
-      region_country      = "(1 | AFRO_region/country)",
+    switch(
+      phi_re,
+      region = "(1 | AFRO_region)",
+      region_country = "(1 | AFRO_region/country)",
       region_country_adm1 = "(1 | AFRO_region/country/ADM1)"
     )
   }
 
   phi_rhs_vec <- filter_re_terms_for_data(c(phi_rhs_str), dat, keep = keep)
   if (length(phi_rhs_vec) == 0L) {
-    message("[phi_re] All phi grouping levels sparse (<2 distinct values); using constant phi.")
+    message(
+      "[phi_re] All phi grouping levels sparse (<2 distinct values); using constant phi."
+    )
     character(0)
   } else {
     phi_rhs_vec[1L]
@@ -1113,7 +1394,7 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #'       goes to 0), so `fixed` and `free` runs stay comparable and the old
 #'       path is never disturbed -- the side-by-side rule.
 #'
-#' `log_pop_c` must be CENTRED WITHIN admin_level (see .addLogPopCentred();
+#' `log_pop_c` must be CENTRED WITHIN admin_level (see .add_log_pop_centred();
 #' the monthly track builds it in load_monthly_data()): uncentred, the
 #' deviation term shifts the intercept as well as the slope, and `beta = 1`
 #' would no longer reproduce the offset-only fit. That identity is what makes
@@ -1131,15 +1412,27 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #' @noRd
 .pop_elasticity_terms <- function(cfg, blk_name) {
   pop_elasticity <- cfg$pop_elasticity %||% "fixed"
-  if (identical(pop_elasticity, "fixed")) return(character())
-  if (!isTRUE(cfg$offset_pop))
-    stop(blk_name, ".pop_elasticity = '", pop_elasticity, "' requires ",
-         blk_name, ".offset_pop = true: the elasticity term is parameterised as a ",
-         "DEVIATION from the offset, so without the offset it estimates ",
-         "beta - 1 while the model carries no beta at all.", call. = FALSE)
-  switch(pop_elasticity,
-    free          = "log_pop_c",
-    free_by_level = "log_pop_c:admin_level")
+  if (identical(pop_elasticity, "fixed")) {
+    return(character())
+  }
+  if (!isTRUE(cfg$offset_pop)) {
+    stop(
+      blk_name,
+      ".pop_elasticity = '",
+      pop_elasticity,
+      "' requires ",
+      blk_name,
+      ".offset_pop = true: the elasticity term is parameterised as a ",
+      "DEVIATION from the offset, so without the offset it estimates ",
+      "beta - 1 while the model carries no beta at all.",
+      call. = FALSE
+    )
+  }
+  switch(
+    pop_elasticity,
+    free = "log_pop_c",
+    free_by_level = "log_pop_c:admin_level"
+  )
 }
 
 #' .build_count_track_parts
@@ -1156,37 +1449,60 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 #' config + OFAT sweeps + sparse frames, both tracks).
 #'
 #' @noRd
-.build_count_track_parts <- function(opt, dat, block, tag, leaf_col, label,
-                                     extra_check = NULL) {
-  cfg    <- opt[[block, exact = FALSE]]
+.build_count_track_parts <- function(
+  opt,
+  dat,
+  block,
+  tag,
+  leaf_col,
+  label,
+  extra_check = NULL
+) {
+  cfg <- opt[[block, exact = FALSE]]
   # The track's own runtime default (size brms, monthly brms_cb), as the fit
   # scripts resolve it; resolved configs always carry the key.
-  be     <- cfg[["backend"]] %||% get_default_options()[[block]][["backend"]]
+  be <- cfg[["backend"]] %||% get_default_options()[[block]][["backend"]]
   re_sep <- if (isTRUE(cfg[[be]]$re_uncorrelated)) "||" else "|"
 
-  rfc         <- .resolve_fixed_covariates(cfg, cfg$admin_level, opt$enso$lag_months)
-  slopes      <- rfc$slopes
-  slope_covs  <- rfc$slope_covs
+  rfc <- .resolve_fixed_covariates(cfg, cfg$admin_level, opt$enso$lag_months)
+  slopes <- rfc$slopes
+  slope_covs <- rfc$slope_covs
   fixed_terms <- c("1", rfc$fixed_covs)
 
   # Per-level RE group strings (shared resolver). Country-grouping mode drops
   # the AFRO_region level (region entry -> NULL).
-  drop_region    <- isTRUE(opt$grouping$enable)
+  drop_region <- isTRUE(opt$grouping$enable)
   group_by_level <- re_group_by_level(leaf_col, drop_region = drop_region)
   re_terms <- character()
 
-  re_terms <- c(re_terms,
-                .scoped_intercept_re_terms(cfg, cfg$admin_level, group_by_level,
-                                           drop_region, label))
+  re_terms <- c(
+    re_terms,
+    .scoped_intercept_re_terms(
+      cfg,
+      cfg$admin_level,
+      group_by_level,
+      drop_region,
+      label
+    )
+  )
 
-  re_terms <- c(re_terms,
-                .slope_re_terms(slope_covs, slopes, group_by_level, re_sep,
-                                 c("region", "country", "adm1", "adm2")))
+  re_terms <- c(
+    re_terms,
+    .slope_re_terms(
+      slope_covs,
+      slopes,
+      group_by_level,
+      re_sep,
+      c("region", "country", "adm1", "adm2")
+    )
+  )
 
   # Seasonal term
   seas_terms <- .seasonal_terms(cfg$seasonal_term, label)
 
-  if (!is.null(extra_check)) extra_check(cfg, slope_covs)
+  if (!is.null(extra_check)) {
+    extra_check(cfg, slope_covs)
+  }
 
   # Offsets -- shared with the other three tracks (.offset_terms()).
   off_terms <- .offset_terms(opt, tag)
@@ -1201,22 +1517,28 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
   # country-grouped fit with outbreaks from only one country): slash-nested
   # intercept REs are trimmed to the deepest valid level; single-level slope
   # RE groups are dropped entirely.
-  fft         <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
+  fft <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
   fixed_terms <- fft$fixed_terms
   # Single-country keep: monthly only (size is retired downstream and keeps
   # the plain trimming).
-  keep        <- if (identical(block, "monthly")) .single_country_keep(opt, dat) else character(0)
-  re_terms    <- filter_re_terms_for_data(fft$re_terms, dat, keep = keep)
+  keep <- if (identical(block, "monthly")) {
+    .single_country_keep(opt, dat)
+  } else {
+    character(0)
+  }
+  re_terms <- filter_re_terms_for_data(fft$re_terms, dat, keep = keep)
 
   out <- list(
     fixed_terms = fixed_terms,
-    seas_terms  = seas_terms,
-    re_terms    = re_terms,
-    off_terms   = off_terms,
-    slope_covs  = slope_covs,
-    phi_re      = cfg$phi_re %||% "constant"
+    seas_terms = seas_terms,
+    re_terms = re_terms,
+    off_terms = off_terms,
+    slope_covs = slope_covs,
+    phi_re = cfg$phi_re %||% "constant"
   )
-  if (length(keep)) out$single_country <- TRUE
+  if (length(keep)) {
+    out$single_country <- TRUE
+  }
   out
 }
 
@@ -1231,11 +1553,15 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
   if (identical(cfg$seasonal_term, "cyclic")) {
     seasonal_cols <- c("sin_month", "cos_month", "sin2_month", "cos2_month")
     bad <- intersect(slope_covs, seasonal_cols)
-    if (length(bad) > 0L)
-      stop("monthly.seasonal_term = 'cyclic' cannot carry a random slope on ",
-           "seasonal column(s): ", paste(bad, collapse = ", "),
-           ". Use seasonal_term = 'harmonic2' for a seasonal RE slope, or ",
-           "drop the re_adm1_<col>_slope flag.")
+    if (length(bad) > 0L) {
+      stop(
+        "monthly.seasonal_term = 'cyclic' cannot carry a random slope on ",
+        "seasonal column(s): ",
+        paste(bad, collapse = ", "),
+        ". Use seasonal_term = 'harmonic2' for a seasonal RE slope, or ",
+        "drop the re_adm1_<col>_slope flag."
+      )
+    }
   }
   invisible(NULL)
 }
@@ -1251,13 +1577,14 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 .build_nb_formula <- function(opt, dat, parts, response) {
   phi_re <- parts$phi_re
 
-  rhs <- paste(c(parts$fixed_terms, parts$seas_terms,
-                 parts$re_terms,    parts$off_terms),
-               collapse = " + ")
+  rhs <- paste(
+    c(parts$fixed_terms, parts$seas_terms, parts$re_terms, parts$off_terms),
+    collapse = " + "
+  )
   bf_main <- brms::bf(stats::as.formula(paste(response, "~", rhs)))
 
   drop_region <- isTRUE(opt$grouping$enable)
-  phi_term    <- .phi_re_term(phi_re, drop_region, dat)
+  phi_term <- .phi_re_term(phi_re, drop_region, dat)
   if (length(phi_term) == 0L) {
     bf_main
   } else {
@@ -1285,8 +1612,14 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 build_size_formula_parts <- function(opt, dat) {
   stopifnot(!is.null(opt$size))
   # Size leaf col = ADM2. Shared body: .build_count_track_parts().
-  .build_count_track_parts(opt, dat, "size", "siz", leaf_col = "ADM2",
-                           label = " (size model)")
+  .build_count_track_parts(
+    opt,
+    dat,
+    "size",
+    "siz",
+    leaf_col = "ADM2",
+    label = " (size model)"
+  )
 }
 
 
@@ -1302,7 +1635,12 @@ build_size_formula_parts <- function(opt, dat) {
 #' need to modify terms before assembly (e.g. 04d_run_siz_brms_cb.R) should
 #' call build_size_formula_parts() directly.
 build_size_formula <- function(opt, dat) {
-  .build_nb_formula(opt, dat, build_size_formula_parts(opt, dat), "suspected_cases")
+  .build_nb_formula(
+    opt,
+    dat,
+    build_size_formula_parts(opt, dat),
+    "suspected_cases"
+  )
 }
 
 
@@ -1315,17 +1653,27 @@ build_size_formula <- function(opt, dat) {
 # before the formula is assembled, exactly as 04_fit_occ_brms.R:129-134 does for
 # the occurrence baseline. The builder below only NAMES them, so it stays a pure
 # function of (opt, dat) and is testable without splines2.
-.DUR_MS_PREFIX      <- "msoms"    # basehaz_duration = "ms", basis on mso
-.DUR_SEAS_MS_PREFIX <- "seasms"   # basehaz_poisson  = "ms", basis on t_start_seas
+.DUR_MS_PREFIX <- "msoms" # basehaz_duration = "ms", basis on mso
+.DUR_SEAS_MS_PREFIX <- "seasms" # basehaz_poisson  = "ms", basis on t_start_seas
 
 .dur_ms_cols <- function(dat, prefix, what, cfg_key) {
   cols <- grep(sprintf("^%s[0-9]+$", prefix), names(dat), value = TRUE)
-  if (length(cols) == 0L)
-    stop(sprintf(paste("duration.%s = 'ms' but no %s* columns are present in the",
-                       "data. The %s M-spline basis must be bound onto the frame",
-                       "before build_duration_formula*() is called (see",
-                       "04_fit_dur_brms.R)."),
-                 cfg_key, prefix, what), call. = FALSE)
+  if (length(cols) == 0L) {
+    stop(
+      sprintf(
+        paste(
+          "duration.%s = 'ms' but no %s* columns are present in the",
+          "data. The %s M-spline basis must be bound onto the frame",
+          "before build_duration_formula*() is called (see",
+          "04_fit_dur_brms.R)."
+        ),
+        cfg_key,
+        prefix,
+        what
+      ),
+      call. = FALSE
+    )
+  }
   sort(cols)
 }
 
@@ -1357,23 +1705,28 @@ build_size_formula <- function(opt, dat) {
 #'   slope_covs)
 build_duration_formula_parts <- function(opt, dat) {
   stopifnot(!is.null(opt$duration))
-  dur    <- opt$duration
-  be     <- dur$backend %||% "brms"
+  dur <- opt$duration
+  be <- dur$backend %||% "brms"
   re_sep <- if (isTRUE(dur[[be]]$re_uncorrelated)) "||" else "|"
 
   # --- Covariates: same union rule as the size track (convention 2) ---------
-  rfc         <- .resolve_fixed_covariates(dur, dur$admin_level %||% "ADM1", opt$enso$lag_months)
-  slopes      <- rfc$slopes
-  slope_covs  <- rfc$slope_covs
+  rfc <- .resolve_fixed_covariates(
+    dur,
+    dur$admin_level %||% "ADM1",
+    opt$enso$lag_months
+  )
+  slopes <- rfc$slopes
+  slope_covs <- rfc$slope_covs
   fixed_terms <- c("1", rfc$fixed_covs)
 
   # --- Primary baseline hazard: months since onset --------------------------
   # `mso_band` is rebuilt from duration.mso_breaks at load time
   # (load_duration_data), so a band sensitivity run needs no data re-prep.
-  bh_terms <- switch(dur$basehaz_duration %||% "factor",
-    none   = character(0),
+  bh_terms <- switch(
+    dur$basehaz_duration %||% "factor",
+    none = character(0),
     factor = "mso_band",
-    ms     = .dur_ms_cols(dat, .DUR_MS_PREFIX, "mso", "basehaz_duration"),
+    ms = .dur_ms_cols(dat, .DUR_MS_PREFIX, "mso", "basehaz_duration"),
     {
       warning("Unknown duration.basehaz_duration: ", dur$basehaz_duration)
       character(0)
@@ -1381,20 +1734,25 @@ build_duration_formula_parts <- function(opt, dat) {
   )
   # A subset with a single occupied band carries no baseline contrast; keeping
   # the term would make the design matrix rank-deficient against the intercept.
-  if (identical(bh_terms, "mso_band") &&
-      length(unique(stats::na.omit(dat[["mso_band"]]))) < 2L) {
-    message("[duration] mso_band has <2 occupied levels in this subset; ",
-            "dropping the mso baseline (constant hazard for this fit).")
+  if (
+    identical(bh_terms, "mso_band") &&
+      length(unique(stats::na.omit(dat[["mso_band"]]))) < 2L
+  ) {
+    message(
+      "[duration] mso_band has <2 occupied levels in this subset; ",
+      "dropping the mso baseline (constant hazard for this fit)."
+    )
     bh_terms <- character(0)
   }
 
   # --- Secondary baseline hazard: seasonal time -----------------------------
-  seas_terms <- switch(dur$basehaz_poisson %||% "none",
-    none                  = character(0),
-    factor                = "factor(month_seas)",
-    cyclic =               ,
-    seasonal              = "s(t_start_seas, bs = 'cc', k = 8)",
-    ms     = .dur_ms_cols(dat, .DUR_SEAS_MS_PREFIX, "seasonal", "basehaz_poisson"),
+  seas_terms <- switch(
+    dur$basehaz_poisson %||% "none",
+    none = character(0),
+    factor = "factor(month_seas)",
+    cyclic = ,
+    seasonal = "s(t_start_seas, bs = 'cc', k = 8)",
+    ms = .dur_ms_cols(dat, .DUR_SEAS_MS_PREFIX, "seasonal", "basehaz_poisson"),
     {
       warning("Unknown duration.basehaz_poisson: ", dur$basehaz_poisson)
       character(0)
@@ -1405,25 +1763,43 @@ build_duration_formula_parts <- function(opt, dat) {
   # the simulator kernels and 09's seasonality step score the four harmonics
   # and nothing else.
   dur_seas <- dur[["seasonal_term"]] %||% "none"
-  if (!dur_seas %in% c("none", "harmonic2"))
-    stop("duration.seasonal_term must be 'none' or 'harmonic2'; got '", dur_seas, "'.",
-         call. = FALSE)
+  if (!dur_seas %in% c("none", "harmonic2")) {
+    stop(
+      "duration.seasonal_term must be 'none' or 'harmonic2'; got '",
+      dur_seas,
+      "'.",
+      call. = FALSE
+    )
+  }
   seas_terms <- c(seas_terms, .seasonal_terms(dur_seas, " (duration)"))
 
   # --- Random effects -------------------------------------------------------
-  drop_region    <- isTRUE(opt$grouping$enable)
+  drop_region <- isTRUE(opt$grouping$enable)
   group_by_level <- re_group_by_level("gid", drop_region = drop_region)
-  re_terms       <- character()
+  re_terms <- character()
 
   # `admin_level: ADM1-ADM2` + `re_adm2_leaf_scope: adm2_only` adds the
   # monthly track's `(0 + is_adm2 | country:ADM1:gid_leaf)` leaf.
-  re_terms <- c(re_terms,
-                .scoped_intercept_re_terms(dur, dur$admin_level %||% "ADM1",
-                                           group_by_level, drop_region))
+  re_terms <- c(
+    re_terms,
+    .scoped_intercept_re_terms(
+      dur,
+      dur$admin_level %||% "ADM1",
+      group_by_level,
+      drop_region
+    )
+  )
 
-  re_terms <- c(re_terms,
-                .slope_re_terms(slope_covs, slopes, group_by_level, re_sep,
-                                 c("region", "country", "adm1")))
+  re_terms <- c(
+    re_terms,
+    .slope_re_terms(
+      slope_covs,
+      slopes,
+      group_by_level,
+      re_sep,
+      c("region", "country", "adm1")
+    )
+  )
 
   # --- Offset ---------------------------------------------------------------
   # Shared with the other three tracks (.offset_terms()). With the anchor gate
@@ -1431,19 +1807,26 @@ build_duration_formula_parts <- function(opt, dat) {
   off_terms <- .offset_terms(opt, "dur")
 
   # Data-aware pruning (see the roxygen note above).
-  fft         <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
+  fft <- filter_fixed_factor_terms_for_data(fixed_terms, re_terms, dat)
   fixed_terms <- fft$fixed_terms
-  re_terms    <- filter_re_terms_for_data(fft$re_terms, dat,
-                                          keep = .single_country_keep(opt, dat))
+  re_terms <- filter_re_terms_for_data(
+    fft$re_terms,
+    dat,
+    keep = .single_country_keep(opt, dat)
+  )
 
-  .flag_single_country(list(
-    fixed_terms = fixed_terms,
-    bh_terms    = bh_terms,
-    seas_terms  = seas_terms,
-    re_terms    = re_terms,
-    off_terms   = off_terms,
-    slope_covs  = slope_covs
-  ), opt, dat)
+  .flag_single_country(
+    list(
+      fixed_terms = fixed_terms,
+      bh_terms = bh_terms,
+      seas_terms = seas_terms,
+      re_terms = re_terms,
+      off_terms = off_terms,
+      slope_covs = slope_covs
+    ),
+    opt,
+    dat
+  )
 }
 
 #' build_duration_formula
@@ -1459,9 +1842,16 @@ build_duration_formula_parts <- function(opt, dat) {
 #' size side.
 build_duration_formula <- function(opt, dat) {
   parts <- build_duration_formula_parts(opt, dat)
-  rhs   <- paste(c(parts$fixed_terms, parts$bh_terms, parts$seas_terms,
-                   parts$re_terms,    parts$off_terms),
-                 collapse = " + ")
+  rhs <- paste(
+    c(
+      parts$fixed_terms,
+      parts$bh_terms,
+      parts$seas_terms,
+      parts$re_terms,
+      parts$off_terms
+    ),
+    collapse = " + "
+  )
   brms::bf(stats::as.formula(paste("y ~", rhs)))
 }
 
@@ -1494,9 +1884,15 @@ build_monthly_formula_parts <- function(opt, dat) {
   # Leaf col = gid (the GAM's s(gid, bs="re")), unlike size's ADM2; offset =
   # pop (toggle) x person-time (unconditional, duration's behaviour). Shared
   # body: .build_count_track_parts(), plus the cyclic-slope guard.
-  .build_count_track_parts(opt, dat, "monthly", "mon", leaf_col = "gid",
-                           label = " (monthly model)",
-                           extra_check = .monthly_cyclic_slope_check)
+  .build_count_track_parts(
+    opt,
+    dat,
+    "monthly",
+    "mon",
+    leaf_col = "gid",
+    label = " (monthly model)",
+    extra_check = .monthly_cyclic_slope_check
+  )
 }
 
 #' build_monthly_formula
@@ -1508,5 +1904,10 @@ build_monthly_formula_parts <- function(opt, dat) {
 #' appends DLNM crossbasis columns) should call build_monthly_formula_parts()
 #' directly, as 04_fit_siz_brms_cb.R does on the size side.
 build_monthly_formula <- function(opt, dat) {
-  .build_nb_formula(opt, dat, build_monthly_formula_parts(opt, dat), "cases_month")
+  .build_nb_formula(
+    opt,
+    dat,
+    build_monthly_formula_parts(opt, dat),
+    "cases_month"
+  )
 }

@@ -1,4 +1,17 @@
-
+# dlnm.R — DLNM cross-basis construction, replay and surfaces for the brms_cb
+#   fits and the simulator kernels.
+#
+# Provides:
+#   make_lag_matrix()               season-aware lag matrix of one variable
+#   build_cb_block()                fit-time cross-basis columns + cb_meta
+#   build_cb_columns_from_Q(), build_cb_design()   replay the stored basis
+#   build_mso_basis()               months-since-onset lookup table (mon)
+#   extract_cb_surface()            exposure- / lag-response surfaces
+#   extract_cb_country_surface()    country-level single-lag surfaces
+#
+# Details:
+#   Replay reuses the fit-time argvar / arglag (resolved knots) stored in
+#   cb_meta, so a simulated or postprocessed basis is bit-identical to the fit.
 
 #' .LATENT_CB_VARS
 #'
@@ -36,11 +49,13 @@
 #'     already-fitted ns cb_meta sidecars, whose stored attrs are frozen.
 .onebasis_replay_args <- function(ob_attrs) {
   args <- (ob_attrs %||% list())[setdiff(names(ob_attrs %||% list()), "range")]
-  if (identical(args$fun, "ns")) args$degree <- NULL
+  if (identical(args$fun, "ns")) {
+    args$degree <- NULL
+  }
   args
 }
 
-#' makeLagMatrix
+#' make_lag_matrix
 #'
 #' Build an n × (max_lag + 1) matrix of lagged exposures for a single variable,
 #' suitable for passing as pre-lagged input to dlnm::crossbasis().
@@ -50,12 +65,12 @@
 #'
 #'   var == "enso":
 #'     Reuses the pre-built enso_lag0 … enso_lag{max_lag} columns written by
-#'     joinEnsoLags() (calendar-aligned global index; no season-year reset).
+#'     join_enso_lags() (calendar-aligned global index; no season-year reset).
 #'     max_lag must not exceed 12.  Any NA values (coverage gaps in the ONI
 #'     series) are imputed to 0 (neutral ENSO) with a warning.
 #'
 #'   all other vars (climate covariates):
-#'     Generalises makeClimateLags() to lags 0..max_lag with season-aware
+#'     Generalises make_climate_lags() to lags 0..max_lag with season-aware
 #'     grouping.  Lags are computed within each (uid × season-year) group so
 #'     they cannot cross cholera-season boundaries.  Season-start boundary
 #'     cells (dplyr::lag() → NA) are set to 0, matching the ttlo_mat /
@@ -67,25 +82,36 @@
 #' @param var     variable stem: "mean_precip", "dev_temp_daymean", "enso", …
 #' @param max_lag maximum lag in months (inclusive).  ENSO max: 12.
 #' @return numeric matrix, n × (max_lag + 1), colnames "lag0" … "lag{max_lag}".
-makeLagMatrix <- function(df, var, max_lag) {
+make_lag_matrix <- function(df, var, max_lag) {
   max_lag <- as.integer(max_lag)
 
   if (identical(var, "enso")) {
     # --- ENSO branch: reuse pre-built enso_lag* columns ---
-    if (max_lag > 12L)
-      stop("makeLagMatrix: ENSO max_lag cannot exceed 12 ",
-           "(joinEnsoLags() creates columns up to enso_lag12)")
+    if (max_lag > 12L) {
+      stop(
+        "make_lag_matrix: ENSO max_lag cannot exceed 12 ",
+        "(join_enso_lags() creates columns up to enso_lag12)"
+      )
+    }
     lag_cols <- sprintf("enso_lag%d", seq(0L, max_lag))
-    missing  <- setdiff(lag_cols, colnames(df))
-    if (length(missing) > 0)
-      stop("makeLagMatrix: required ENSO columns not found in df: ",
-           paste(missing, collapse = ", "),
-           ". Ensure joinEnsoLags() was called with max_lag >= ", max_lag)
+    missing <- setdiff(lag_cols, colnames(df))
+    if (length(missing) > 0) {
+      stop(
+        "make_lag_matrix: required ENSO columns not found in df: ",
+        paste(missing, collapse = ", "),
+        ". Ensure join_enso_lags() was called with max_lag >= ",
+        max_lag
+      )
+    }
     Q <- as.matrix(df[, lag_cols, drop = FALSE])
     na_count <- sum(is.na(Q))
     if (na_count > 0) {
-      warning("makeLagMatrix: ", na_count, " NA(s) in ENSO lag columns; ",
-              "imputing to 0 (neutral ENSO conditions).")
+      warning(
+        "make_lag_matrix: ",
+        na_count,
+        " NA(s) in ENSO lag columns; ",
+        "imputing to 0 (neutral ENSO conditions)."
+      )
       Q[is.na(Q)] <- 0
     }
     colnames(Q) <- sprintf("lag%d", seq(0L, max_lag))
@@ -94,30 +120,39 @@ makeLagMatrix <- function(df, var, max_lag) {
 
   # --- Climate branch: read pre-computed lag columns ----------------------
   # Lag columns (<var>_lag1 ... <var>_lag{max_lag}) must have been written by
-  # makeClimateLags() during data preparation (03_prepare_occ.R /
+  # make_climate_lags() during data preparation (03_prepare_occ.R /
   # 03b_prepare_siz.R).  If any are missing, a clear error is raised so the
   # user knows to re-run prep with the required max_lag.
-  if (!var %in% colnames(df))
-    stop("makeLagMatrix: column '", var, "' not found in df. ",
-         "Available columns: ", paste(head(colnames(df), 20), collapse = ", "))
+  if (!var %in% colnames(df)) {
+    stop(
+      "make_lag_matrix: column '",
+      var,
+      "' not found in df. ",
+      "Available columns: ",
+      paste(head(colnames(df), 20), collapse = ", ")
+    )
+  }
 
-  needed      <- sprintf("%s_lag%d", var, seq(1L, max_lag))
+  needed <- sprintf("%s_lag%d", var, seq(1L, max_lag))
   missing_cols <- setdiff(needed, colnames(df))
-  if (length(missing_cols) > 0)
-    stop("makeLagMatrix: pre-computed lag columns not found: ",
-         paste(missing_cols, collapse = ", "),
-         ". Re-run 03_prepare_occ.R / 03b_prepare_siz.R with max_lag >= ",
-         max_lag)
+  if (length(missing_cols) > 0) {
+    stop(
+      "make_lag_matrix: pre-computed lag columns not found: ",
+      paste(missing_cols, collapse = ", "),
+      ". Re-run 03_prepare_occ.R / 03b_prepare_siz.R with max_lag >= ",
+      max_lag
+    )
+  }
 
-  lag_col_names <- c(var, needed)   # lag0 = <var>; lag1..max_lag = <var>_lagk
+  lag_col_names <- c(var, needed) # lag0 = <var>; lag1..max_lag = <var>_lagk
   Q <- as.matrix(df[, lag_col_names, drop = FALSE])
-  Q[is.na(Q)] <- 0   # boundary NAs → 0 (ttlo_mat / season-boundary convention)
+  Q[is.na(Q)] <- 0 # boundary NAs → 0 (ttlo_mat / season-boundary convention)
   colnames(Q) <- sprintf("lag%d", seq(0L, max_lag))
   Q
 }
 
 
-#' extractCbSurface
+#' extract_cb_surface
 #'
 #' Compute predicted exposure-response / lag-response surfaces from a brms fit
 #' that contains dlnm::crossbasis() predictors.  Uses dlnm::crosspred() on a
@@ -147,20 +182,28 @@ makeLagMatrix <- function(df, var, max_lag) {
 #'   $cumfit / $cumlo / $cumhi       — cumulative curves + 95% CI (if cumul = TRUE)
 #'   $cumlo50 / $cumhi50             — cumulative 50% CrI (if cumul = TRUE)
 #'   $meta   — the original metadata entry
-extractCbSurface <- function(fit, meta, vars  = NULL,
-                              at    = NULL,
-                              cumul = FALSE,
-                              probs = c(0.025, 0.5, 0.975),
-                              probs50 = c(0.25, 0.75)) {
-  if (!requireNamespace("dlnm", quietly = TRUE))
-    stop("extractCbSurface: package 'dlnm' is required.")
-  if (!requireNamespace("brms", quietly = TRUE))
-    stop("extractCbSurface: package 'brms' is required.")
+extract_cb_surface <- function(
+  fit,
+  meta,
+  vars = NULL,
+  at = NULL,
+  cumul = FALSE,
+  probs = c(0.025, 0.5, 0.975),
+  probs50 = c(0.25, 0.75)
+) {
+  if (!requireNamespace("dlnm", quietly = TRUE)) {
+    stop("extract_cb_surface: package 'dlnm' is required.")
+  }
+  if (!requireNamespace("brms", quietly = TRUE)) {
+    stop("extract_cb_surface: package 'brms' is required.")
+  }
 
-  if (is.null(vars)) vars <- names(meta)
+  if (is.null(vars)) {
+    vars <- names(meta)
+  }
   vars <- intersect(vars, names(meta))
   if (length(vars) == 0) {
-    warning("extractCbSurface: no matching variables found in meta.")
+    warning("extract_cb_surface: no matching variables found in meta.")
     return(list())
   }
 
@@ -170,7 +213,11 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     vm <- meta[[v]]
     cb_col_names <- vm$cb_col_names
     if (is.null(cb_col_names) || length(cb_col_names) == 0) {
-      warning("extractCbSurface: no cb_col_names in meta for '", v, "'. Skipping.")
+      warning(
+        "extract_cb_surface: no cb_col_names in meta for '",
+        v,
+        "'. Skipping."
+      )
       next
     }
 
@@ -180,13 +227,19 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     draws <- tryCatch(
       brms::as_draws_matrix(fit, variable = b_names),
       error = function(e) {
-        warning("extractCbSurface: could not extract draws for '", v,
-                "': ", conditionMessage(e))
+        warning(
+          "extract_cb_surface: could not extract draws for '",
+          v,
+          "': ",
+          conditionMessage(e)
+        )
         NULL
       }
     )
-    if (is.null(draws) || nrow(draws) == 0) next
-    draws <- unclass(draws)  # plain numeric matrix (S × K)
+    if (is.null(draws) || nrow(draws) == 0) {
+      next
+    }
+    draws <- unclass(draws) # plain numeric matrix (S × K)
 
     n_cols <- ncol(draws)
 
@@ -198,17 +251,19 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     if (!is.null(vm$single_lag)) {
       cb_stub <- matrix(0, nrow = 1L, ncol = n_cols)
       ob_attrs <- vm$onebasis_attrs %||% list()
-      for (nm in names(ob_attrs)) attr(cb_stub, nm) <- ob_attrs[[nm]]
+      for (nm in names(ob_attrs)) {
+        attr(cb_stub, nm) <- ob_attrs[[nm]]
+      }
       class(cb_stub) <- c("onebasis", "matrix")
     } else {
       cb_stub <- structure(
         matrix(0, nrow = 1L, ncol = n_cols),
-        class  = c("crossbasis", "matrix"),
+        class = c("crossbasis", "matrix"),
         argvar = vm$argvar,
         arglag = vm$arglag,
-        lag    = vm$lag,
-        df     = vm$df,
-        range  = vm$range
+        lag = vm$lag,
+        df = vm$df,
+        range = vm$range
       )
     }
 
@@ -216,8 +271,11 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     rng <- vm$range %||% c(NA_real_, NA_real_)
     if (is.null(at)) {
       if (anyNA(rng)) {
-        warning("extractCbSurface: unknown range for '", v,
-                "' — provide `at` explicitly. Skipping.")
+        warning(
+          "extract_cb_surface: unknown range for '",
+          v,
+          "' — provide `at` explicitly. Skipping."
+        )
         next
       }
       at_vals <- seq(rng[1], rng[2], length.out = 50L)
@@ -226,18 +284,20 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     }
 
     # Per-draw crosspred loop
-    n_draws     <- nrow(draws)
-    draw_preds  <- vector("list", n_draws)
-    ok_count    <- 0L
+    n_draws <- nrow(draws)
+    draw_preds <- vector("list", n_draws)
+    ok_count <- 0L
     for (i in seq_len(n_draws)) {
       b_i <- as.numeric(draws[i, ])
       p_i <- tryCatch(
-        dlnm::crosspred(cb_stub,
-                        coef  = b_i,
-                        vcov  = diag(0, length(b_i)),
-                        at    = at_vals,
-                        cen   = 0,
-                        cumul = cumul),
+        dlnm::crosspred(
+          cb_stub,
+          coef = b_i,
+          vcov = diag(0, length(b_i)),
+          at = at_vals,
+          cen = 0,
+          cumul = cumul
+        ),
         error = function(e) NULL
       )
       if (!is.null(p_i)) {
@@ -248,41 +308,49 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
     draw_preds <- Filter(Negate(is.null), draw_preds)
 
     if (length(draw_preds) == 0) {
-      warning("extractCbSurface: all crosspred draws failed for '", v, "'. Skipping.")
+      warning(
+        "extract_cb_surface: all crosspred draws failed for '",
+        v,
+        "'. Skipping."
+      )
       next
     }
-    message(sprintf("extractCbSurface: %d/%d successful draws for '%s'",
-                    ok_count, n_draws, v))
+    message(sprintf(
+      "extract_cb_surface: %d/%d successful draws for '%s'",
+      ok_count,
+      n_draws,
+      v
+    ))
 
     # Stack matfit into a 3D array: length(at_vals) × n_lags × n_draws
     # (dlnm 2.4+ stores log-RR in $matfit; $matRRfit does not exist)
     mat_list <- lapply(draw_preds, function(x) x$matfit)
-    mat_arr  <- simplify2array(mat_list)
+    mat_arr <- simplify2array(mat_list)
 
     # Lag sequence derived from matfit column names ("lag0", "lag1", ...)
     lag_seq <- as.numeric(sub("^lag", "", colnames(draw_preds[[1]]$matfit)))
 
     out <- list(
-      at         = at_vals,
-      lag        = lag_seq,
-      single_lag = vm$single_lag,   # NULL for distributed-lag; integer for onebasis
-      matfit     = apply(mat_arr, c(1, 2), median),
-      matlo      = apply(mat_arr, c(1, 2), quantile, probs = probs[1]),
-      mathi      = apply(mat_arr, c(1, 2), quantile, probs = probs[3]),
-      matlo50    = apply(mat_arr, c(1, 2), quantile, probs = probs50[1]),
-      mathi50    = apply(mat_arr, c(1, 2), quantile, probs = probs50[2]),
-      allfit     = mat_arr,
-      meta       = vm
+      at = at_vals,
+      lag = lag_seq,
+      single_lag = vm$single_lag, # NULL for distributed-lag; integer for onebasis
+      matfit = apply(mat_arr, c(1, 2), median),
+      matlo = apply(mat_arr, c(1, 2), quantile, probs = probs[1]),
+      mathi = apply(mat_arr, c(1, 2), quantile, probs = probs[3]),
+      matlo50 = apply(mat_arr, c(1, 2), quantile, probs = probs50[1]),
+      mathi50 = apply(mat_arr, c(1, 2), quantile, probs = probs50[2]),
+      allfit = mat_arr,
+      meta = vm
     )
 
     if (cumul && !is.null(draw_preds[[1]]$allfit)) {
       cum_list <- lapply(draw_preds, function(x) x$allfit)
-      cum_arr  <- do.call(cbind, lapply(cum_list, as.numeric))
-      out$cumfit   <- apply(cum_arr, 1, median)
-      out$cumlo    <- apply(cum_arr, 1, quantile, probs = probs[1])
-      out$cumhi    <- apply(cum_arr, 1, quantile, probs = probs[3])
-      out$cumlo50  <- apply(cum_arr, 1, quantile, probs = probs50[1])
-      out$cumhi50  <- apply(cum_arr, 1, quantile, probs = probs50[2])
+      cum_arr <- do.call(cbind, lapply(cum_list, as.numeric))
+      out$cumfit <- apply(cum_arr, 1, median)
+      out$cumlo <- apply(cum_arr, 1, quantile, probs = probs[1])
+      out$cumhi <- apply(cum_arr, 1, quantile, probs = probs[3])
+      out$cumlo50 <- apply(cum_arr, 1, quantile, probs = probs50[1])
+      out$cumhi50 <- apply(cum_arr, 1, quantile, probs = probs50[2])
     }
 
     results[[v]] <- out
@@ -292,14 +360,14 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
 }
 
 
-#' extractCbCountrySurface
+#' extract_cb_country_surface
 #'
 #' Country-level exposure-response surfaces for a single-lag (onebasis) DLNM
 #' crossbasis variable: population CB coefficient draws + per-country random
 #' effect draws (the "country" ranef group), combined and evaluated at `at`
 #' via the variable's stored onebasis attributes (Z_cen, centered at
-#' ENSO/exposure = 0, mirroring extractCbSurface()'s `cen = 0` convention).
-#' Companion to extractCbSurface() (population-level only, crosspred-based);
+#' ENSO/exposure = 0, mirroring extract_cb_surface()'s `cen = 0` convention).
+#' Companion to extract_cb_surface() (population-level only, crosspred-based);
 #' this one is draw-based (no vcov, so no crosspred) because ranef draws have
 #' no crosspred entry point. Shared by 06_fit_figures_lag_compare.R's
 #' country-ERF-by-lag figure and 05_fit_postprocess_lag_compare_surface.R
@@ -326,68 +394,100 @@ extractCbSurface <- function(fit, meta, vars  = NULL,
 #'   filtering), each entry: list(at=, matfit=, matlo=, mathi=, matlo50=,
 #'   mathi50=) — numeric vectors of length(at), log-RR scale, posterior median
 #'   + 95% and 50% credible intervals (draw-based, not crosspred-based like
-#'   extractCbSurface()).
-extractCbCountrySurface <- function(fit, meta, at = NULL, countries = NULL,
-                                     n_draws = 200L, seed = 1234L,
-                                     probs = c(0.025, 0.975),
-                                     probs50 = c(0.25, 0.75)) {
-  if (!requireNamespace("dlnm", quietly = TRUE))
-    stop("extractCbCountrySurface: package 'dlnm' is required.")
-  if (!requireNamespace("brms", quietly = TRUE))
-    stop("extractCbCountrySurface: package 'brms' is required.")
-  if (is.null(meta$single_lag))
-    stop("extractCbCountrySurface: `meta` has no single_lag — this helper ",
-         "only supports single-lag (onebasis) crossbasis variables.")
+#'   extract_cb_surface()).
+extract_cb_country_surface <- function(
+  fit,
+  meta,
+  at = NULL,
+  countries = NULL,
+  n_draws = 200L,
+  seed = 1234L,
+  probs = c(0.025, 0.975),
+  probs50 = c(0.25, 0.75)
+) {
+  if (!requireNamespace("dlnm", quietly = TRUE)) {
+    stop("extract_cb_country_surface: package 'dlnm' is required.")
+  }
+  if (!requireNamespace("brms", quietly = TRUE)) {
+    stop("extract_cb_country_surface: package 'brms' is required.")
+  }
+  if (is.null(meta$single_lag)) {
+    stop(
+      "extract_cb_country_surface: `meta` has no single_lag — this helper ",
+      "only supports single-lag (onebasis) crossbasis variables."
+    )
+  }
 
   cb_names <- meta$cb_col_names
-  K        <- length(cb_names)
-  b_pop_raw <- unclass(brms::as_draws_matrix(fit, variable = paste0("b_", cb_names)))
+  K <- length(cb_names)
+  b_pop_raw <- unclass(brms::as_draws_matrix(
+    fit,
+    variable = paste0("b_", cb_names)
+  ))
   colnames(b_pop_raw) <- cb_names
 
   set.seed(seed)
-  draw_idx    <- sample.int(nrow(b_pop_raw), min(n_draws, nrow(b_pop_raw)))
-  b_pop_draws <- b_pop_raw[draw_idx, , drop = FALSE]   # [S x K]
+  draw_idx <- sample.int(nrow(b_pop_raw), min(n_draws, nrow(b_pop_raw)))
+  b_pop_draws <- b_pop_raw[draw_idx, , drop = FALSE] # [S x K]
 
   re_all <- brms::ranef(fit, summary = FALSE)
-  if (!"country" %in% names(re_all))
-    stop("extractCbCountrySurface: fit has no 'country' ranef group.")
+  if (!"country" %in% names(re_all)) {
+    stop("extract_cb_country_surface: fit has no 'country' ranef group.")
+  }
   re_country_draws <- re_all[["country"]][draw_idx, , cb_names, drop = FALSE]
-  country_lvls <- dimnames(re_country_draws)[[2]]   # e.g. "Central Africa_AGO"
-  iso3         <- sub(".*_", "", country_lvls)
+  country_lvls <- dimnames(re_country_draws)[[2]] # e.g. "Central Africa_AGO"
+  iso3 <- sub(".*_", "", country_lvls)
 
-  keep <- if (is.null(countries)) rep(TRUE, length(iso3)) else iso3 %in% countries
-  if (!any(keep))
-    stop("extractCbCountrySurface: none of the fit's country ranef levels ",
-         "(", paste(unique(iso3), collapse = ", "), ") match `countries`.")
+  keep <- if (is.null(countries)) {
+    rep(TRUE, length(iso3))
+  } else {
+    iso3 %in% countries
+  }
+  if (!any(keep)) {
+    stop(
+      "extract_cb_country_surface: none of the fit's country ranef levels ",
+      "(",
+      paste(unique(iso3), collapse = ", "),
+      ") match `countries`."
+    )
+  }
 
-  rng     <- meta$range %||% c(NA_real_, NA_real_)
+  rng <- meta$range %||% c(NA_real_, NA_real_)
   at_vals <- if (is.null(at)) {
-    if (anyNA(rng))
-      stop("extractCbCountrySurface: unknown range in `meta` — provide `at` explicitly.")
+    if (anyNA(rng)) {
+      stop(
+        "extract_cb_country_surface: unknown range in `meta` — provide `at` explicitly."
+      )
+    }
     seq(rng[1], rng[2], length.out = 50L)
-  } else at
+  } else {
+    at
+  }
 
   ob_args <- .onebasis_replay_args(meta$onebasis_attrs)
-  Z       <- do.call(dlnm::onebasis, c(list(at_vals), ob_args))
-  # Center on the basis evaluated AT exposure = 0 (matches extractCbSurface's
+  Z <- do.call(dlnm::onebasis, c(list(at_vals), ob_args))
+  # Center on the basis evaluated AT exposure = 0 (matches extract_cb_surface's
   # crosspred(cen = 0)) -- NOT on whichever `at_vals` entry happens to be
   # nearest to 0. The two coincide when `at` is a dense grid spanning 0 (the
   # original use case: 50 points over the full range), but diverge for a
   # sparse custom grid with no point near 0 (e.g. Nina/Nino at = c(-2,-1,1,2)),
   # where the nearest-point approach would silently center on -1 instead.
-  Z0      <- do.call(dlnm::onebasis, c(list(0), ob_args))
-  Z_cen   <- Z - matrix(Z0, nrow(Z), K, byrow = TRUE)  # [n_at x K]
+  Z0 <- do.call(dlnm::onebasis, c(list(0), ob_args))
+  Z_cen <- Z - matrix(Z0, nrow(Z), K, byrow = TRUE) # [n_at x K]
 
   results <- list()
   for (i in which(keep)) {
-    r_ctry <- matrix(re_country_draws[, i, ], nrow = nrow(b_pop_draws),
-                     dimnames = list(NULL, cb_names))
-    log_rr_mat <- Z_cen %*% t(b_pop_draws + r_ctry)   # [n_at x S]
+    r_ctry <- matrix(
+      re_country_draws[, i, ],
+      nrow = nrow(b_pop_draws),
+      dimnames = list(NULL, cb_names)
+    )
+    log_rr_mat <- Z_cen %*% t(b_pop_draws + r_ctry) # [n_at x S]
     results[[iso3[i]]] <- list(
-      at      = at_vals,
-      matfit  = apply(log_rr_mat, 1, median),
-      matlo   = apply(log_rr_mat, 1, quantile, probs = probs[1]),
-      mathi   = apply(log_rr_mat, 1, quantile, probs = probs[2]),
+      at = at_vals,
+      matfit = apply(log_rr_mat, 1, median),
+      matlo = apply(log_rr_mat, 1, quantile, probs = probs[1]),
+      mathi = apply(log_rr_mat, 1, quantile, probs = probs[2]),
       matlo50 = apply(log_rr_mat, 1, quantile, probs = probs50[1]),
       mathi50 = apply(log_rr_mat, 1, quantile, probs = probs50[2])
     )
@@ -396,58 +496,82 @@ extractCbCountrySurface <- function(fit, meta, at = NULL, countries = NULL,
 }
 
 
-#' .cbLagExposure
+#' .cb_lag_exposure
 #'
 #' Exposure vector of variable `v` at lag `L` (negative = ENSO lead), read from
-#' the prep-written lag column (`ensoLagColName(L)` for ENSO, `<v>` at lag 0,
+#' the prep-written lag column (`enso_lag_col_name(L)` for ENSO, `<v>` at lag 0,
 #' `<v>_lag<L>` otherwise), with boundary/coverage NAs set to 0 (the
-#' makeLagMatrix() convention). Shared by the single-lag and multi-lag (`lags`)
+#' make_lag_matrix() convention). Shared by the single-lag and multi-lag (`lags`)
 #' modes of build_cb_block() and by build_cb_design(), so fit time and replay
 #' read the same column.
 #' @param who prefix for the error message (caller context)
 #' @noRd
-.cbLagExposureCol <- function(v, L) {
-  if (identical(v, "enso")) ensoLagColName(L)
-  else if (L == 0L) v else sprintf("%s_lag%d", v, L)
+.cb_lag_exposure_col <- function(v, L) {
+  if (identical(v, "enso")) {
+    enso_lag_col_name(L)
+  } else if (L == 0L) {
+    v
+  } else {
+    sprintf("%s_lag%d", v, L)
+  }
 }
-.cbLagExposure <- function(dat, v, L, who = "single_lag") {
-  L    <- as.integer(L)
-  xcol <- .cbLagExposureCol(v, L)
-  if (!xcol %in% colnames(dat))
-    stop(who, ": exposure column '", xcol, "' not found for variable '", v,
-         "'. Ensure prep wrote the lag column (",
-         if (L < 0L) paste0("a lead: prep with --enso_max_lead >= ", -L)
-         else paste0("max_lag >= ", L), ").")
+.cb_lag_exposure <- function(dat, v, L, who = "single_lag") {
+  L <- as.integer(L)
+  xcol <- .cb_lag_exposure_col(v, L)
+  if (!xcol %in% colnames(dat)) {
+    stop(
+      who,
+      ": exposure column '",
+      xcol,
+      "' not found for variable '",
+      v,
+      "'. Ensure prep wrote the lag column (",
+      if (L < 0L) {
+        paste0("a lead: prep with --enso_max_lead >= ", -L)
+      } else {
+        paste0("max_lag >= ", L)
+      },
+      ")."
+    )
+  }
   x <- as.numeric(dat[[xcol]])
-  x[is.na(x)] <- 0   # boundary/coverage NAs -> 0 (makeLagMatrix convention)
+  x[is.na(x)] <- 0 # boundary/coverage NAs -> 0 (make_lag_matrix convention)
   x
 }
 
-#' .cbLagsSpec
+#' .cb_lags_spec
 #'
 #' Resolve a `lags:` spec to an integer lag vector: a length-2 value is an
 #' inclusive range (`[-11, 11]` -> -11:11), anything longer is taken as the
 #' explicit lag set (sorted, unique). NULL -> NULL (mode not requested).
 #' @noRd
-.cbLagsSpec <- function(lags) {
-  if (is.null(lags)) return(NULL)
+.cb_lags_spec <- function(lags) {
+  if (is.null(lags)) {
+    return(NULL)
+  }
   lags <- as.integer(unlist(lags))
-  if (length(lags) == 2L) lags <- seq.int(lags[1L], lags[2L])
+  if (length(lags) == 2L) {
+    lags <- seq.int(lags[1L], lags[2L])
+  }
   lags <- sort(unique(lags))
-  if (length(lags) < 2L)
+  if (length(lags) < 2L) {
     stop("dlnm `lags:` needs at least two lags (use `single_lag:` for one).")
+  }
   lags
 }
 
-#' .cbLagColNames
+#' .cb_lag_col_names
 #'
 #' Column names of a multi-lag (`lags`) basis, lag-major:
-#' `<v>_cb<j>_l<slToken(lag)>`, j = 1..J within each lag. Also the column order
+#' `<v>_cb<j>_l<sl_token(lag)>`, j = 1..J within each lag. Also the column order
 #' of the J x n_lag `col_matrix` stored in cb_meta (by column).
 #' @noRd
-.cbLagColNames <- function(v, J, lags) {
-  as.vector(vapply(lags, function(l) sprintf("%s_cb%d_l%s", v, seq_len(J), slToken(l)),
-                   character(J)))
+.cb_lag_col_names <- function(v, J, lags) {
+  as.vector(vapply(
+    lags,
+    function(l) sprintf("%s_cb%d_l%s", v, seq_len(J), sl_token(l)),
+    character(J)
+  ))
 }
 
 #' .replay_onebasis_lags
@@ -458,11 +582,14 @@ extractCbCountrySurface <- function(fit, meta, at = NULL, countries = NULL,
 #' @noRd
 .replay_onebasis_lags <- function(X, ob_attrs) {
   replay <- .onebasis_replay_args(ob_attrs)
-  do.call(cbind, lapply(seq_len(ncol(X)), function(i) {
-    m <- unclass(do.call(dlnm::onebasis, c(list(X[, i]), replay)))
-    attributes(m) <- list(dim = dim(m))
-    m
-  }))
+  do.call(
+    cbind,
+    lapply(seq_len(ncol(X)), function(i) {
+      m <- unclass(do.call(dlnm::onebasis, c(list(X[, i]), replay)))
+      attributes(m) <- list(dim = dim(m))
+      m
+    })
+  )
 }
 
 #' build_cb_block
@@ -474,7 +601,7 @@ extractCbCountrySurface <- function(fit, meta, at = NULL, countries = NULL,
 #' 04_fit_siz_brms_cb.R and 04_fit_dur_brms_cb.R; byte-identical to the
 #' inline copies it replaces (guarded by test_cb_block_extraction.R).
 #'
-#' @param dat      data frame carrying the columns makeLagMatrix()/single_lag
+#' @param dat      data frame carrying the columns make_lag_matrix()/single_lag
 #'                 lookup need for every variable in dlnm_cfg$variables
 #'                 (enso_lag* for ENSO; `<var>`, `<var>_lag1..max_lag` for
 #'                 climate-style vars).
@@ -485,7 +612,7 @@ extractCbCountrySurface <- function(fit, meta, at = NULL, countries = NULL,
 #'                 the pre-extraction message text exactly.
 #' @return list(dat = <dat + bound basis columns>, cb_cols = character(),
 #'              cb_meta = list()) — cb_meta has one entry per variable with
-#'              the attributes extractCbSurface()/build_cb_columns_from_Q()
+#'              the attributes extract_cb_surface()/build_cb_columns_from_Q()
 #'              need for crosspred reconstruction.
 build_cb_block <- function(dat, dlnm_cfg, label = "") {
   cb_cols <- character(0)
@@ -499,14 +626,16 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
 
       # Merge per-variable spec with shared defaults (per-var wins)
       spec <- dlnm_defaults
-      for (k in names(var_spec)) spec[[k]] <- var_spec[[k]]
+      for (k in names(var_spec)) {
+        spec[[k]] <- var_spec[[k]]
+      }
 
-      max_lag    <- as.integer(spec$max_lag %||% 3L)
-      argvar     <- spec$argvar %||% list(fun = "bs", degree = 3L, df = 4L)
-      arglag     <- spec$arglag %||% list(fun = "ns", df = 3L)
-      single_lag <- spec$single_lag   # NULL = full crossbasis; integer = onebasis at one lag
+      max_lag <- as.integer(spec$max_lag %||% 3L)
+      argvar <- spec$argvar %||% list(fun = "bs", degree = 3L, df = 4L)
+      arglag <- spec$arglag %||% list(fun = "ns", df = 3L)
+      single_lag <- spec$single_lag # NULL = full crossbasis; integer = onebasis at one lag
 
-      lags <- .cbLagsSpec(spec$lags)  # NULL unless the multi-lag mode is requested
+      lags <- .cb_lags_spec(spec$lags) # NULL unless the multi-lag mode is requested
 
       if (!is.null(lags)) {
         # --- Multi-lag mode: one onebasis per lag on a SHARED basis ---
@@ -514,36 +643,55 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
         # knots once, then the same basis is replayed on each lag column, so
         # column j means the same exposure function at every lag. Used by the
         # brms_kl backend (dlnm_kernel.R), which weights the lags with a
-        # Gaussian kernel. Columns are lag-major (.cbLagColNames()).
-        if (!is.null(single_lag))
-          stop("dlnm variable '", v, "': set either `single_lag:` or `lags:`, not both.")
+        # Gaussian kernel. Columns are lag-major (.cb_lag_col_names()).
+        if (!is.null(single_lag)) {
+          stop(
+            "dlnm variable '",
+            v,
+            "': set either `single_lag:` or `lags:`, not both."
+          )
+        }
         message(sprintf(
           "[dlnm]%s var = %-20s  lags = %s..%s (%d)  argvar = %s  (shared onebasis per lag)",
-          label, v, min(lags), max(lags), length(lags),
+          label,
+          v,
+          min(lags),
+          max(lags),
+          length(lags),
           paste(names(argvar), argvar, sep = "=", collapse = ",")
         ))
-        X <- matrix(vapply(lags, function(l) .cbLagExposure(dat, v, l, who = "lags"),
-                           numeric(nrow(dat))),
-                    nrow = nrow(dat))
-        ob0      <- do.call(dlnm::onebasis, c(list(as.vector(X)), argvar))
+        X <- matrix(
+          vapply(
+            lags,
+            function(l) .cb_lag_exposure(dat, v, l, who = "lags"),
+            numeric(nrow(dat))
+          ),
+          nrow = nrow(dat)
+        )
+        ob0 <- do.call(dlnm::onebasis, c(list(as.vector(X)), argvar))
         ob_attrs <- attributes(ob0)
         ob_attrs[c("dim", "dimnames", "class")] <- NULL
-        if (identical(ob_attrs$fun, "ns")) ob_attrs$degree <- NULL
-        J  <- ncol(ob0)
-        B  <- .replay_onebasis_lags(X, ob_attrs)
-        cb_names     <- .cbLagColNames(v, J, lags)
-        colnames(B)  <- cb_names
-        dat     <- dplyr::bind_cols(dat, tibble::as_tibble(as.data.frame(B)))
+        if (identical(ob_attrs$fun, "ns")) {
+          ob_attrs$degree <- NULL
+        }
+        J <- ncol(ob0)
+        B <- .replay_onebasis_lags(X, ob_attrs)
+        cb_names <- .cb_lag_col_names(v, J, lags)
+        colnames(B) <- cb_names
+        dat <- dplyr::bind_cols(dat, tibble::as_tibble(as.data.frame(B)))
         cb_cols <- c(cb_cols, cb_names)
         cb_meta[[v]] <- list(
-          lags           = lags,
+          lags = lags,
           onebasis_attrs = ob_attrs,
-          argvar         = argvar,
-          range          = range(X, na.rm = TRUE),
-          df             = J,
-          cb_col_names   = cb_names,
-          col_matrix     = matrix(cb_names, nrow = J,
-                                  dimnames = list(NULL, slToken(lags)))
+          argvar = argvar,
+          range = range(X, na.rm = TRUE),
+          df = J,
+          cb_col_names = cb_names,
+          col_matrix = matrix(
+            cb_names,
+            nrow = J,
+            dimnames = list(NULL, sl_token(lags))
+          )
         )
       } else if (!is.null(single_lag)) {
         # --- Single-lag mode: collapse the lag dimension via dlnm::onebasis() ---
@@ -551,16 +699,22 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
         L <- as.integer(single_lag)
         message(sprintf(
           "[dlnm]%s var = %-20s  single_lag = %d  argvar = %s  (onebasis; lag dimension collapsed)",
-          label, v, L, paste(names(argvar), argvar, sep = "=", collapse = ",")
+          label,
+          v,
+          L,
+          paste(names(argvar), argvar, sep = "=", collapse = ",")
         ))
 
-        x <- .cbLagExposure(dat, v, L, who = "single_lag")
+        x <- .cb_lag_exposure(dat, v, L, who = "single_lag")
 
         ob <- do.call(dlnm::onebasis, c(list(x), argvar))
 
-        cb_names     <- sprintf("%s_cb%d", v, seq_len(ncol(ob)))
+        cb_names <- sprintf("%s_cb%d", v, seq_len(ncol(ob)))
         colnames(ob) <- cb_names
-        dat     <- dplyr::bind_cols(dat, tibble::as_tibble(as.data.frame(unclass(ob))))
+        dat <- dplyr::bind_cols(
+          dat,
+          tibble::as_tibble(as.data.frame(unclass(ob)))
+        )
         cb_cols <- c(cb_cols, cb_names)
 
         # Store onebasis attributes (resolved knots etc.) for crosspred reconstruction.
@@ -568,61 +722,77 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
         # sidecar replays cleanly (see .onebasis_replay_args); harmless for `bs`.
         ob_attrs <- attributes(ob)
         ob_attrs[c("dim", "dimnames", "class")] <- NULL
-        if (identical(ob_attrs$fun, "ns")) ob_attrs$degree <- NULL
+        if (identical(ob_attrs$fun, "ns")) {
+          ob_attrs$degree <- NULL
+        }
         cb_meta[[v]] <- list(
-          single_lag     = L,
+          single_lag = L,
           onebasis_attrs = ob_attrs,
-          argvar         = argvar,
-          range          = range(x, na.rm = TRUE),
-          df             = ncol(ob),
-          cb_col_names   = cb_names
+          argvar = argvar,
+          range = range(x, na.rm = TRUE),
+          df = ncol(ob),
+          cb_col_names = cb_names
         )
       } else {
         message(sprintf(
           "[dlnm]%s var = %-20s  max_lag = %d  argvar = %s  arglag = %s",
-          label, v, max_lag,
+          label,
+          v,
+          max_lag,
           paste(names(argvar), argvar, sep = "=", collapse = ","),
           paste(names(arglag), arglag, sep = "=", collapse = ",")
         ))
 
         # Build lag matrix from pre-computed columns (lag0 = var, lag1..max_lag)
-        Q <- makeLagMatrix(dat, v, max_lag)
+        Q <- make_lag_matrix(dat, v, max_lag)
 
         # Compute crossbasis matrix
-        cb <- dlnm::crossbasis(Q,
-                               lag    = c(0L, max_lag),
-                               argvar = argvar,
-                               arglag = arglag)
+        cb <- dlnm::crossbasis(
+          Q,
+          lag = c(0L, max_lag),
+          argvar = argvar,
+          arglag = arglag
+        )
 
         # Unique per-variable column prefix: <var>_cb1, <var>_cb2, ...
-        cb_names     <- sprintf("%s_cb%d", v, seq_len(ncol(cb)))
+        cb_names <- sprintf("%s_cb%d", v, seq_len(ncol(cb)))
         colnames(cb) <- cb_names
 
         # Bind CB columns into dat
-        dat     <- dplyr::bind_cols(dat, tibble::as_tibble(as.data.frame(cb)))
+        dat <- dplyr::bind_cols(dat, tibble::as_tibble(as.data.frame(cb)))
         cb_cols <- c(cb_cols, cb_names)
 
         # Store metadata for postprocessing (attributes needed by crosspred)
         meta_attrs <- attributes(cb)
         cb_meta[[v]] <- list(
-          argvar       = meta_attrs$argvar,
-          arglag       = meta_attrs$arglag,
-          lag          = meta_attrs$lag,
-          df           = meta_attrs$df,
-          range        = meta_attrs$range,
+          argvar = meta_attrs$argvar,
+          arglag = meta_attrs$arglag,
+          lag = meta_attrs$lag,
+          df = meta_attrs$df,
+          range = meta_attrs$range,
           cb_col_names = cb_names
         )
       }
     }
 
-    message(sprintf("[dlnm]%s %d crossbasis column(s) across %d variable(s): %s",
-                    label, length(cb_cols), length(names(dlnm_cfg$variables)),
-                    paste(names(dlnm_cfg$variables), collapse = ", ")))
+    message(sprintf(
+      "[dlnm]%s %d crossbasis column(s) across %d variable(s): %s",
+      label,
+      length(cb_cols),
+      length(names(dlnm_cfg$variables)),
+      paste(names(dlnm_cfg$variables), collapse = ", ")
+    ))
   } else {
     if (!isTRUE(dlnm_cfg$enable)) {
-      message(sprintf("[dlnm]%s DLNM disabled (dlnm.enable: false). Running as standard model.", label))
+      message(sprintf(
+        "[dlnm]%s DLNM disabled (dlnm.enable: false). Running as standard model.",
+        label
+      ))
     } else {
-      message(sprintf("[dlnm]%s no variables configured; running as standard model.", label))
+      message(sprintf(
+        "[dlnm]%s no variables configured; running as standard model.",
+        label
+      ))
     }
   }
 
@@ -635,10 +805,10 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
 #' DLNM cross-basis columns, reusing the stored fit-time basis exactly. The
 #' resolved `argvar`/`arglag` in `meta` carry the knots dlnm computed at fit
 #' time, so re-calling dlnm::crossbasis() reproduces the basis bit-for-bit (the
-#' same guarantee extractCbSurface() relies on for crosspred()).
+#' same guarantee extract_cb_surface() relies on for crosspred()).
 #'
 #' @param Q    numeric matrix n_obs × (max_lag + 1); columns lag0 … lag{max_lag}
-#'             (output of makeLagMatrix()).
+#'             (output of make_lag_matrix()).
 #' @param meta one entry of a cb_meta list: must contain argvar, arglag, lag,
 #'             cb_col_names.
 #' @return numeric matrix n_obs × length(meta$cb_col_names); colnames set to
@@ -659,38 +829,56 @@ build_cb_block <- function(dat, dlnm_cfg, label = "") {
 #' knots (the smoothing phase); the forward simulation uses
 #' `simulator.enso.clamp_margin` (default 0.25, i.e. up to 125% of the max).
 .clamp_cb_range <- function(x, range, margin = 0) {
-  if (is.null(range)) return(x)
+  if (is.null(range)) {
+    return(x)
+  }
   lo <- range[1L] - margin * abs(range[1L])
   hi <- range[2L] + margin * abs(range[2L])
   pmin(pmax(x, lo), hi)
 }
 
 build_cb_columns_from_Q <- function(Q, meta) {
-  if (!requireNamespace("dlnm", quietly = TRUE))
+  if (!requireNamespace("dlnm", quietly = TRUE)) {
     stop("build_cb_columns_from_Q: package 'dlnm' is required.")
+  }
   if (!is.null(meta$lags)) {
     # Multi-lag (`lags`) basis: Q holds one exposure column per lag, in
     # meta$lags order (see build_cb_design()).
-    Q  <- if (is.matrix(Q)) Q else matrix(as.numeric(Q), ncol = 1L)
-    if (ncol(Q) != length(meta$lags))
-      stop("build_cb_columns_from_Q: Q has ", ncol(Q), " column(s) but meta$lags has ",
-           length(meta$lags), ".")
+    Q <- if (is.matrix(Q)) Q else matrix(as.numeric(Q), ncol = 1L)
+    if (ncol(Q) != length(meta$lags)) {
+      stop(
+        "build_cb_columns_from_Q: Q has ",
+        ncol(Q),
+        " column(s) but meta$lags has ",
+        length(meta$lags),
+        "."
+      )
+    }
     cb <- .replay_onebasis_lags(Q, meta$onebasis_attrs)
   } else if (!is.null(meta$single_lag)) {
-    x       <- if (is.matrix(Q)) Q[, 1L] else as.numeric(Q)
+    x <- if (is.matrix(Q)) Q[, 1L] else as.numeric(Q)
     ob_args <- .onebasis_replay_args(meta$onebasis_attrs)
     cb <- as.matrix(do.call(dlnm::onebasis, c(list(x = x), ob_args)))
   } else {
-    cb <- as.matrix(dlnm::crossbasis(Q,
-                                     lag    = meta$lag,
-                                     argvar = meta$argvar,
-                                     arglag = meta$arglag))
+    cb <- as.matrix(dlnm::crossbasis(
+      Q,
+      lag = meta$lag,
+      argvar = meta$argvar,
+      arglag = meta$arglag
+    ))
   }
-  if (ncol(cb) != length(meta$cb_col_names))
-    stop("build_cb_columns_from_Q: reconstructed ", ncol(cb),
-         " cross-basis columns but meta expects ", length(meta$cb_col_names),
-         " (", paste(meta$cb_col_names, collapse = ", "), "). ",
-         "argvar/arglag in cb_meta may be inconsistent with the fitted model.")
+  if (ncol(cb) != length(meta$cb_col_names)) {
+    stop(
+      "build_cb_columns_from_Q: reconstructed ",
+      ncol(cb),
+      " cross-basis columns but meta expects ",
+      length(meta$cb_col_names),
+      " (",
+      paste(meta$cb_col_names, collapse = ", "),
+      "). ",
+      "argvar/arglag in cb_meta may be inconsistent with the fitted model."
+    )
+  }
   colnames(cb) <- meta$cb_col_names
   cb
 }
@@ -732,15 +920,22 @@ build_cb_columns_from_Q <- function(Q, meta) {
 #'         mso_max = <integer>)`. Row `j` of `B` is the basis at `mso = j - 1`.
 build_mso_basis <- function(cb_meta_mon) {
   meta <- (cb_meta_mon %||% list())[["mso"]]
-  if (is.null(meta)) return(NULL)
+  if (is.null(meta)) {
+    return(NULL)
+  }
   rng <- meta$range
-  if (is.null(rng) || !all(is.finite(rng)))
-    stop("build_mso_basis: cb_meta$mso carries no finite `range`; the ",
-         "boundary-knot clamp cannot be established. Re-run ",
-         "analysis/04_fit_mon_brms_cb.R to regenerate the mon_cb_meta sidecar.")
+  if (is.null(rng) || !all(is.finite(rng))) {
+    stop(
+      "build_mso_basis: cb_meta$mso carries no finite `range`; the ",
+      "boundary-knot clamp cannot be established. Re-run ",
+      "analysis/04_fit_mon_brms_cb.R to regenerate the mon_cb_meta sidecar."
+    )
+  }
   mso_max <- max(1L, as.integer(ceiling(max(rng))))
-  B <- build_cb_columns_from_Q(matrix(as.numeric(seq.int(0L, mso_max)), ncol = 1L),
-                               meta)
+  B <- build_cb_columns_from_Q(
+    matrix(as.numeric(seq.int(0L, mso_max)), ncol = 1L),
+    meta
+  )
   list(B = B, mso_max = mso_max)
 }
 
@@ -749,12 +944,12 @@ build_mso_basis <- function(cb_meta_mon) {
 #' Reconstruct all DLNM cross-basis design columns (`<var>_cb1 … cbK`) for a
 #' data frame of observations, from a cb_meta sidecar (written by
 #' 04b_run_occ_brms_cb.R / 04d_run_siz_brms_cb.R). For each variable it builds
-#' the lag matrix via makeLagMatrix() — identical to the fit-time code path — and
-#' applies the stored basis. The variable name drives makeLagMatrix() dispatch:
+#' the lag matrix via make_lag_matrix() — identical to the fit-time code path — and
+#' applies the stored basis. The variable name drives make_lag_matrix() dispatch:
 #' "enso" reads the pre-built enso_lag* columns; any other name reads the
 #' `<var>` / `<var>_lag*` climate lag columns (which must be present in `df`).
 #'
-#' @param df      data frame carrying the lag columns required by makeLagMatrix()
+#' @param df      data frame carrying the lag columns required by make_lag_matrix()
 #'                for every variable in cb_meta (enso_lag* for ENSO;
 #'                `<var>`, `<var>_lag1`…`<var>_lag{max_lag}` for climate vars).
 #' @param cb_meta named list (one entry per cross-basis variable) or NULL.
@@ -763,31 +958,45 @@ build_mso_basis <- function(cb_meta_mon) {
 #' @return data frame with one column per cross-basis column (named by
 #'         cb_col_names), nrow == nrow(df); NULL if cb_meta is empty / no vars.
 build_cb_design <- function(df, cb_meta, vars = NULL) {
-  if (is.null(cb_meta) || length(cb_meta) == 0) return(NULL)
-  if (is.null(vars)) vars <- names(cb_meta)
+  if (is.null(cb_meta) || length(cb_meta) == 0) {
+    return(NULL)
+  }
+  if (is.null(vars)) {
+    vars <- names(cb_meta)
+  }
   vars <- intersect(vars, names(cb_meta))
-  if (length(vars) == 0) return(NULL)
+  if (length(vars) == 0) {
+    return(NULL)
+  }
 
   cols <- list()
   for (v in vars) {
     meta <- cb_meta[[v]]
     if (!is.null(meta$lags)) {
       # Multi-lag (`lags`) fit: one exposure column per lag, in meta$lags order.
-      Q <- matrix(vapply(meta$lags, function(l) .cbLagExposure(df, v, l, who = "build_cb_design"),
-                         numeric(nrow(df))), nrow = nrow(df))
+      Q <- matrix(
+        vapply(
+          meta$lags,
+          function(l) .cb_lag_exposure(df, v, l, who = "build_cb_design"),
+          numeric(nrow(df))
+        ),
+        nrow = nrow(df)
+      )
     } else if (!is.null(meta$single_lag)) {
       # Single-lag (onebasis) fit: the lag dimension was collapsed at fit time
       # onto a single exposure column (04_fit_occ_brms_cb.R:163-168). Reconstruct
       # from that exact column — NOT lag0 — mirroring build_cb_mats()
       # (simulator_core.R:1539-1543). build_cb_columns_from_Q() then reads
       # Q[,1L], so a one-column Q carrying the correct lag is required.
-      Q <- matrix(.cbLagExposure(df, v, meta$single_lag, who = "build_cb_design"),
-                  ncol = 1L)
+      Q <- matrix(
+        .cb_lag_exposure(df, v, meta$single_lag, who = "build_cb_design"),
+        ncol = 1L
+      )
     } else {
       max_lag <- as.integer(meta$lag[2])
-      Q       <- makeLagMatrix(df, v, max_lag)
+      Q <- make_lag_matrix(df, v, max_lag)
     }
-    cb      <- build_cb_columns_from_Q(Q, meta)
+    cb <- build_cb_columns_from_Q(Q, meta)
     cols[[v]] <- as.data.frame(cb)
   }
   dplyr::bind_cols(cols)

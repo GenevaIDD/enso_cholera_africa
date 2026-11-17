@@ -53,7 +53,7 @@ steps:
     - "~/secure/cholera_outbreak_data/outbreak_data_<Mon_YYYY>/time_series_{preoutbreak,outbreak}_extraction.rds"
     - "~/secure/cholera_outbreak_data/outbreak_data_<Mon_YYYY>/outbreak_shapefiles.rds"
     - "generated_data/prep_counts/00_ingest_outbreakextractr.yml (cascade counts)"
-  note: "Run when the outbreak data are refreshed; AFR/EMR filter (the >=50-case filter is upstream, in OutbreakExtractR). Writes into the vintage folder (--outdir defaults to --indir = paths.R::defaultOutbreakDataDir())."
+  note: "Run when the outbreak data are refreshed; AFR/EMR filter (the >=50-case filter is upstream, in OutbreakExtractR). Writes into the vintage folder (--outdir defaults to --indir = paths.R::default_outbreak_data_dir())."
 
 - id: 00_ingest_synthetic.R
   file: 00_ingest_synthetic.R
@@ -187,7 +187,7 @@ steps:
   outputs:
     - "generated_data/population/parts/iso3=<ISO3>/year=<YYYY>/ (same partitions as 02b_preprocess_population_run.R)"
     - "generated_data/population/gid_pop_cache/iso3=<ISO3>/year=<YYYY>.qs (Q_g, independent of the outbreak vintage)"
-  note: "One task per country, all years: geometry once, Q_g reused across vintages. A partition is skipped only when built from the current LP corpus (popPartFresh)."
+  note: "One task per country, all years: geometry once, Q_g reused across vintages. A partition is skipped only when built from the current LP corpus (pop_part_fresh)."
 
 - id: 02c_preprocess_population_compile.R
   file: 02c_preprocess_population_compile.R
@@ -466,7 +466,7 @@ steps:
   after: [03_prepare_occ.R]
   dispatched_by: 04_fit_run.R
   outputs:
-    - "generated_data/ occurrence fit + cb_meta (makeRunFile)"
+    - "generated_data/ occurrence fit + cb_meta (make_run_file)"
 
 - id: 04_fit_occ_brms_kl.R
   file: 04_fit_occ_brms_kl.R
@@ -479,7 +479,7 @@ steps:
   dispatched_by: 04_fit_run.R
   drivers: [stages/04_fit_kl.sh]
   outputs:
-    - "generated_data/ occurrence fit + kl_meta + kl_summary (+ kl_resp, kl_comembership, kl_partition for latent classes; kl_pin_plan, kl_pin + per-order _arrNN fits under kernel.pin) (makeRunFile)"
+    - "generated_data/ occurrence fit + kl_meta + kl_summary (+ kl_resp, kl_comembership, kl_partition for latent classes; kl_pin_plan, kl_pin + per-order _arrNN fits under kernel.pin) (make_run_file)"
   note: "ENSO lag kernel / latent country classes (utils/dlnm_kernel.R). A config batch (e.g. the class sweep kl_sweep_classes_prodtu_all, utils/make_batch_configs.R) on SLURM: stages/04_fit_kl.sh (array, -c 32 / 96G; --postprocess chains 05_fit_postprocess_kl_sweep.R; --deploy reads the batch from deploy.kl_sweep.batch and the comparison's chain selection from kl_sweep.n_agree / mode_tol)."
 
 - id: 04_fit_siz_brms_cb.R
@@ -492,7 +492,7 @@ steps:
   after: [03_prepare_siz.R]
   dispatched_by: 04_fit_run.R
   outputs:
-    - "generated_data/ size fit + cb_meta (makeSizeRunFile)"
+    - "generated_data/ size fit + cb_meta (make_size_run_file)"
 
 - id: 04_fit_dur_brms_cb.R
   file: 04_fit_dur_brms_cb.R
@@ -504,7 +504,7 @@ steps:
   after: [03_prepare_dur.R]
   dispatched_by: 04_fit_run.R
   outputs:
-    - "generated_data/ duration fit + cb_meta (makeDurationRunFile)"
+    - "generated_data/ duration fit + cb_meta (make_duration_run_file)"
 
 - id: 04_fit_mon_brms_cb.R
   file: 04_fit_mon_brms_cb.R
@@ -540,7 +540,7 @@ steps:
   after: [03_prepare_siz.R]
   dispatched_by: 04_fit_run.R
   outputs:
-    - "generated_data/ size fit (makeSizeRunFile)"
+    - "generated_data/ size fit (make_size_run_file)"
 
 - id: 04_fit_dur_brms.R
   file: 04_fit_dur_brms.R
@@ -552,7 +552,7 @@ steps:
   after: [03_prepare_dur.R]
   dispatched_by: 04_fit_run.R
   outputs:
-    - "generated_data/ duration fit (makeDurationRunFile)"
+    - "generated_data/ duration fit (make_duration_run_file)"
 
 - id: 04_fit_mon_brms.R
   file: 04_fit_mon_brms.R
@@ -577,7 +577,7 @@ steps:
   after: [04_fit_run.R]
   drivers: [stages/04_fit.sh]
   outputs:
-    - "generated_data/ RE stats, coef summaries, LOO, pp_check (make*RunFile)"
+    - "generated_data/ RE stats, coef summaries, LOO, pp_check (make_*_run_file)"
   note: "Runs in the same SLURM job as the fit (slurm/submit_fit.sh)."
 
 - id: 05_fit_postprocess_cb.R
@@ -681,7 +681,7 @@ steps:
   runs: local
   after: [05_fit_postprocess.R]
   outputs:
-    - "figures/ per-config fit figures (makeFigureDir)"
+    - "figures/ per-config fit figures (make_figure_dir)"
 
 - id: 06_fit_figures_cb.R
   file: 06_fit_figures_cb.R

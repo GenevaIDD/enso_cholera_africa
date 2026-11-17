@@ -1,18 +1,17 @@
-# utils/priors.R — brms prior construction for all four tracks
+# priors.R — brms prior construction for every track
 #
-# Sourced-only library (no numeric prefix; see analysis/utils/README.md §5).
+# Provides:
+#   build_occ_priors()        occurrence
+#   build_duration_priors()   duration
+#   build_monthly_priors()    monthly case counts
+#   build_size_priors()       size (retired downstream, kept)
+#   .PRIOR_DEFAULTS           default prior strings per track (also read by
+#                             make_batch_configs.R)
 #
-# Public entry points: build_occ_priors(), build_duration_priors(),
-# build_size_priors(), build_monthly_priors(); the shared default table
-# .PRIOR_DEFAULTS (also read by utils/make_batch_configs.R).
-#
-# Dependencies (caller-sourced; this module never source()s another):
-#   base.R     (`%||%`)
-#   formula.R  build_size_formula_parts(), build_monthly_formula_parts()
-#              (when `parts` is NULL), resolve_slopes(), .anchor_gate_on(),
-#              .occ_basehaz()
-# Golden gate: analysis/tests/test_prior_builder_golden.R.
-
+# Details:
+#   Callers source base.R (`%||%`) and formula.R (build_*_formula_parts() when
+#   `parts` is NULL, resolve_slopes(), .anchor_gate_on(), .occ_basehaz()).
+#   tests/test_prior_builder_golden.R pins the output byte for byte.
 
 # ============================================================================
 # Shared prior-builder helpers (brms prior consolidation)
@@ -72,28 +71,46 @@
 #' -- exactly like the `sd` values above -- do not change it as part of a
 #' refactor commit.
 .PRIOR_DEFAULTS <- list(
-  occurrence = list(intercept = "normal(0, 1.5)", intercept_anchored = "normal(0, 1)",
-                    b = "normal(0, 0.5)",
-                    sd_region_country = "normal(0, 2.5)", sd_adm1 = "normal(0, 2.5)",
-                    sds = "student_t(3, 0, 2.5)",
-                    cor = "lkj(2)"),
-  duration   = list(intercept = "normal(0, 1.5)", intercept_anchored = "normal(0, 1)",
-                    b = "normal(0, 0.5)",
-                    sd_region_country = "normal(0, 2.5)", sd_adm1 = "normal(0, 2.5)",
-                    sds = "student_t(3, 0, 2.5)",
-                    cor = "lkj(2)"),
-  size       = list(intercept = "normal(-3, 1)",  intercept_anchored = "normal(0, 1)",
-                    b = "normal(0, 0.5)",
-                    sd_region_country = "normal(0, 0.5)", sd_adm1 = "normal(0, 0.5)",
-                    sds = "student_t(3, 0, 2.5)",
-                    cor = NULL,
-                    phi_intercept = "normal(1, 1)", phi_sd = "normal(0, 0.5)"),
-  monthly    = list(intercept = "normal(-3, 1)",  intercept_anchored = "normal(0, 1)",
-                    b = "normal(0, 0.5)",
-                    sd_region_country = "normal(0, 0.5)", sd_adm1 = "normal(0, 0.5)",
-                    sds = "student_t(3, 0, 2.5)",
-                    cor = NULL,
-                    phi_intercept = "normal(1, 1)", phi_sd = "normal(0, 0.5)")
+  occurrence = list(
+    intercept = "normal(0, 1.5)",
+    intercept_anchored = "normal(0, 1)",
+    b = "normal(0, 0.5)",
+    sd_region_country = "normal(0, 2.5)",
+    sd_adm1 = "normal(0, 2.5)",
+    sds = "student_t(3, 0, 2.5)",
+    cor = "lkj(2)"
+  ),
+  duration = list(
+    intercept = "normal(0, 1.5)",
+    intercept_anchored = "normal(0, 1)",
+    b = "normal(0, 0.5)",
+    sd_region_country = "normal(0, 2.5)",
+    sd_adm1 = "normal(0, 2.5)",
+    sds = "student_t(3, 0, 2.5)",
+    cor = "lkj(2)"
+  ),
+  size = list(
+    intercept = "normal(-3, 1)",
+    intercept_anchored = "normal(0, 1)",
+    b = "normal(0, 0.5)",
+    sd_region_country = "normal(0, 0.5)",
+    sd_adm1 = "normal(0, 0.5)",
+    sds = "student_t(3, 0, 2.5)",
+    cor = NULL,
+    phi_intercept = "normal(1, 1)",
+    phi_sd = "normal(0, 0.5)"
+  ),
+  monthly = list(
+    intercept = "normal(-3, 1)",
+    intercept_anchored = "normal(0, 1)",
+    b = "normal(0, 0.5)",
+    sd_region_country = "normal(0, 0.5)",
+    sd_adm1 = "normal(0, 0.5)",
+    sds = "student_t(3, 0, 2.5)",
+    cor = NULL,
+    phi_intercept = "normal(1, 1)",
+    phi_sd = "normal(0, 0.5)"
+  )
 )
 
 #' .prior_strings
@@ -130,31 +147,49 @@
 .prior_strings <- function(brms_block, track) {
   .prior_sd_superseded <- function(b, track) {
     legacy <- b[["prior_sd"]]
-    if (is.null(legacy) || is.null(b[["prior_sd_region_country"]]) ||
-        is.null(b[["prior_sd_adm1"]]))
+    if (
+      is.null(legacy) ||
+        is.null(b[["prior_sd_region_country"]]) ||
+        is.null(b[["prior_sd_adm1"]])
+    ) {
       return(invisible(FALSE))
+    }
     default <- .PRIOR_DEFAULTS[[track]][["sd_region_country"]]
-    if (identical(gsub("\\s+", "", legacy), gsub("\\s+", "", default)))
+    if (identical(gsub("\\s+", "", legacy), gsub("\\s+", "", default))) {
       return(invisible(FALSE))
-    msg <- paste0(track, ".brms.prior_sd = '", legacy, "' is ignored: both tier ",
-                  "keys are set (prior_sd_region_country = '",
-                  b[["prior_sd_region_country"]], "', prior_sd_adm1 = '",
-                  b[["prior_sd_adm1"]], "') and win. Drop `prior_sd:`, or set it ",
-                  "to the track default '", default, "'.")
-    warning(structure(class = c("prior_sd_superseded", "warning", "condition"),
-                      list(message = msg, call = NULL)))
+    }
+    msg <- paste0(
+      track,
+      ".brms.prior_sd = '",
+      legacy,
+      "' is ignored: both tier ",
+      "keys are set (prior_sd_region_country = '",
+      b[["prior_sd_region_country"]],
+      "', prior_sd_adm1 = '",
+      b[["prior_sd_adm1"]],
+      "') and win. Drop `prior_sd:`, or set it ",
+      "to the track default '",
+      default,
+      "'."
+    )
+    warning(structure(
+      class = c("prior_sd_superseded", "warning", "condition"),
+      list(message = msg, call = NULL)
+    ))
     invisible(TRUE)
   }
 
-  defaults   <- .PRIOR_DEFAULTS[[track]]
+  defaults <- .PRIOR_DEFAULTS[[track]]
   brms_block <- brms_block %||% list()
-  legacy_sd  <- brms_block[["prior_sd"]]  # back-compat: pre-split blanket key seeds
-                                      # both tiers when a config hasn't split them
+  legacy_sd <- brms_block[["prior_sd"]] # back-compat: pre-split blanket key seeds
+  # both tiers when a config hasn't split them
   .prior_sd_superseded(brms_block, track)
   stats::setNames(
     lapply(names(defaults), function(k) {
       val <- brms_block[[paste0("prior_", k)]]
-      if (is.null(val) && k %in% c("sd_region_country", "sd_adm1")) val <- legacy_sd
+      if (is.null(val) && k %in% c("sd_region_country", "sd_adm1")) {
+        val <- legacy_sd
+      }
       val %||% defaults[[k]]
     }),
     names(defaults)
@@ -192,19 +227,28 @@
 #' @param anchored logical(1) from .anchor_gate_on()
 #' @return character(1) prior string for class = "Intercept"
 .intercept_prior_string <- function(s, brms_block, track, anchored) {
-  if (!isTRUE(anchored)) return(s$intercept)
+  if (!isTRUE(anchored)) {
+    return(s$intercept)
+  }
 
   pinned <- (brms_block %||% list())[["prior_intercept"]]
   unanchored_default <- .PRIOR_DEFAULTS[[track]]$intercept
   if (!is.null(pinned) && !identical(pinned, unanchored_default)) {
-    stop(track, ".brms.prior_intercept is pinned to '", pinned, "', but this ",
-         "run has the baseline-rate anchor switched on, which puts ",
-         "offset(log(<anchor>)) in the formula and moves the intercept to a ",
-         "RESIDUAL scale. Applying the pinned prior there would double-count ",
-         "the offset correction. Either drop the `prior_intercept:` key (the ",
-         "anchored default '", .PRIOR_DEFAULTS[[track]]$intercept_anchored,
-         "' then applies), or, if the pin was chosen FOR the anchored scale, ",
-         "rename it to `prior_intercept_anchored:`.", call. = FALSE)
+    stop(
+      track,
+      ".brms.prior_intercept is pinned to '",
+      pinned,
+      "', but this ",
+      "run has the baseline-rate anchor switched on, which puts ",
+      "offset(log(<anchor>)) in the formula and moves the intercept to a ",
+      "RESIDUAL scale. Applying the pinned prior there would double-count ",
+      "the offset correction. Either drop the `prior_intercept:` key (the ",
+      "anchored default '",
+      .PRIOR_DEFAULTS[[track]]$intercept_anchored,
+      "' then applies), or, if the pin was chosen FOR the anchored scale, ",
+      "rename it to `prior_intercept_anchored:`.",
+      call. = FALSE
+    )
   }
   s$intercept_anchored
 }
@@ -222,11 +266,12 @@
 #' @param re_uncorrelated brms_cfg$re_uncorrelated (logical or NULL)
 #' @return list(has_b, has_sd, has_cor)
 .prior_formula_gates <- function(parts, re_uncorrelated) {
-  bh_terms   <- parts$bh_terms   %||% character(0)
+  bh_terms <- parts$bh_terms %||% character(0)
   seas_terms <- parts$seas_terms %||% character(0)
   list(
-    has_b   = length(c(setdiff(parts$fixed_terms, "1"), bh_terms, seas_terms)) > 0L,
-    has_sd  = length(parts$re_terms) > 0L,
+    has_b = length(c(setdiff(parts$fixed_terms, "1"), bh_terms, seas_terms)) >
+      0L,
+    has_sd = length(parts$re_terms) > 0L,
     has_cor = !isTRUE(re_uncorrelated) && any(grepl("\\+.*\\|", parts$re_terms))
   )
 }
@@ -248,14 +293,19 @@
 #' @param re_terms character vector of "(... | group)" RE strings
 #' @return character vector of brms group names (deduplicated)
 .re_term_group_names <- function(re_terms) {
-  if (length(re_terms) == 0L) return(character(0))
+  if (length(re_terms) == 0L) {
+    return(character(0))
+  }
   names_list <- lapply(re_terms, function(term) {
     grp_str <- sub(".*\\|\\|?\\s+", "", term)
     grp_str <- trimws(sub("\\s*\\)\\s*$", "", grp_str))
     if (grepl("/", grp_str, fixed = TRUE)) {
       comps <- strsplit(grp_str, "/", fixed = TRUE)[[1]]
-      vapply(seq_along(comps), function(i) paste(comps[seq_len(i)], collapse = ":"),
-             character(1))
+      vapply(
+        seq_along(comps),
+        function(i) paste(comps[seq_len(i)], collapse = ":"),
+        character(1)
+      )
     } else {
       grp_str
     }
@@ -285,11 +335,11 @@
 #' @return list(region_country = character, adm1 = character) -- brms group
 #'   names for each tier; either may be character(0)
 .re_group_tiers <- function(re_terms) {
-  groups  <- .re_term_group_names(re_terms)
+  groups <- .re_term_group_names(re_terms)
   is_adm1 <- grepl("ADM1", groups, fixed = TRUE)
   list(
     region_country = groups[!is_adm1],
-    adm1           = groups[is_adm1]
+    adm1 = groups[is_adm1]
   )
 }
 
@@ -317,14 +367,18 @@
 #'   would then hard-error one level up when the caller tries to c() it
 #'   alongside a real brmsprior ("Cannot add 'list' objects to the prior").
 .tiered_sd_priors <- function(s, tiers, nlpar = NULL) {
-  nl <- nlpar %||% ""   # brms::set_prior()'s own default: NULL is a no-op
+  nl <- nlpar %||% "" # brms::set_prior()'s own default: NULL is a no-op
   entries <- c(
-    lapply(tiers$region_country, function(g)
-      brms::set_prior(s$sd_region_country, class = "sd", group = g, nlpar = nl)),
-    lapply(tiers$adm1, function(g)
-      brms::set_prior(s$sd_adm1, class = "sd", group = g, nlpar = nl))
+    lapply(tiers$region_country, function(g) {
+      brms::set_prior(s$sd_region_country, class = "sd", group = g, nlpar = nl)
+    }),
+    lapply(tiers$adm1, function(g) {
+      brms::set_prior(s$sd_adm1, class = "sd", group = g, nlpar = nl)
+    })
   )
-  if (length(entries) == 0L) return(NULL)
+  if (length(entries) == 0L) {
+    return(NULL)
+  }
   do.call(c, entries)
 }
 
@@ -360,11 +414,14 @@
 #' @param track    "occurrence" | "duration" | "size" | "monthly"
 #' @return logical(1)
 .has_smooth_terms <- function(parts, brms_cfg, track) {
-  if (identical(track, "occurrence"))
+  if (identical(track, "occurrence")) {
     return(identical(.occ_basehaz(brms_cfg), "cyclic"))
-  terms <- c(parts$bh_terms %||% character(0),
-             parts$seas_terms %||% character(0),
-             parts$fixed_terms %||% character(0))
+  }
+  terms <- c(
+    parts$bh_terms %||% character(0),
+    parts$seas_terms %||% character(0),
+    parts$fixed_terms %||% character(0)
+  )
   any(grepl("^s\\(", terms))
 }
 
@@ -398,7 +455,7 @@
 #' @return logical(1)
 .prior_config_slopes <- function(block, admin_level) {
   slopes <- resolve_slopes(block$random_effects, admin_level)
-  covs   <- block$covariates %||% list()
+  covs <- block$covariates %||% list()
   length(slopes) > 0 ||
     length(names(Filter(isTRUE, covs))) > 0 ||
     isTRUE(block$covariates$enso) ||
@@ -427,15 +484,19 @@
 #' have no region level, so that tier is exactly the `country` group).
 #' @noRd
 .single_country_strings <- function(s, parts) {
-  if (isTRUE(parts$single_country)) s$sd_region_country <- .SINGLE_COUNTRY_SD
+  if (isTRUE(parts$single_country)) {
+    s$sd_region_country <- .SINGLE_COUNTRY_SD
+  }
   s
 }
 
 .shape_dpar_priors <- function(strings, phi_re) {
-  if (identical(phi_re %||% "constant", "constant")) return(NULL)
+  if (identical(phi_re %||% "constant", "constant")) {
+    return(NULL)
+  }
   c(
     brms::set_prior(strings$phi_intercept, class = "Intercept", dpar = "shape"),
-    brms::set_prior(strings$phi_sd,        class = "sd",        dpar = "shape")
+    brms::set_prior(strings$phi_sd, class = "sd", dpar = "shape")
   )
 }
 
@@ -458,22 +519,44 @@
 #'   "Intercept"` (nl models have no Intercept class) and b/sd/sds carry the
 #'   nlpar; cor priors never take one (brms scopes them by group only).
 #' @noRd
-.build_hazard_track_priors <- function(opt, block, tag, parts, brms_cfg, gate_b,
-                                       nlpar = NULL) {
-  brms_cfg  <- brms_cfg %||% opt[[block, exact = FALSE]]$brms
-  s         <- .single_country_strings(.prior_strings(brms_cfg, block), parts)
-  gates     <- .prior_formula_gates(parts, brms_cfg$re_uncorrelated)
-  intercept <- .intercept_prior_string(s, brms_cfg, block,
-                                       .anchor_gate_on(opt, tag))
-  nl        <- nlpar %||% ""
+.build_hazard_track_priors <- function(
+  opt,
+  block,
+  tag,
+  parts,
+  brms_cfg,
+  gate_b,
+  nlpar = NULL
+) {
+  brms_cfg <- brms_cfg %||% opt[[block, exact = FALSE]]$brms
+  s <- .single_country_strings(.prior_strings(brms_cfg, block), parts)
+  gates <- .prior_formula_gates(parts, brms_cfg$re_uncorrelated)
+  intercept <- .intercept_prior_string(
+    s,
+    brms_cfg,
+    block,
+    .anchor_gate_on(opt, tag)
+  )
+  nl <- nlpar %||% ""
 
-  priors <- if (is.null(nlpar)) brms::set_prior(intercept, class = "Intercept")
-            else brms::set_prior(intercept, class = "b", coef = "Intercept", nlpar = nl)
-  if (!gate_b || gates$has_b) priors <- c(priors, brms::set_prior(s$b, class = "b", nlpar = nl))
-  priors <- c(priors, .tiered_sd_priors(s, .re_group_tiers(parts$re_terms), nlpar))
-  if (.has_smooth_terms(parts, brms_cfg, block))
+  priors <- if (is.null(nlpar)) {
+    brms::set_prior(intercept, class = "Intercept")
+  } else {
+    brms::set_prior(intercept, class = "b", coef = "Intercept", nlpar = nl)
+  }
+  if (!gate_b || gates$has_b) {
+    priors <- c(priors, brms::set_prior(s$b, class = "b", nlpar = nl))
+  }
+  priors <- c(
+    priors,
+    .tiered_sd_priors(s, .re_group_tiers(parts$re_terms), nlpar)
+  )
+  if (.has_smooth_terms(parts, brms_cfg, block)) {
     priors <- c(priors, brms::set_prior(s$sds, class = "sds", nlpar = nl))
-  if (gates$has_cor) priors <- c(priors, brms::set_prior(s$cor, class = "cor"))
+  }
+  if (gates$has_cor) {
+    priors <- c(priors, brms::set_prior(s$cor, class = "cor"))
+  }
   priors
 }
 
@@ -491,14 +574,25 @@
 #' @param tag      anchor-gate track tag ("siz" | "mon")
 #' @param parts_fn build_size_formula_parts | build_monthly_formula_parts
 #' @noRd
-.build_count_track_priors <- function(opt, block, tag, parts_fn, brms_cfg, parts) {
-  cfg        <- opt[[block, exact = FALSE]]
-  parts      <- parts %||% parts_fn(opt, NULL)
+.build_count_track_priors <- function(
+  opt,
+  block,
+  tag,
+  parts_fn,
+  brms_cfg,
+  parts
+) {
+  cfg <- opt[[block, exact = FALSE]]
+  parts <- parts %||% parts_fn(opt, NULL)
   has_slopes <- .prior_config_slopes(cfg, cfg$admin_level)
-  brms_cfg   <- brms_cfg %||% cfg$brms
-  s          <- .single_country_strings(.prior_strings(brms_cfg, block), parts)
-  intercept  <- .intercept_prior_string(s, brms_cfg, block,
-                                        .anchor_gate_on(opt, tag))
+  brms_cfg <- brms_cfg %||% cfg$brms
+  s <- .single_country_strings(.prior_strings(brms_cfg, block), parts)
+  intercept <- .intercept_prior_string(
+    s,
+    brms_cfg,
+    block,
+    .anchor_gate_on(opt, tag)
+  )
 
   priors <- c(
     brms::set_prior(intercept, class = "Intercept"),
@@ -507,15 +601,26 @@
   if (has_slopes) {
     priors <- c(brms::set_prior(s$b, class = "b"), priors)
   }
-  if (.has_smooth_terms(parts, brms_cfg, block))
+  if (.has_smooth_terms(parts, brms_cfg, block)) {
     priors <- c(priors, brms::set_prior(s$sds, class = "sds"))
+  }
   phi_priors <- .shape_dpar_priors(s, cfg$phi_re)
-  if (!is.null(phi_priors)) priors <- c(priors, phi_priors)
+  if (!is.null(phi_priors)) {
+    priors <- c(priors, phi_priors)
+  }
   # single country: the shape RE keeps its `country` level (grouped fits root it
   # at country, formula.R::.phi_re_term()); tight prior on that sd as well.
-  if (isTRUE(parts$single_country) && !is.null(phi_priors))
-    priors <- c(priors, brms::set_prior(.SINGLE_COUNTRY_SD, class = "sd",
-                                        group = "country", dpar = "shape"))
+  if (isTRUE(parts$single_country) && !is.null(phi_priors)) {
+    priors <- c(
+      priors,
+      brms::set_prior(
+        .SINGLE_COUNTRY_SD,
+        class = "sd",
+        group = "country",
+        dpar = "shape"
+      )
+    )
+  }
   priors
 }
 
@@ -542,8 +647,15 @@
 #'   (brms_kl backend: "lin"); NULL = unchanged output
 #' @return brmsprior: Intercept, b, [sd tiers], [sds], [cor]
 build_occ_priors <- function(opt, parts, brms_cfg = NULL, nlpar = NULL) {
-  .build_hazard_track_priors(opt, "occurrence", "occ", parts, brms_cfg,
-                             gate_b = FALSE, nlpar = nlpar)
+  .build_hazard_track_priors(
+    opt,
+    "occurrence",
+    "occ",
+    parts,
+    brms_cfg,
+    gate_b = FALSE,
+    nlpar = nlpar
+  )
 }
 
 #' build_duration_priors
@@ -569,19 +681,41 @@ build_occ_priors <- function(opt, parts, brms_cfg = NULL, nlpar = NULL) {
 #'   when `prior_mso_band` is set
 #' @return brmsprior: Intercept, [b], [mso_band b], [sd tiers], [sds], [cor]
 build_duration_priors <- function(opt, parts, brms_cfg = NULL, dat = NULL) {
-  priors   <- .build_hazard_track_priors(opt, "duration", "dur", parts, brms_cfg,
-                                         gate_b = TRUE)
+  priors <- .build_hazard_track_priors(
+    opt,
+    "duration",
+    "dur",
+    parts,
+    brms_cfg,
+    gate_b = TRUE
+  )
   brms_cfg <- brms_cfg %||% opt[["duration"]][["brms"]]
   band_prior <- brms_cfg[["prior_mso_band"]]
-  if (is.null(band_prior) || !identical(parts$bh_terms, "mso_band")) return(priors)
-  if (is.null(dat) || is.null(dat[["mso_band"]]))
-    stop("build_duration_priors: duration prior_mso_band is set but `dat` with an ",
-         "`mso_band` column was not passed.", call. = FALSE)
+  if (is.null(band_prior) || !identical(parts$bh_terms, "mso_band")) {
+    return(priors)
+  }
+  if (is.null(dat) || is.null(dat[["mso_band"]])) {
+    stop(
+      "build_duration_priors: duration prior_mso_band is set but `dat` with an ",
+      "`mso_band` column was not passed.",
+      call. = FALSE
+    )
+  }
   lv <- levels(droplevels(as.factor(dat[["mso_band"]])))[-1L]
   # brms coefficient names for factor levels: "4-5" -> "4M5", "9+" -> "9P".
-  coefs <- paste0("mso_band", gsub("+", "P", gsub("-", "M", lv, fixed = TRUE), fixed = TRUE))
-  do.call(c, c(list(priors), lapply(coefs, function(k)
-    brms::set_prior(band_prior, class = "b", coef = k))))
+  coefs <- paste0(
+    "mso_band",
+    gsub("+", "P", gsub("-", "M", lv, fixed = TRUE), fixed = TRUE)
+  )
+  do.call(
+    c,
+    c(
+      list(priors),
+      lapply(coefs, function(k) {
+        brms::set_prior(band_prior, class = "b", coef = k)
+      })
+    )
+  )
 }
 
 #' build_size_priors
@@ -603,8 +737,14 @@ build_duration_priors <- function(opt, parts, brms_cfg = NULL, dat = NULL) {
 #'   `%in% names(dat)` sparsity check treats an unknown column as "keep,
 #'   can't check").
 build_size_priors <- function(opt, brms_cfg = NULL, parts = NULL) {
-  .build_count_track_priors(opt, "size", "siz", build_size_formula_parts,
-                            brms_cfg, parts)
+  .build_count_track_priors(
+    opt,
+    "size",
+    "siz",
+    build_size_formula_parts,
+    brms_cfg,
+    parts
+  )
 }
 
 #' build_monthly_priors
@@ -621,6 +761,12 @@ build_size_priors <- function(opt, brms_cfg = NULL, parts = NULL) {
 #'   identical rationale (CB/ENSO slope RE terms already appended by
 #'   04_fit_mon_brms_cb.R when supplied; NULL recomputes from `opt` alone).
 build_monthly_priors <- function(opt, brms_cfg = NULL, parts = NULL) {
-  .build_count_track_priors(opt, "monthly", "mon", build_monthly_formula_parts,
-                            brms_cfg, parts)
+  .build_count_track_priors(
+    opt,
+    "monthly",
+    "mon",
+    build_monthly_formula_parts,
+    brms_cfg,
+    parts
+  )
 }

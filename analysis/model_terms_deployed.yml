@@ -23,7 +23,7 @@
 # none of them appears in any fixed or random term.
 #
 # `{nbr}` is the neighbour-contagion column name, which the gate derives per
-# config with paths.R::nbrCovariateName() from the config's `contagion:`
+# config with paths.R::nbr_covariate_name() from the config's `contagion:`
 # block (rho_km, scale, partition, partition_source) -- the same call
 # build_formula_terms() makes -- so a renamed kernel column needs no edit here.
 #
