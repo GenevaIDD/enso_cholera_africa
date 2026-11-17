@@ -314,7 +314,7 @@ if (!file.exists(opt$size_data)) {
       # apportion_w == 1 on every row, so `orig` is just `suspected_cases` and
       # the check reduces to sum(x) == sum(x). Assert the property that actually
       # characterises a collapse instead — one row per (LP, season), each
-      # carrying the LP's OWN case count. That is a strictly stronger claim than
+      # carrying the LP's own case count. That is a strictly stronger claim than
       # the conservation the expansion path can make, and it is the thing a
       # regression would break.
       gate(

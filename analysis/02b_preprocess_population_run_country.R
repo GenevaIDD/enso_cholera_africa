@@ -91,21 +91,12 @@ n_workers <- if (isTRUE(opt$workers > 0L)) {
 }
 
 # 3. One country ---------------------------------------------------------------
-# Per country, every year at once:
-#   * GADM units are read for the task's country only (load_gadm_units' SQL
-#     filter) and the LP corpus once, not once per year;
-#   * the country footprint, LP selection and LP x gid pieces are built once;
-#   * Q_g (the gadm1 / gadm2 roles) is cached per (country, year) under
-#     make_run_file(opt, "pop_gid_cache_dir"), keyed on the GADM file, the
-#     raster and boundary dirs and the extractor version -- not on the outbreak
-#     vintage -- so a new vintage re-extracts the LP roles only.
-# Output is the per-year runner's, partition for partition:
-#   generated_data/population/parts/iso3=<ISO3>/year=<YYYY>/
-#     crosswalk.qs | lp_pop.qs | gid_pop.qs | manifest.yml | _SUCCESS
-# A year whose partition is fresh (pop_part_fresh: built from this LP corpus)
-# is skipped. Where compute nodes cannot download, prestage the WorldPop
-# rasters and the boundary cache first: a country task owns all its years'
-# rasters.
+# Per country, every year at once: GADM units, LP corpus, footprint and
+# LP x gid pieces are built once. Q_g is cached per (country, year) under
+# make_run_file(opt, "pop_gid_cache_dir"), keyed on GADM, raster, boundary and
+# extractor version (not the outbreak vintage). Output partitions match the
+# per-year runner's (generated_data/population/parts/iso3=/year=/); a fresh
+# partition is skipped. Rasters and boundary cache must be prestaged.
 
 run_country_task_file <- function(task_path, force = FALSE, use_cache = TRUE) {
   tk <- yaml::read_yaml(task_path)

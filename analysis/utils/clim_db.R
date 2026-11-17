@@ -111,8 +111,8 @@ get_extremes_gid <- function(
 #' This is the guard whose absence let three Ghana gids grow to 33.9M / 33.9M /
 #' 19.9M rows against 528 distinct months each -- 99.7% of an 8.5 GB
 #' climate_stats.sqlite -- via compile_stats()'s purrr::reduce(full_join)
-#' (utils.R:493). Every downstream join then silently multiplied those rows.
-#' (Moved verbatim from 02_preprocess_climate.R, which still calls it.)
+#' (clim_compile.R). Every downstream join then silently multiplied those rows.
+#' (Called by 02_preprocess_climate.R.)
 assert_unique_clim_rows <- function(dat, key, what) {
   dup <- duplicated(dat[, key, drop = FALSE])
   if (!any(dup)) {

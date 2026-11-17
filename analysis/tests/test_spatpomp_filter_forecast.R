@@ -391,22 +391,13 @@ if (!is.null(bpf_correct)) {
     )
 
     # -------------------------------------------------------------------
-    # M3-mon: filter -> forecast handoff with draws_dur/draws_mon supplied.
-    # forecast_from_filtered()'s posterior_idx_mon is wrapped off
-    # posterior_idx_occ exactly like posterior_idx_dur (spatpomp_core.R,
-    # forecast_from_filtered() docstring); this exercises that wiring through
-    # the real bpfilter handoff (not a synthetic replicate list), which
-    # test_spatpomp_c_variant_mon.R -- being kernel-level -- never does. mon
-    # hard-requires a duration fit, so draws_dur is supplied alongside
-    # draws_mon (simulate_one_tu() stop()s otherwise).
-    #
-    # dry_run=TRUE (not FALSE, unlike the plain-forecast checks above): the
-    # dry_run=FALSE file-writing path here needs sim_io_ext() (utils/sim_io.R,
-    # not sourced by this test file) -- the same pre-existing gap already
-    # responsible for this file's baseline "event_table.rds written" FAILs
-    # above. dry_run=TRUE returns event_table/monthly_summary in memory
-    # without touching that path, which is sufficient to check the mon-path
-    # wiring this section targets.
+    # M3-mon: filter -> forecast handoff with draws_dur/draws_mon. Checks
+    # that forecast_from_filtered() wraps posterior_idx_mon off
+    # posterior_idx_occ like posterior_idx_dur, through the real bpfilter
+    # handoff (the kernel tests never do). mon requires a duration fit, so
+    # draws_dur is supplied. dry_run = TRUE: the file-writing path needs
+    # sim_io_ext() (sim_io.R, not sourced here), and in-memory results
+    # suffice for the wiring check.
     cat("\n## M3-mon: filter -> forecast handoff with draws_dur/draws_mon\n")
 
     draws_dur_m3 <- make_draws_bundle_synthetic(
@@ -614,7 +605,7 @@ expect_true(
 # ---------------------------------------------------------------------------
 # Hindcast Seam 1b: toff (t0 column) alignment — the off-by-one guard
 # ---------------------------------------------------------------------------
-# The ft_int case above has EXACTLY length(filt_months) columns (toff = 0), so a
+# The ft_int case above has exactly length(filt_months) columns (toff = 0), so a
 # stale `M_idx <- m` and a correct `M_idx <- m + toff` coincide and the bug is
 # invisible. A real pomp/spatPomp filter.traj has ntimes+1 columns: column 1 is
 # the pre-filter t0 state, columns 2..M+1 are the M filter months, so
@@ -622,7 +613,7 @@ expect_true(
 # variant rebuilds ft with a leading zero t0 column and asserts the launch-month
 # state is sliced at column m + 1 (NOT column m) — it fails against the stale
 # `M_idx <- m` code and passes after the toff fix. Mirrors the
-# .smoothing_active_matrix() convention (smoothing_core.R:869).
+# .smoothing_active_matrix() convention (smoothing_core.R).
 cat("\n## Hindcast Seam 1b: toff (t0 column) alignment guards the off-by-one\n")
 
 # ft_int1: (nvars × 1 × Mint+1). Column 1 = t0 (all zero). Columns 2..Mint+1
@@ -806,7 +797,7 @@ if (is.finite(my_hi) && is.finite(my_lo)) {
 cat("\n## M3-spread: .forecast_param_indices() branch logic\n")
 {
   Np_sp <- 7L
-  # Handoff whose particles ALL carry draw_idx=1 — reproduces the collapsed
+  # Handoff whose particles all carry draw_idx=1 — reproduces the collapsed
   # smoothing cache (n_draws_in_filter=1).
   handoff_sp <- lapply(seq_len(Np_sp), function(i) {
     list(posterior_draw_idx = 1L)
@@ -907,7 +898,7 @@ cat("\n## M3-random: .forecast_param_indices(param_draw_mode = 'random')\n")
   S_dur_rn <- 120L
   S_mon_rn <- 90L
   seed_rn <- 12345L
-  # Handoff whose particles ALL carry draw_idx=1 (collapsed smoothing cache) —
+  # Handoff whose particles all carry draw_idx=1 (collapsed smoothing cache) —
   # random mode must ignore it.
   handoff_rn <- lapply(seq_len(Np_rn), function(i) {
     list(posterior_draw_idx = 1L)
@@ -1205,7 +1196,7 @@ expect_true(
   "region assembly: filt_months carried through (common across members)"
 )
 
-# (d) filter_traj_to_warmup() extracts EVERY region gid from the merged array,
+# (d) filter_traj_to_warmup() extracts every region gid from the merged array,
 # with each per-unit state landing on the right gid AND the correct rep pairing
 # (rep1 values = 1000*1 + member_offset + position).
 frame_region <- tibble::tibble(

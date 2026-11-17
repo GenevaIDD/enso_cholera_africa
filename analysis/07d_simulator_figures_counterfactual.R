@@ -44,22 +44,14 @@ source("analysis/utils/simulator_core.R") # build_location_frame()
 source("analysis/utils/figures_io.R")
 
 # 2. CLI -----------------------------------------------------------------------
-# --ratio_start "auto" = the latest observed ONI month (the ENSO handoff);
-# --ratio_end "auto" = per-group horizon_end / africa_min_horizon from --manifest (an
-# explicit value overrides BOTH windows uniformly).
-# --horizon firm (default) = each country to its fit group's firm horizon (last CFSv2
-# month + the group's min deployed lag); unit = to the horizon its simulation unit was
-# run to (v2 manifests; the forecast's own end, past the CFSv2 span on the ENSO
-# continuation). Group horizon = the latest of its countries', common = the earliest.
-# unit writes to <figdir>/sim/<manifest-stem>/counterfactual_unit/ (firm figures kept).
-# --arm_alignment stitch (default) | common_start: when the two arms launch at
-# different months (manifest launch keys, utils/sim_io.R::manifest_arm_starts()),
-# "stitch" starts the window at the earlier (counterfactual) launch -- it
-# replaces --ratio_start auto -- and takes the factual series from the smoothing
-# up to its own launch (--smoothing_parts_dir, default the parts/ beside the
-# factual configs' smoothing_input), paired by replicate through 07b's
-# handoff_map.csv; "common_start" keeps the first month both arms simulate.
-# Equal launches: no-op either way.
+# --ratio_start / --ratio_end "auto": the latest observed ONI month / each
+# group's horizon from --manifest (an explicit value overrides both windows).
+# --horizon firm (default): each country to its group's firm horizon; unit: to
+# its simulation unit's run end (written under counterfactual_unit/).
+# --arm_alignment stitch (default): when the arms launch at different months,
+# start at the counterfactual launch and fill the factual from the smoothing
+# up to its own launch, paired via 07b's handoff_map.csv; common_start: the
+# first month both arms simulate. Equal launches: no-op.
 option_list <- list(
   make_option(
     "--manifest",
@@ -323,26 +315,13 @@ adm1_pop <- frame %>%
   dplyr::summarise(pop_adm1 = sum(pop, na.rm = TRUE), .groups = "drop")
 
 # 5. Load every group's two runs -----------------------------------------------
-# Cached, keyed on every input that changes them.
-# Design notes:
-#   * Within each group the factual + counterfactual run share posterior_strategy:
-#     paired + seed + n_replicates, so replicate_id is comparable 1:1 across arms.
-#     The ADM1 ratio map colours the ratio of MEANS (stable at ADM1 granularity, where
-#     per-replicate ratios are mostly 0/0 or Inf); significance (map border) is tested
-#     on the paired per-replicate difference forecast_i - counterfactual_i.
-#   * "Region" = ENSO teleconnection sub-group (the grouping driving the fits), not
-#     AFRO_region. enso_central is in the manifest's `skipped_groups` and is dropped.
-#   * CASES: the mon track's `cases_month` = one draw per ACTIVE month, the
-#     manuscript estimand (needs runs with grouping.monthly_enable: true).
-#   * No importance re-weighting of replicates: forward draws from the paired
-#     posterior/particle ensemble handed off from the historical smoothing, all
-#     equally weighted.
-#   * The derived-aggregate cache lives under <sim_root>/_figure_cache/, keyed on
-#     the manifest AND every input that changes it.
-# v2 manifests (partition_by: registry): runs are per partition unit; each unit
-# is loaded once and its rows relabelled with each country's FIT group (the
-# figures stay keyed by the fit grouping), every country censored at its own
-# firm horizon (utils/sim_io.R).
+# Cached under <sim_root>/_figure_cache/, keyed on the manifest and every
+# input. Factual and counterfactual share seed and n_replicates, so
+# replicate_id pairs 1:1; the ADM1 map colours the ratio of means and tests
+# significance on the paired per-replicate difference. "Region" = the ENSO
+# fit group. Cases = mon `cases_month`. Replicates are equally weighted.
+# v2 manifests: each partition unit is loaded once, relabelled by each
+# country's fit group and censored at its firm horizon (utils/sim_io.R).
 UNIT_MODE <- length(man$units) > 0L
 run_tags <- if (UNIT_MODE) {
   unlist(lapply(manifest_units(man), function(u) {
@@ -534,7 +513,7 @@ adm1_month_both <- dplyr::bind_rows(adm1_month_list) %>%
 # --arm_alignment stitch the factual series already starts at
 # the window start (smoothing before its launch), so this is a no-op. Otherwise
 # (common_start) the paired ratio / probability maps cumulate from the first
-# loaded month, so they are restricted to the months BOTH arms simulate, per
+# loaded month, so they are restricted to the months both arms simulate, per
 # group; otherwise the earlier-starting arm accumulates extra months. The ribbon
 # figures keep each arm's full span.
 .arm_start <- adm1_month_both %>%
@@ -596,7 +575,7 @@ country_ribbon <- summarise_reps(
 # Forecast vs counterfactual overlay.
 # Outputs (figures/sim/<manifest-stem>/counterfactual/ unless --out_dir):
 #   fig1_africa.png        Africa-wide monthly cases + outbreaks, truncated to africa_min_horizon
-#   fig2_region.png        same by ENSO group, each to its OWN horizon_end
+#   fig2_region.png        same by ENSO group, each to its own horizon_end
 #   fig6_country_outbreaks.png / fig7_country_cases.png   same by country
 #   fig3_adm1_ratio_map_{common,full}.png          ADM1 cumulative-incidence ratio (paired test outline)
 #   fig4_adm1_outbreak_ratio_map_{common,full}.png same for outbreak-months

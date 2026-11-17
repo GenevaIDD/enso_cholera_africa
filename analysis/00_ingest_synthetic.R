@@ -108,26 +108,13 @@ if (
 say <- function(...) message("[00_synthetic] ", sprintf(...))
 
 # 4. Output folders and synthetic units ----------------------------------------
-# Writes (relative to the working directory):
-#   $CHOLERA_OUTBREAK_DATA_DIR/<vintage>/combined_outbreaks_cholera.csv
-#     + stage1_geo/*.geojson
-#   data/geodata/{gadm_410-levels,gadm_valid}.gpkg, Africa_waterbody.shp,
-#     rivers_africa_37333.shp
-#   data/climate_parquet/<ISO3>/Africa_<core>.parquet.gzip
-#     (+ DOWNLOAD_MANIFEST.tsv)
-#   data/worldpop/*.tif, data/country_boundaries/<ISO3>_adm0.geojson
-#   data/who_annual_report_africa/{who_annual_report_africa,
-#     who_dashboard_annual_africa,who_dashboard_weekly_africa}.rds,
-#     who_sitrep_cumulative_africa.csv
-#   data/best_seasonality_estimates.csv, data/hmm_country_clusters.csv
-#   data/lenssen/extracted/<model>/step01_InitVerifInfo.Rda,
-#     data/precalc_plume_quantiles_ENSO_NINO34_synthetic.rds
-#   generated_data/enso_{oni,nino34,nino34_oisst}_cache.rds
-#     (+ _download_meta.yml), enso_cfsv2_cache.rds
-#   generated_data/wpp2024_national_totals.csv
-#   generated_data/synthetic_world/truth.yml, epidemics.rds (simulated truth)
-#   generated_data/synthetic_world/enso_events_synth.yml (past ENSO events of
-#     the synthetic ONI)
+# Writes synthetic stand-ins for every external input (relative to the
+# working directory): the outbreak CSV + stage1_geo/ under
+# $CHOLERA_OUTBREAK_DATA_DIR/<vintage>/; data/{geodata, climate_parquet,
+# worldpop, country_boundaries, who_annual_report_africa, lenssen}/ and the
+# seasonality / HMM-cluster CSVs; generated_data/ ENSO caches and WPP national
+# totals; and generated_data/synthetic_world/ (truth.yml, epidemics.rds,
+# enso_events_synth.yml: the simulated truth).
 dirs <- c(
   vintage_dir,
   "data/geodata",

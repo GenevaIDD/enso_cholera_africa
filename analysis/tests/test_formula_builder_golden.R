@@ -8,7 +8,7 @@
 #   Covers build_formula_terms(), build_size_formula_parts() and
 #   build_duration_formula_parts() (and the monthly builder). Asserts nothing
 #   about *correctness*: current output must equal the committed snapshot
-#   analysis/tests/golden/formula_builder_golden.rds EXACTLY, so a refactor of
+#   analysis/tests/golden/formula_builder_golden.rds exactly, so a refactor of
 #   the shared internals (per-cov/per-level RE loops, fixed-covariate
 #   resolution, intercept RE terms) that turns it red is not
 #   behaviour-preserving. Pure config + string assembly: no fit, no data/.

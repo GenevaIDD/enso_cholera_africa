@@ -17,26 +17,15 @@
 #   Callers source base.R, enso.R (continue_enso_analog(),
 #   enso_continuation_features()) and obs_sim_compare.R (crps_fair()).
 
-# Design: every observed seam month s (default 1982-01 .. 2020-12) is
-# continued to leads 1..H by each method; lead k is the k-th month after the
-# seam, i.e. the continuation lead of a simulator replicate k months past its
-# last CFSv2 month. The seam state is the OBSERVED ONI (v, 3-month tendency,
-# ONI(s - 6)), so the scores are optimistic against a seam the CFSv2 forecast
-# sets. Each ensemble is scored against the observed ONI with the fair CRPS
-# (obs_sim_compare.R::crps_fair(), the one copy; 1 member = |x - y|).
-#
-# Methods are closures `function(ctx)` returning an [H x n] ensemble matrix;
-# ctx = list(s, x0, state, H, obs, obs_month, obs_date). They are called in the
-# order given, once per seam, so the RNG stream is fixed by the seed and the
-# method list:
-#   enso_skill_method_neutral()   ONI = 0 (one member)
-#   enso_skill_method_ar1(phi)    phi^k * ONI(s) (one member, deterministic)
-#   enso_skill_method_clim()      same-calendar-month observed ONI, +- exclude
-#                                 months around the seam left out
-#                                 (leave-out climatology)
-#   enso_skill_method_analog(lib) the deployed k-NN analog continuation
-#                                 (enso.R::continue_enso_analog(), every knob
-#                                 of simulator.enso.continuation)
+# Design: each observed seam month s is continued to leads 1..H by each
+# method; lead k is the k-th month after the seam. The seam state is the
+# observed ONI, so scores are optimistic against a CFSv2-set seam. Scored with
+# the fair CRPS (obs_sim_compare.R::crps_fair(); 1 member = |x - y|).
+# Methods are closures function(ctx) -> [H x n] ensemble matrix, ctx = list(s,
+# x0, state, H, obs, obs_month, obs_date), called in the given order once per
+# seam (RNG stream fixed by seed + method list): enso_skill_method_neutral(),
+# _ar1(phi), _clim() (leave-out climatology) and _analog(lib) (the deployed
+# k-NN continuation, enso.R::continue_enso_analog()).
 
 #' enso_skill_seams
 #'

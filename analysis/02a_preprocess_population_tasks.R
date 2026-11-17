@@ -68,24 +68,13 @@ if (is.null(pop)) {
 }
 
 # 3. Country x year grid -------------------------------------------------------
-# Why (country, year) and not (country): with all 16 years requested, a
-# per-country task would serialise 16 WorldPop downloads and 16 extraction
-# passes into one job. Per-(country, year):
-#   * each WorldPop raster is owned by exactly ONE task, so the missing
-#     cross-worker download lock in download_worldpop_constrained()
-#     (OutbreakExtractR R/get_pop.R:1-68) becomes structurally unreachable;
-#   * the UN adjustment factor is per (country, year) anyway
-#     (estimate_adj_factors(), R/get_pop.R:70-133) — nothing is recomputed;
-#   * resume granularity is one country-year rather than one country.
-# The only shared resource left is the national-boundary cache; building it
-# once before the array removes that race.
-#
-# --task_unit country (the per-country runner,
-# 02b_preprocess_population_run_country.R) writes one task per country with
-# every year instead. The download argument above does not hold on a cluster
-# whose compute nodes cannot reach WorldPop: there the rasters are prestaged
-# on the login node and no task downloads.
-# The country's geometry is then built once instead of once per year.
+# Default task unit is (country, year): each WorldPop raster belongs to one
+# task (no cross-worker download race), the UN adjustment factor is per
+# (country, year) anyway, and a resume redoes one country-year. The
+# national-boundary cache is built once, before the array.
+# --task_unit country (02b_preprocess_population_run_country.R): one task per
+# country with every year, for clusters whose compute nodes cannot reach
+# WorldPop (the rasters are prestaged on the login node).
 iso3s <- if (!is.null(opt$countries) && nzchar(opt$countries)) {
   toupper(trimws(strsplit(opt$countries, ",")[[1]]))
 } else {

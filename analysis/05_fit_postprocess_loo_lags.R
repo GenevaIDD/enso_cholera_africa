@@ -439,29 +439,15 @@ message(strrep("-", 60))
 print(ranking, row.names = FALSE)
 
 # 6. Write outputs -------------------------------------------------------------
-# Outputs (under <outdir>/loo_compare/<batch>/ — make_loo_compare_run_file(),
-# utils/paths.R; the batch config dir -d holds INPUTS only. Readers locate the
-# latest ranking via utils/loo_lags.R::loo_compare_ranking_files(), which also
-# falls back to the legacy in-config-dir location):
-#   loo_compare_lags[_<group>]_<YYYYMMDD>.rds
-#                                    — ranking tibble (best→worst), with elpd_loo,
-#                                      se_elpd, elpd_diff, se_diff, p_loo, single_lag,
-#                                      and the Pareto-k summary
-#                                      columns of each lag's PSIS-LOO
-#                                      (utils/loo_lags.R::PARETO_K_COLS; additive,
-#                                      no selection rule reads them)
-#   loo_compare_lags[_<group>].png   — elpd-by-lag plot (point + SE), best lag flagged
-#   lag_loo_sidecar[_<group>]_<YYYYMMDD>.rds
-#                                    — (opt-in, --lag_sidecar) N x L pointwise elpd and
-#                                      Pareto-k matrices, per-lag population ENSO
-#                                      crossbasis draws (b_enso_cb*) + the cb_meta
-#                                      "enso" entry, per-lag row-key digests, track
-#                                      and group (utils/loo_lags.R::build_lag_loo_sidecar()).
-#                                      Loads every fit even when its LOO is cached.
-#                                      --sidecar_only writes only this file: the
-#                                      ranking rds and png are left untouched, so a
-#                                      retrofit does not move 09's enso_relation
-#                                      freshness inputs.
+# Outputs under <outdir>/loo_compare/<batch>/ (make_loo_compare_run_file();
+# readers use loo_lags.R::loo_compare_ranking_files()); -d holds inputs only.
+#   loo_compare_lags[_<group>]_<YYYYMMDD>.rds  ranking (best -> worst): elpd,
+#     SEs, p_loo, single_lag and Pareto-k columns (PARETO_K_COLS)
+#   loo_compare_lags[_<group>].png             elpd by lag, best lag flagged
+#   lag_loo_sidecar[_<group>]_<YYYYMMDD>.rds   opt-in (--lag_sidecar; loads
+#     every fit): pointwise elpd / Pareto-k, per-lag ENSO cb draws
+#     (build_lag_loo_sidecar()). --sidecar_only writes only this file, so
+#     09's enso_relation freshness inputs do not move.
 #   per-fit LOO cached via make_run_file(opt, "loo" | "size_loo")
 
 # Outputs go under <outdir>/loo_compare/<batch>/ (make_loo_compare_run_file(),
@@ -579,24 +565,11 @@ ggsave(out_png, p, width = 7, height = 4.5, dpi = 150)
 message("Saved elpd-by-lag plot -> ", out_png)
 
 # 7. Copy best-fit artefacts ---------------------------------------------------
-# --copy_best <dir> copies the winning fit's artefacts (fit / re_stats / loo /
-# cb_meta) into <dir>, printing each copied file.
-# Best-lag selection (shared with bash/tools/collect_enso_best_lag_fits.sh and
-# the loo_lag_results_by_group.Rmd diagnostic report — see utils/loo_lags.R):
-#   occurrence        — the MAXIMUM single_lag among fits within --se_mult SEs of
-#                        elpd_diff from the rank-1 (best-elpd) fit.
-#   size/duration/monthly — the best (lowest-rank) single_lag >= --min_lag, which
-#                        callers pass as the occurrence lag for the same group.
-#                        Required for --copy_best on these tracks.
-#
-# Persist the winning fit's artefacts (fit / re_stats / loo / cb_meta) into a
-# best-fit folder, per the shared (hybrid) selection rule in
-# analysis/utils/loo_lags.R: occurrence — max single_lag within --se_mult SEs
-# of elpd_diff from rank-1; other tracks — the same unconstrained SE-window
-# pick if it already clears --min_lag (the occurrence lag), else the
-# SE-window pick within the single_lag >= --min_lag eligible subset. The
-# ranking/plot above are unchanged — they always reflect the raw LOO order;
-# only the *copied* fit is subject to the selection rule.
+# --copy_best <dir> copies the selected fit's artefacts (fit / re_stats / loo /
+# cb_meta) into <dir>. Selection is the shared rule in utils/loo_lags.R
+# (occurrence: max single_lag within --se_mult SEs of rank 1; other tracks:
+# the same, floored at --min_lag = the group's occurrence lag, required for
+# these tracks). The ranking and plot always keep the raw LOO order.
 
 if (!is.null(script_opt$copy_best)) {
   dest <- script_opt$copy_best

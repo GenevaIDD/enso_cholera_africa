@@ -44,7 +44,7 @@
 
 #' .geo_crps_level
 #'
-#' Score one geography level: optional coverage pro-rating of BOTH sides by the
+#' Score one geography level: optional coverage pro-rating of both sides by the
 #' level's covered gid-month fraction, the ensemble CRPS (crps_ens(),
 #' utils/obs_sim_compare.R) plus sim mean/quantiles per (geography, year), the
 #' unmasked sim mean, and the covered gid-month count. Callers build the
@@ -879,34 +879,24 @@ attach_episode_case_totals <- function(event_table, episode_totals) {
 #' Compute CRPS for annual total suspected cases at Africa / region / country.
 #'
 #' Aggregates simulated per-episode case totals (`episode_cases`, from
-#' compute_episode_case_totals(): the in-horizon sum of the mon track's
-#' `cases_month` over each episode) from the event table and observed
-#' `suspected_cases` from outbreak_metadata.rds by calendar year of ONSET at
-#' three geographic levels. When a coverage mask is supplied, only (gid, month)
-#' cells in the mask contribute; annual totals are pro-rated to a full year by
-#' multiplying by 12 / n_covered_months. The unmasked sim totals are also
-#' retained (column `total_sim_unmasked_mean`) so coverage-driven gaps can be
-#' visualised.
+#' compute_episode_case_totals()) and observed `suspected_cases` by calendar
+#' year of onset at three geographic levels. With a coverage mask only masked
+#' (gid, month) cells count and annual totals are pro-rated by
+#' 12 / n_covered_months; `total_sim_unmasked_mean` keeps the unmasked totals.
+#' Episodes censored at the horizon end contribute only their in-horizon
+#' months, so the last horizon year(s) are biased low on the simulated side.
 #'
-#' Estimand note (size track retired): the observed side is each outbreak's
-#' whole-outbreak total, attributed to its onset year; the simulated side is
-#' the sum of `cases_month` over the episode's simulated months. An episode censored at the
-#' horizon end therefore contributes only its in-horizon months, so the last
-#' horizon year(s) are biased low on the simulated side.
-#'
-#' @param event_table tibble with columns replicate_id, gid, start_month,
-#'   episode_cases (merged/event_table with compute_episode_case_totals()
-#'   joined on by run_validation()).
-#' @param obs_metadata_path path to `~/secure/cholera_outbreak_data/outbreak_metadata.rds`.
+#' @param event_table tibble with replicate_id, gid, start_month and
+#'   episode_cases (joined on by run_validation()).
+#' @param obs_metadata_path path to
+#'   `~/secure/cholera_outbreak_data/outbreak_metadata.rds`.
 #' @param frame tibble from build_location_frame() — must carry gid, country,
 #'   AFRO_region.
-#' @param obs_panel data frame from the survival panel — carries
-#'   location_period_id and gid (used to bridge obs metadata to gids).
+#' @param obs_panel survival panel carrying location_period_id and gid (bridges
+#'   obs metadata to gids).
 #' @param mask optional tibble(gid, month) from build_coverage_mask().
-#' @param case_admin_level admin level the case (monthly) model was fitted at
-#'   ("ADM1" | "ADM2" | "ADM1-ADM2"). Observed metadata is filtered to the same
-#'   admin level so obs and sim compare like-for-like. Default "ADM1-ADM2" (the
-#'   monthly track's default `monthly.admin_level`).
+#' @param case_admin_level admin level of the monthly fit ("ADM1" | "ADM2" |
+#'   "ADM1-ADM2", default "ADM1-ADM2"); observed metadata is filtered to match.
 #' @return named list(africa, region, country) each a tibble with columns
 #'   geography, year, n_sim, total_obs, crps_cases, total_sim_mean,
 #'   total_sim_lo, total_sim_hi, n_covered_months.
@@ -935,7 +925,7 @@ compute_crps_total_cases <- function(
   # ── Footprint-reconciled (rule-B) region key ──────────────────────────────
   # The simulator forecasts one admin level per region (ADM2 where nested
   # children exist, coarse ADM1 only where they don't — dropOverlappingADM1-
-  # FromFrame), while the observed corpus reports the SAME geography at a mix of
+  # FromFrame), while the observed corpus reports the same geography at a mix of
   # ADM1/ADM2/ADM3. An exact-(gid) membership test silently drops observed cases
   # reported coarser than the sim forecasts (the cross-level blindspot). The
   # region key maps every gid to its ADM1 unit — the ISO3 prefix makes "NGA_20"
@@ -957,7 +947,7 @@ compute_crps_total_cases <- function(
       location_period_id = as.character(location_period_id),
       gid = as.character(gid)
     )
-  # Under `episodes.key: gid_season` the survival panel carries ONE
+  # Under `episodes.key: gid_season` the survival panel carries one
   # representative location period per gid, so the bridge above would drop
   # every other member LP's observed cases. The canonical membership map
   # (utils/footprint.R::canonical_episodes()) lists every member LP; it also
@@ -1026,7 +1016,7 @@ compute_crps_total_cases <- function(
         obs_meta,
         # flatten_gid() first: gid is the raw (dotted, "ISO3.ADM1[.ADM2]_N")
         # panel convention here, not an underscore-joined RE level string — see
-        # the same idiom at 03_prepare_occ.R:561 / 03_prepare_siz.R:593.
+        # the same idiom in 03_prepare_occ.R and 03_prepare_siz.R.
         ADM1 = gid_to_adm1(gid, "compute_crps_total_cases")
       )
     }
@@ -1058,7 +1048,7 @@ compute_crps_total_cases <- function(
     mask_norm <- mask %>%
       dplyr::mutate(gid = as.character(gid), month = as.Date(month))
     if (identical(total_case_basis, "region_key")) {
-      # Project coverage up to (region_key, month) and mask BOTH sides on it.
+      # Project coverage up to (region_key, month) and mask both sides on it.
       #   OBS: a coarse observed report often sits on a gid absent from the
       #        (frame-gid-keyed) mask — its region is covered even though its gid
       #        is not, so key the coverage test on region.
@@ -1107,9 +1097,9 @@ compute_crps_total_cases <- function(
 
   # ── Per-gid observed cases: sum of distinct outbreaks ────────────────────
   # outbreak_metadata.rds carries one row per outbreak `uid`
-  # (= location-outbreak_number; see 01_preprocess_outbreaks.R:77-83) with its
-  # suspected_cases already summed over the outbreak window. Multiple rows per
-  # (gid, year) are therefore *distinct* outbreaks and must be summed — the
+  # (= location-outbreak_number; see 01_preprocess_outbreaks.R section 6) with
+  # its suspected_cases already summed over the outbreak window. Multiple rows
+  # per (gid, year) are therefore *distinct* outbreaks and must be summed — the
   # previous mean-rate-over-LPs aggregation deflated gids with several outbreaks
   # per year. Summing the absolute case counts also puts obs on the same footing
   # as the simulator's absolute `episode_cases`, removing the earlier pop vs
@@ -1123,7 +1113,7 @@ compute_crps_total_cases <- function(
     )
 
   # region_key mode: attribute observed cases to geography from the observed
-  # metadata's OWN country/AFRO_region (a coarse observed gid is absent from
+  # metadata's own country/AFRO_region (a coarse observed gid is absent from
   # frame_geo, so the gid → geo join used by the exact_gid path would drop it).
   # Cases are still summed per distinct outbreak, exactly as obs_gid_year does.
   obs_geo_year <- NULL
@@ -1472,35 +1462,15 @@ compute_active_fraction <- function(
 # compute_sim_kendall_tau — simulated episode-cases/duration Kendall's tau
 # ---------------------------------------------------------------------------
 
-#' Simulated episode-cases <-> duration Kendall's tau, reusing `paired_kendall_tau()`
-#' (`analysis/utils/dependence.R`) so the simulated and observed (Phase 5,
-#' `05_fit_postprocess_dependence.R`) numbers are computed with the same
-#' estimator.
+#' Simulated episode-cases <-> duration Kendall's tau, with the observed side's
+#' estimator (dependence.R::paired_kendall_tau()).
 #'
-#' This is a RAW-value tau (pooled across all uncensored simulated episodes,
-#' `stats::cor(episode_cases, duration_months, method = "kendall")` under the
-#' hood), not a PIT-residual tau -- the simulated episodes are one realised
-#' draw each, not posterior draws against a fixed panel, so there is no
-#' PIT to compute. Kendall's tau is rank-invariant to monotonic transforms of
-#' either margin on its OWN, so this is a valid tau, but it is not
-#' confound-adjusted the way the fits' PIT-residual tau is: shared covariates
-#' and REs can induce raw co-variation between simulated episode cases and duration
-#' even when the posterior-draw-level (residual) association is zero. If the
-#' fits show independence, this simulated tau is the falsifiable check that
-#' the *kernel* (not just the fits) also shows no residual coupling -- read it
-#' next to, not as identical to, the PIT-residual tau.
-#'
-#' Censored episodes are dropped before pooling (their `duration_months` is
-#' the horizon-truncation point, not the true cessation time, which would
-#' bias the pooled tau; their in-horizon `episode_cases` is truncated likewise).
-#'
-#' Estimand note (size track retired): the simulated size margin is
-#' `episode_cases`, the sum of the mon track's `cases_month` over the episode
-#' (compute_episode_case_totals()). Because `episode_cases` accumulates over the
-#' episode's active months, it is mechanically coupled to `duration_months`, so
-#' this tau is expected to be positive even when the per-month case draws are
-#' independent of cessation; read it as a kernel diagnostic, not as directly
-#' comparable to the Phase-5 (size-fit) PIT-residual tau.
+#' A raw-value tau pooled over uncensored simulated episodes (censored ones
+#' carry truncated duration and cases), not a PIT-residual tau: shared
+#' covariates and REs can induce co-variation, and `episode_cases` sums over
+#' the episode's months, so it is mechanically coupled to `duration_months`
+#' and expected to be positive. Read it as a kernel diagnostic, not as
+#' comparable to the fits' PIT-residual tau.
 #'
 #' @param event_table tibble from the simulator's merged event_table (must
 #'   carry episode_cases, duration_months, censored -- absent on no-duration
@@ -1543,7 +1513,7 @@ compute_sim_kendall_tau <- function(event_table, min_n = 5L) {
 # These three functions are driven by the --hindcast CLI mode (mirrors the
 # --hindcast mode of 07c_simulator_postprocess.R). For a single hindcast run
 # (one launch_year x ENSO group) they overlay the simulated forecast band vs
-# the observed record over the *scored* window, applying the SAME panel-derived
+# the observed record over the *scored* window, applying the same panel-derived
 # coverage mask 07c uses (observed at-risk (gid, month) cells within the
 # forecast horizon). See run_hindcast_figures() for the manifest loop.
 

@@ -75,34 +75,23 @@ if (!exists("build_obs_for_tu", mode = "function")) {
 #' Precompute the static part of the linear predictor for every (unit, time)
 #' in the covariate table.
 #'
-#' Calls evaluate_lp() with NA spillover and NA u_days so that TTLO and
-#' spillover contributions are suppressed (both return 0 for NA inputs).
-#' The result captures: intercept FE, nested intercept REs, climate FE + RE
-#' slope × covariate values, seasonal spline, and basehaz contribution.
+#' Calls evaluate_lp() with NA spillover and NA u_days, so the TTLO and
+#' spillover terms are 0. The result holds the intercept FE, nested intercept
+#' REs, climate FE + RE slope x covariate, seasonal spline and basehaz.
 #'
 #' @param draws_sub  1-draw draws bundle.
 #' @param frame_tu   location frame for the TU.
 #' @param covar_tbl  covariate table from build_covar_for_tu (long, sorted by
 #'                   time then unit).
 #' @param enso_names character vector of ENSO covariate column names to pass.
-#' @param cb_names   DLNM cross-basis columns to inject. Cross-basis terms are
-#'                   neither TTLO- nor spillover-dependent, so they are fully
-#'                   absorbed into the static LP here (no Csnippet change needed).
-#'                   Empty when the fit carries no cross-basis.
-#'
-#'                   Accepts either form: an UNNAMED vector of covariate column
-#'                   names (each maps to the identically-named model term -- the
-#'                   occurrence track's case, where the bare `enso_cb<k>` columns
-#'                   ARE that fit's basis), or a NAMED vector mapping MODEL TERM
-#'                   -> COVARIATE COLUMN. The named form is what the monthly
-#'                   and duration tracks must pass: every track selects its ENSO
-#'                   single-lag independently (Horn: occ 11, mon 11, dur 8), so
-#'                   their columns live under the `.SP_MON_CB_PREFIX` /
-#'                   `.SP_DUR_CB_PREFIX` namespaces and have to be renamed back to
-#'                   the bare model term before `evaluate_lp()`'s `_cb[0-9]+$`
-#'                   whitelist will match them against the fitted coefficients.
-#'                   Passing the unnamed form for those tracks silently evaluates
-#'                   their coefficients against the OCCURRENCE basis.
+#' @param cb_names   DLNM cross-basis columns to inject (absorbed fully into the
+#'                   static LP); empty when the fit has no cross-basis.
+#'                   Unnamed: column names equal the model terms (occurrence).
+#'                   Named (model term -> covariate column): required for the
+#'                   monthly and duration tracks, whose columns carry
+#'                   `.SP_MON_CB_PREFIX` / `.SP_DUR_CB_PREFIX`. The unnamed form
+#'                   would evaluate their coefficients against the occurrence
+#'                   basis.
 #' @return numeric vector of length nrow(covar_tbl).
 precompute_lp_static <- function(
   draws_sub,
@@ -365,27 +354,16 @@ precompute_nbr_coefs <- function(draws_sub, frame_tu, drop_region = FALSE) {
 # Exogenous observed o_tu fold (country-partition mode only)
 # ---------------------------------------------------------------------------
 
-#' Fold OBSERVED cross-country contagion into lp_static for single-country
+#' Fold observed cross-country contagion into lp_static for single-country
 #' partitions.
 #'
-#' Under partition_by=country the internal `tu` indicator is collapsed to a
-#' constant, so update_lags() yields o_tu = 0 for every unit at every step and
-#' the rprocess always takes the FALSE spillover branch (adds spill_otu_f). The
-#' positive cross-country contagion term is therefore lost, clipping the
-#' continent-wide occurrence peaks.
-#'
-#' This restores it WITHOUT touching the (frozen) 07a kernel or the Csnippet:
-#' for every (unit, time) whose lag-1 calendar month had an observed outbreak in
-#' ANOTHER country of the same TRUE transmission unit, we add
-#'   delta[unit] = spill_otu_t[unit] - spill_otu_f[unit]
-#' to lp_static. Combined with the rprocess's unconditional spill_otu_f, the
-#' effective contribution becomes spill_otu_t exactly when the observed term is
-#' active — algebraically identical to the TU-partitioned run, but driven by the
-#' observed panel instead of the (single-country) simulated state.
-#'
-#' No-op unless `otu_obs` is supplied AND frame_tu carries a `tu_true` column
-#' (set only by smoothing_apply_partition in country mode); the TU-partitioned
-#' and ungrouped paths are completely unchanged.
+#' Under partition_by=country, o_tu is always 0, so the rprocess always adds
+#' spill_otu_f and the cross-country contagion term is lost. For every
+#' (unit, time) whose lag-1 month had an observed outbreak in another country of
+#' the same true TU, this adds spill_otu_t - spill_otu_f to lp_static: the same
+#' result as a TU-partitioned run, driven by the observed panel. No-op unless
+#' `otu_obs` is given and frame_tu has a `tu_true` column (set only by
+#' smoothing_apply_partition() in country mode).
 #'
 #' @param lp_static   numeric, length nrow(covar_tbl) (frame_tu/covar_tbl order).
 #' @param covar_tbl   long covariate table (columns unit, time, ...).
@@ -537,24 +515,13 @@ precompute_nbr_coefs <- function(draws_sub, frame_tu, drop_region = FALSE) {
 
 #' Precompute lp_static / TTLO / spillover, with optional multi-group routing.
 #'
-#' Ungrouped (grouping_sub = NULL): identical to the three standalone
-#' precompute_* calls — zero behaviour change.
-#'
-#' Grouped (Design B, multi-group per TU): segments frame_tu rows by
-#' frame_tu$group and runs the existing precompute_* functions per group against
-#' that group's single-draw bundle, with drop_region = TRUE (grouped fits drop
-#' the AFRO_region RE level). Results are stitched back into full-frame order:
-#'   - lp_static: assigned into a length-nrow(covar_tbl) vector via the per-group
-#'     covar-row mask (covar_tbl$unit %in% group gids); precompute_lp_static
-#'     returns rows in the masked-subset order, so the assignment is order-safe.
-#'   - ttlo / spillover: full U-row data.frames filled where frame_tu$group == g.
-#'     frame_g preserves frame_tu row order for group g, so the per-group result
-#'     aligns with the logical mask. build_covar_for_tu_c later joins these by
-#'     unit, so per-group fill order is safe downstream.
-#'
-#' The union of enso_names / cb_names is passed to every group: evaluate_lp
-#' ignores terms absent from a group's draws, so no per-group name filtering is
-#' required.
+#' Ungrouped (grouping_sub = NULL): the same as the three standalone
+#' precompute_* calls. Grouped: runs them per frame_tu$group on that group's
+#' single-draw bundle (drop_region = TRUE) and stitches the results back into
+#' full-frame order (lp_static by the per-group covar-row mask; ttlo /
+#' spillover as U-row frames filled per group, joined by unit downstream). Every
+#' group gets the union of enso_names / cb_names: evaluate_lp() ignores terms
+#' absent from a group's draws.
 #'
 #' @param frame_tu     location frame for the TU (must carry a `group` column
 #'                     under grouping).
@@ -633,23 +600,12 @@ precompute_lp_components <- function(
 # ---------------------------------------------------------------------------
 # Sibling precompute functions for the DURATION (cessation-hazard) model (C)
 # ---------------------------------------------------------------------------
-# Mirrors the occurrence precompute trio exactly. Differences
-# from occurrence:
-#   * basehaz_val is always 0 in precompute_dur_lp_static() -- NOT because it
-#     is folded in statically (unlike occurrence's t_start_seas basehaz), but
-#     because basehaz_eval() (the generic dispatcher precompute_lp_static()
-#     calls) does not recognise the duration model's "factor" mso-band kind
-#     and silently returns 0 for it -- exactly the value the R
-#     reference wants here, since the mso-band hazard is STATE-dependent
-#     (mso changes every step) and can never be folded into a per-(unit,time)
-#     build-time constant the way occurrence's t_start_seas-keyed basehaz can.
-#     The real mso-band contribution is computed at Csnippet RUNTIME from the
-#     DBH lookup table below (mirrors the TTLO yrs-bin ternary chain).
-#   * TTLO/spillover coefficients are drawn from the DURATION draws bundle's
-#     own fe/re_slope (a real duration model can, and typically will, carry
-#     different TTLO/spillover coefficients than the occurrence model whose
-#     outbreak episodes it shares) -- reuses precompute_ttlo_coefs /
-#     precompute_spillover_coefs verbatim (already generic over any draws_sub).
+# Mirrors the occurrence precompute trio, except:
+#   * basehaz_val is 0: the mso-band cessation hazard depends on the latent
+#     mso clock, so it is looked up at Csnippet runtime from the DBH table
+#     below (basehaz_eval() returns 0 for the "factor" kind, as wanted here).
+#   * TTLO / spillover coefficients come from the DURATION draws bundle
+#     (precompute_ttlo_coefs / precompute_spillover_coefs reused as is).
 
 #' Precompute the static part of the duration LP (climate + intercept + RE +
 #' ENSO/cross-basis; basehaz always 0 here -- see block comment above).
@@ -844,39 +800,20 @@ precompute_dur_lp_components <- function(
 # ---------------------------------------------------------------------------
 # Sibling precompute functions for the MONTHLY-CASE (`mon`) model (C variant)
 # ---------------------------------------------------------------------------
-# Mirrors the occurrence trio (precompute_lp_static, precompute_ttlo_coefs,
-# precompute_spillover_coefs) with basehaz_val = 0 (a count model, not a
-# survival model) and three differences that are all forced by
-# build_monthly_formula_parts() (utils/config.R) rather than chosen here:
-#
-#   * OFFSETS. mon is offset(log(pop)) [toggled] + offset(log_offset)
-#     [toggled] + its own empirical anchor offset(log(base_rate_mon)).
-#     log(pop) and the anchor are static per-unit constants and fold in once
-#     -- the C rprocess never reads pop -- but log_offset is a per-(unit, time)
-#     covariate column, so it is added inside the per-time loop. Every toggle
-#     is read off the DRAWS BUNDLE (offset_pop / offset_logoffset), never
-#     hardcoded -- the same bundle-driven rule the v1 kernel follows, so the
-#     offset set is asserted in exactly one place (the extractor) and tested
-#     once. `pop_elasticity: free` is NOT folded here: the `log_pop_c`
-#     deviation term is a fitted COEFFICIENT, not an offset, so it is derived
-#     inside evaluate_lp() from `frame_tu$pop` and the bundle's
-#     `log_pop_centres` (simulator_core.R) -- one derivation serves every
-#     kernel. `off_pop` below stays the elasticity-1 part.
-#
-#   * COVARIATE NAMING. mon's panel cross-bases live in the covariate table
-#     under the .SP_MON_CB_PREFIX namespace ("monCB_enso_cb1", ...) because
-#     occurrence and monthly cases pick their ENSO single-lag independently and
-#     would otherwise collide on one `enso_cb<k>` column. evaluate_lp() must
-#     see them under the BARE fitted term, so callers pass a term -> column
-#     map (`mon_covar_map`) instead of a plain `cb_names` vector.
-#
-#   * THE mso CROSS-BASIS IS LATENT. It has no panel column at all, so it
-#     cannot be folded into lp_static; it is precomputed as a per-unit x
-#     per-mso-value coefficient table (precompute_mon_mso_coefs) and looked up
-#     at Csnippet runtime from the latent mv_new[u]. Structurally this is
-#     precompute_ttlo_coefs()'s per-unit-RE bin table, NOT the duration
-#     basehaz's global `static const double` array (which works only because
-#     basehaz_dur_eval() is FE-only).
+# Mirrors the occurrence trio with basehaz_val = 0 (a count model), plus three
+# differences forced by build_monthly_formula_parts() (utils/config.R):
+#   * OFFSETS: log(pop) and the base_rate_mon anchor are static per unit and
+#     folded in once; log_offset varies by (unit, time) and is added in the
+#     time loop. Toggles come from the draws bundle (offset_pop /
+#     offset_logoffset), never hard-coded. The `log_pop_c` elasticity term is
+#     a coefficient, derived in evaluate_lp(); `off_pop` is the elasticity-1
+#     part.
+#   * COVARIATE NAMING: mon cross-bases live under .SP_MON_CB_PREFIX
+#     ("monCB_enso_cb1", ...) since occ and mon pick ENSO lags independently;
+#     callers pass a term -> column map (`mon_covar_map`) to evaluate_lp().
+#   * mso CROSS-BASIS IS LATENT: no panel column, so it is a per-unit x
+#     per-mso-value coefficient table (precompute_mon_mso_coefs) looked up at
+#     runtime from mv_new[u].
 
 #' Precompute the static (non-mso) part of the monthly-case LP for every
 #' (unit, time) in covar_tbl.
@@ -910,7 +847,7 @@ precompute_mon_lp_static <- function(
   } else {
     rep(0.0, U)
   }
-  # offset(log(base_rate_mon)) -- mon's OWN anchor column.
+  # offset(log(base_rate_mon)) -- mon's own anchor column.
   off_anch <- .anchor_log_offset(
     draws_mon_sub,
     frame_tu,
@@ -1001,7 +938,7 @@ precompute_mon_lp_static <- function(
 #'
 #' The generated Csnippet needs to know, because its onset-month exposure
 #' correction is only valid if there is an offset there to correct (see
-#' .ONSET_EXPOSURE_FRAC, simulator_core.R). This reads the SAME bundle key
+#' .ONSET_EXPOSURE_FRAC, simulator_core.R). This reads the same bundle key
 #' precompute_mon_lp_static() reads at :789, so the two cannot disagree -- the
 #' failure mode being guarded against is the recurring "config computed but not
 #' threaded to its consumer" pattern, where the fold and the correction get
@@ -1079,7 +1016,7 @@ precompute_mon_phi <- function(draws_mon_sub, frame_tu, drop_region = FALSE) {
 #'
 #'   entry[u, j] = sum_k (fe[["mso_cb<k>"]] + ns1("mso_cb<k>")[u]) * B[j+1, k]
 #'
-#' so the Csnippet does ONE covariate read indexed by the clamped latent
+#' so the Csnippet does one covariate read indexed by the clamped latent
 #' mv_new[u] -- zero basis arithmetic in C. Structurally a clone of
 #' precompute_ttlo_coefs(), with (mso_max + 1) bins instead of 7.
 #'
@@ -1434,7 +1371,7 @@ build_covar_for_tu_c <- function(
 #'
 #' spatPomp v1.1.0 flattens its covariate table with paste0(covariate_name,
 #' unit_index), where unit_index is the bare positional integer 1..U (see
-#' construct_spatPomp()'s .local() body; docstring at spatpomp_core.R:449-452).
+#' construct_spatPomp()'s .local() body; documented in spatpomp_core.R).
 #' That concatenation is ambiguous whenever one covariate name is another name
 #' plus digits -- concretely `mon_mso_coef_j1` vs `mon_mso_coef_j11`
 #' (precompute_mon_mso_coefs() emits j0..j<mso_max>, and the deployed mon fits
@@ -1562,25 +1499,16 @@ generate_rinit_csnippet <- function(
   } else {
     NULL
   }
-  # init_bases: named integer vector giving the absolute (0-based) position of
-  #   each init covariate's FIRST-UNIT copy in the covars array passed to rinit.
-  #   Accessed as covars[base + u] (0-based u), bypassing covindex.
-  #
-  # State index mapping (fixed by .SP_UNIT_STATENAMES order, 11 states total):
+  # init_bases: absolute 0-based position of each init covariate's first-unit
+  #   copy in the rinit covars array, read as covars[base + u].
+  # State index k (fixed by .SP_UNIT_STATENAMES, 11 states):
   #   k=0 u_days  k=1 o  k=2 o_ct  k=3 o_tu  k=4 Yout
   #   k=5 draw_idx  k=6 p  k=7 mu  k=8 size_phi  k=9 active  k=10 mso
-  # spatPomp uses __stateindex[k*U+u] for the flat position of state k, unit u.
-  #
-  # size_phi_base: integer base offset in __covars for the size_phi_init column
-  #   (the mon dispersion), or NULL (Bernoulli path → seed 0.0).
-  #
-  # active_init/mso_init are always present in init_bases (build_covar_for_tu_c
-  # unconditionally adds them, defaulting to 0 via warmup_state$active %||% 0)
-  # so they are written unconditionally here, same convention as u_days/o/o_ct/o_tu.
-  # Legacy (!use_dur) runs: rprocess never writes ST(9,u)/ST(10,u) again, so
-  # these seeded-0 values are simply held in place for the whole run (pomp's
-  # __x state buffer persists in-place across steps -- same precedent as
-  # size_phi/ST(8,u), which rprocess also never unconditionally rewrites).
+  #   flat position __stateindex[k*U+u].
+  # size_phi_base: __covars offset of size_phi_init, or NULL (Bernoulli: 0.0).
+  # active_init / mso_init are always in init_bases (default 0) and always
+  # written; without the duration track rprocess never rewrites ST(9,u) /
+  # ST(10,u), so the seeded 0 persists.
   fixed_d_c <- sprintf("%.1f", as.double(fixed_draw))
   ud_init_base <- as.integer(init_bases[["u_days_init"]])
   o_init_base <- as.integer(init_bases[["o_init"]])
@@ -1696,61 +1624,52 @@ generate_rinit_csnippet <- function(
 #'      spillover coef, then hazard p and draws Yout.
 #'   5. Computes ADM1 → country → TU aggregates for lag update.
 #'   6. Writes updated state back via __stateindex loop (O(1) code).
+#' Every opt-in flag set to FALSE emits the C unchanged.
 #'
 #' @param U          integer; number of units.
 #' @param memb       list from make_membership_arrays_c().
 #' @param fixed_draw integer; draw index to write into draw_idx state (default 1L).
-#' @param force_o_tu logical; when TRUE, ST(3,u) (next-step o_tu) is written as
-#'   an unconditional 1.0 for every valid-TU unit instead of the computed
-#'   leave-one-country-out expression. Under partition_by=country a TU is a
-#'   single country, so the computed expression is always 0 (see
-#'   .fold_observed_otu_into_lp docstring) — this flag is the simulated-period
-#'   counterpart, used when there is no observed panel to fold in (forecast /
-#'   counterfactual), or when the caller prefers the simpler always-active
-#'   assumption over the observed fold during smoothing. NA-TU units (TUID<0)
-#'   still get the -1.0 sentinel regardless. Default FALSE preserves prior
-#'   behaviour exactly.
-#' @param use_dur   logical; opt-in for the duration-aware (cessation
-#'   hazard) path, mirroring simulate_one_tu()'s `use_dur` gate. FALSE (default)
-#'   emits no active/mso code at all — states 9/10 are never written, so they
-#'   hold their rinit-seeded 0 for the whole run, as size_phi/ST(8,u) do.
+#' @param force_o_tu logical; TRUE writes next-step o_tu (ST(3,u)) as 1.0 for
+#'   every valid-TU unit instead of the leave-one-country-out expression, which
+#'   is always 0 under partition_by=country (see .fold_observed_otu_into_lp()).
+#'   For simulated periods with no observed panel. NA-TU units (TUID<0) keep
+#'   the -1.0 sentinel. Default FALSE.
+#' @param use_dur   logical; opt-in cessation-hazard path, mirroring
+#'   simulate_one_tu()'s `use_dur`. FALSE (default) emits no active/mso code;
+#'   states 9/10 keep their rinit 0.
 #' @param dur_bh    list(kind, breaks, table) from precompute_dur_basehaz_table();
 #'   ungrouped duration basehaz lookup. NULL when duration is grouped or absent.
 #' @param dur_bh_by_group named list of per-group dur_bh lists (grouped duration
 #'   mode only); all groups must share identical kind/breaks (enforced by
 #'   precompute_dur_lp_components()). NULL when ungrouped or duration absent.
 #' @param dur_grp_id integer vector length U (0-based, in the SAME unit order as
-#'   `memb`/frame_sorted — NOT frame_tu row order) mapping each unit to its
+#'   `memb`/frame_sorted, NOT frame_tu row order) mapping each unit to its
 #'   row in dur_bh_by_group's tables. Required iff dur_bh_by_group is supplied.
 #' @param dur_groups character vector of group labels giving the row order of
-#'   dur_bh_by_group's tables (i.e. dur_grp_id indexes into this). Required iff
+#'   dur_bh_by_group's tables (dur_grp_id indexes into this). Required iff
 #'   dur_bh_by_group is supplied.
-#' @param use_nbr logical; emit the distance-weighted neighbour-contagion term.
-#'   When TRUE, the preamble embeds the WNBR[N_ADM1*N_ADM1] kernel, phase 1
-#'   reconstructs the lag-1 ADM1-active vector from the `o` state and adds
-#'   `bnbr[u] * (WNBR %*% Aa1)[ADID[u]]` to the occurrence LP. Gated ONLY by this
-#'   flag -- independent of force_o_tu / drop_country_tu_spillover. FALSE
-#'   (default) emits byte-identical C to the pre-nbr code.
+#' @param use_nbr logical; emit the distance-weighted neighbour-contagion term:
+#'   the preamble embeds the WNBR[N_ADM1*N_ADM1] kernel, and phase 1 rebuilds
+#'   the lag-1 ADM1-active vector from the `o` state and adds
+#'   `bnbr[u] * (WNBR %*% Aa1)[ADID[u]]` to the occurrence LP. Gated only by
+#'   this flag (independent of force_o_tu / drop_country_tu_spillover).
 #' @param nbr_kernel dense ADM1 x ADM1 kernel (nrow = ncol = memb$n_adm1), in the
-#'   SAME 0-based ADM1 order as memb$adm1_id. Required iff use_nbr. From
+#'   same 0-based ADM1 order as memb$adm1_id. Required iff use_nbr. From
 #'   build_partition_nbr_kernel(frame_sorted, ...).
 #' @param mon_mso_ncol integer; number of mon_mso_coef_j* covariate columns
-#'   (= mso_max + 1). 0 when the mon fit carries no mso cross-basis, in which
-#'   case the generated block simply omits the mso contribution. Ignored unless
-#'   the measurement selects the mon path.
+#'   (= mso_max + 1); 0 omits the mso contribution. Ignored unless the
+#'   measurement selects the mon path.
 #' @param mon_mu_cap logical; TRUE (a finite simulator.incidence_cap on the mon
-#'   path) caps mu at the per-unit `mon_mu_cap` covariate, fmin(exp(mn_lp), cap).
-#'   FALSE emits the uncapped expression unchanged.
+#'   path) caps mu at the per-unit `mon_mu_cap` covariate,
+#'   fmin(exp(mn_lp), cap).
 #' @param onset_season logical; TRUE (simulator.onset_eligibility: season)
 #'   gates the onset draw on no u_days-resetting onset in the unit's current
-#'   season, reading the `seas_k` covariate as sk[u] (season_onset_open() in
-#'   simulator_core.R is the R side). Requires use_dur. FALSE emits the
-#'   previous C unchanged.
+#'   season, reading the `seas_k` covariate as sk[u] (season_onset_open() is
+#'   the R side). Requires use_dur.
 #' @param cess_half logical; TRUE (simulator.cessation_exposure: half) emits
-#' mon_mu_block AFTER dur_cessation_block, reading a snapshot
-#'   of this month's pre-cessation active / mso (av_act / mv_act) and halving
-#'   the exposure of a unit that ceased this step. No-op without the mon path.
-#'   FALSE emits the previous C unchanged.
+#'   mon_mu_block after dur_cessation_block, reading a snapshot of this month's
+#'   pre-cessation active / mso (av_act / mv_act) and halving the exposure of a
+#'   unit that ceased this step. No-op without the mon path.
 #' @return pomp::Csnippet object.
 generate_rprocess_csnippet <- function(
   U,
@@ -1794,7 +1713,7 @@ generate_rprocess_csnippet <- function(
   }
 
   # Neighbour-contagion build-time contract: the WNBR matvec needs the dense
-  # ADM1 x ADM1 kernel, indexed in the SAME 0-based ADM1 order as memb$adm1_id
+  # ADM1 x ADM1 kernel, indexed in the same 0-based ADM1 order as memb$adm1_id
   # (i.e. unique(frame_sorted$adm1_unit)). Caller builds it via
   # build_partition_nbr_kernel(frame_sorted, ...). Fail loud here rather than
   # emit C that reads a mis-sized/absent WNBR.
@@ -1843,7 +1762,7 @@ generate_rprocess_csnippet <- function(
   #     reference (simulator_core.R). ---
   csv_dbl <- function(v) paste(sprintf("%.17g", as.double(v)), collapse = ", ")
 
-  # Onset-month exposure correction, emitted as the SAME double the v1 kernel
+  # Onset-month exposure correction, emitted as the same double the v1 kernel
   # gets from log(.ONSET_EXPOSURE_FRAC) -- printed at %.17g (round-trip exact)
   # rather than written as M_LN2, so the C and R kernels cannot drift.
   # See .ONSET_EXPOSURE_FRAC (simulator_core.R) for what this corrects.
@@ -2062,7 +1981,7 @@ generate_rprocess_csnippet <- function(
     .trim = FALSE
   )
 
-  # Neighbour-contagion kernel, embedded row-major in the SAME 0-based ADM1
+  # Neighbour-contagion kernel, embedded row-major in the same 0-based ADM1
   # order as ADID[] (both derive from unique(frame_sorted$adm1_unit)). t() makes
   # the column-major R matrix row-major for WNBR[a*N_ADM1+b]. Symmetric apart
   # from the zeroed diagonal, so transpose is cosmetic, but kept explicit so the
@@ -2203,28 +2122,16 @@ generate_rprocess_csnippet <- function(
   }
 
   # ---- Section 4: phase 1 — LP + hazard + Yout ----
-  # Duration-aware onset gate: the RNG call itself is skipped (not masked)
-  # for already-active units, in ascending unit order -- reproducibility-
-  # critical, mirrors simulate_one_tu()'s identical hard
-  # branch (a masked always-draw would change the RNG stream the moment any
-  # unit's `active` first flips to 1). Legacy path (use_dur=FALSE): identical
-  # unconditional draw, byte-for-byte the onset-only code.
-  #
-  # Bernoulli draw via rbinom(1.0, p) (Rmath.h, available in Csnippets), NOT
-  # `unif_rand() < p`: the two are both valid Bernoulli(p) samplers but do NOT
-  # consume/interpret the underlying uniform draw the same way -- confirmed
-  # empirically (matched-seed comparison of stats::rbinom() vs a compiled
-  # unif_rand()<p reference: they silently disagree once p is away from the
-  # 0/1 extremes) and confirmed that C's Rmath rbinom() IS byte-identical to
-  # R's stats::rbinom() under a matched seed. The v1 kernel draws Yn via
-  # stats::rbinom() (simulate_one_tu()), so the C side must
-  # call rbinom() too, or R/C trajectories silently desync the first time a
-  # non-degenerate probability is hit.
-  # Season gate (onset_eligibility: season): also skip the
-  # draw when an onset that reset u_days fell in the unit's current season.
-  # ud[u] is the pre-update value, so floor(ud/30.4375 + 0.5) is the months
-  # since that onset minus one; eligible iff it is >= sk[u]. NaN is eligible.
-  # Same expression as simulator_core.R::season_onset_open().
+  # The onset RNG call is SKIPPED (not masked) for active units, in ascending
+  # unit order, as in simulate_one_tu(); a masked draw would shift the RNG
+  # stream. Without the duration track the draw is unconditional.
+  # Draw with rbinom(1.0, p), NOT unif_rand() < p: only Rmath rbinom() matches
+  # R's stats::rbinom() under a matched seed, which the v1 kernel uses, so any
+  # other sampler desyncs R/C trajectories.
+  # Season gate (onset_eligibility: season): also skip when the last onset is in
+  # the current season; eligible iff floor(ud/30.4375 + 0.5) >= sk[u]
+  # (pre-update ud; NaN eligible). Same rule as
+  # simulator_core.R::season_onset_open().
   yn_draw_line <- if (isTRUE(use_dur) && isTRUE(onset_season)) {
     paste0(
       "    if (av[u] < 0.5 && (ISNAN(ud[u]) || floor(ud[u] / 30.4375 + 0.5) >= sk[u])) ",
@@ -2235,7 +2142,7 @@ generate_rprocess_csnippet <- function(
   } else {
     "    Yn[u] = rbinom(1.0, p);\n"
   }
-  # Neighbour-contagion reconstruction, ONCE per step before the per-unit loop.
+  # Neighbour-contagion reconstruction, once per step before the per-unit loop.
   # Rebuild the lag-1 ADM1-active 0/1 vector Aa1 from the `o` state ov[u] (o is
   # written in phase 2 as Aa[ADID[u]], so every unit of an ADM1 already carries
   # that ADM1's OR-aggregate -- the assignment is exact, no max needed), then
@@ -2329,36 +2236,16 @@ generate_rprocess_csnippet <- function(
   }
 
   # ---- Section 4d (mon only): monthly-case LP + mu, AFTER promotion ----
-  # Position is load-bearing: this block reads the LATENT mv_new/av_new, which
-  # only promotion_block creates. Placed AFTER promotion so a unit onsetting
-  # this month is seen at mso = 1 rather than 0, and BEFORE dur_cessation_block
-  # so a unit whose episode ends this month still emits its final month's mean.
-  # Matches simulate_one_tu()'s ordering exactly.
-  # simulator.cessation_exposure: half (cess_half) moves it AFTER
-  # dur_cessation_block instead, reading the av_act / mv_act snapshot so the
-  # final month is still emitted, at half its exposure.
-  #
-  # ud/ov/oc/ot are deliberately the PRE-update values (same as the occurrence
-  # LP and the v1 kernel), NOT the post-lag-update ST(k,u) reads that
-  # dur_cessation_block uses.
-  #
-  # Writes the ST(7,u) = mu slot (rinit seeds it 0; nothing else writes it),
-  # so no state vector / cache schema change. The generated C comment strings
-  # below are left verbatim so the emitted code stays byte-identical.
-  # Inactive units get mu = 0: the measurement gates its NegBin term on
-  # `mu > 0.0`, NOT the recorded `active` state (ST(9,u)), because
-  # dur_cessation_block runs AFTER this block and can reset active/mso to 0
-  # in the SAME step for a unit whose episode ends this month -- gating on
-  # `active` would silently drop that final month's case observation. `mu`
-  # computed here is deterministically 0.0 iff av_new[u] < 0.5 (this month,
-  # pre-cessation), so it is an exact, order-independent "active this month"
-  # signal. mu is also consumed downstream (smoothing, forecast summaries)
-  # and must not hold a counterfactual "cases if this unit were active" value.
-  # Under cess_half the block runs after dur_cessation_block, so it reads the
-  # snapshot av_act / mv_act (this month's activity before cessation) instead
-  # of av_new / mv_new, which the cessation draw may already have reset; a
-  # unit with av_act = 1 and av_new = 0 ceased this step. ud/ov/oc/ot are the
-  # unpacked pre-update copies either way.
+  # Placement is load-bearing: AFTER promotion_block (reads latent mv_new /
+  # av_new, so a unit onsetting this month has mso = 1) and BEFORE
+  # dur_cessation_block (an episode ending this month still emits its final
+  # mean), as in simulate_one_tu(). Under cess_half it runs AFTER cessation and
+  # reads the av_act / mv_act snapshot instead, at half exposure.
+  # ud/ov/oc/ot are the PRE-update values, as in the occurrence LP.
+  # Writes mu into ST(7,u) (no schema change); mu = 0 exactly when inactive,
+  # which the measurement's `mu > 0.0` gate relies on. mu must never hold a
+  # counterfactual value (smoothing and forecasts read it). The emitted C
+  # comment strings are kept verbatim so the C stays byte-identical.
   cess_half <- isTRUE(cess_half) && isTRUE(use_mon) && isTRUE(use_dur)
   mn_av <- if (cess_half) "av_act" else "av_new"
   mn_mv <- if (cess_half) "mv_act" else "mv_new"
@@ -2605,7 +2492,7 @@ generate_rprocess_csnippet <- function(
   # exactly). Uses rbinom(1.0, p_dur) rather than `unif_rand() < p_dur` for
   # the same reason as the phase-1 onset draw above -- see that comment.
   dur_cessation_block <- if (isTRUE(use_dur)) {
-    # DBH (mso-band basehaz lookup table) constants: declared ONCE, outside
+    # DBH (mso-band basehaz lookup table) constants: declared once, outside
     # the per-unit loop below (static const arrays with compile-time-constant
     # initializers -- no benefit and worse readability if placed inside the
     # loop). dur_bh_lookup_stmt (per-unit bin index + table read) is placed
@@ -2922,9 +2809,8 @@ generate_rprocess_csnippet <- function(
 #' Wraps the occurrence (and optional duration / monthly-case) kernel in
 #' compiled Csnippet rprocess / rinit, with Csnippet measurement functions that
 #' read the latent hazard `p` stored in the state vector.
-#'
-#' REQUIRES fixed_draw_idx (errors if NULL). The N-independent-runs design
-#' always provides it; this variant is not supported for the random-draw path.
+#' REQUIRES fixed_draw_idx (errors if NULL): one bpfilter run per replicate,
+#' each on one draw; the random-draw path is not supported.
 #'
 #' @param frame_tu          location frame for this TU (from build_location_frame).
 #' @param panel_tu_warmup   climate + outbreak panel for this TU, covering at
@@ -2937,32 +2823,29 @@ generate_rprocess_csnippet <- function(
 #' @param n_draws_in_filter integer; ignored when fixed_draw_idx is provided (the
 #'                          draw subset is always size 1 in that case).
 #' @param fixed_draw_idx    integer (required): the posterior draw this object
-#'                          commits to (N-independent-runs design: one
-#'                          bpfilter run per replicate, each on one draw).
-#' @param draws_dur         Optional duration (cessation-hazard) draws bundle
-#'                          (`extract_duration_draws()`). Ignored when
+#'                          commits to.
+#' @param draws_dur         optional duration (cessation-hazard) draws bundle
+#'                          (extract_duration_draws()). Ignored when
 #'                          `grouping$draws_dur_by_group` is supplied.
-#' @param draws_mon         Optional monthly-case (`mon`) draws bundle
-#'                          (`extract_monthly_draws()`), used when
-#'                          `measurement` is one of `.SP_MON_MEAS`.
-#' @param cb_meta_mon       Optional cb_meta sidecar for the mon fit (ungrouped).
-#' @param cb_meta_dur       Optional cb_meta sidecar for the `dur` fit
+#' @param draws_mon         optional monthly-case (`mon`) draws bundle
+#'                          (extract_monthly_draws()), used when `measurement`
+#'                          is one of `.SP_MON_MEAS`.
+#' @param cb_meta_mon       optional cb_meta sidecar, mon fit (ungrouped).
+#' @param cb_meta_dur       optional cb_meta sidecar for the `dur` fit
 #'                          (ungrouped); its panel cross-bases go under the
 #'                          `.SP_DUR_CB_PREFIX` namespace.
-#' @param mon_case_col      Optional column name in `obs_data`/the panel holding
-#'                          OBSERVED MONTHLY cases (emitted as `obs_CM`).
+#' @param mon_case_col      optional column name in `obs_data`/the panel holding
+#'                          observed monthly cases (emitted as `obs_CM`).
 #' @param force_o_tu logical; forwarded to generate_rprocess_csnippet() and
-#'   used to gate .fold_observed_otu_into_lp(). See that function's docstrings
-#'   for the partition_by=country rationale. Default FALSE (no change).
+#'   used to gate .fold_observed_otu_into_lp() (see there). Default FALSE.
 #' @param drop_country_tu_spillover logical; forwarded to
-#'   generate_rprocess_csnippet() (suppresses o_ct/o_tu LP contribution and
-#'   forces both to 0 post-update) and used to zero the o_ct/o_tu warmup-init
-#'   state and gate .fold_observed_otu_into_lp() off. Takes PRECEDENCE over
-#'   force_o_tu. Default FALSE (no change).
+#'   generate_rprocess_csnippet() (drops the o_ct/o_tu LP contribution and
+#'   forces both to 0 after the update); also zeroes the o_ct/o_tu warmup state
+#'   and turns .fold_observed_otu_into_lp() off. Takes precedence over
+#'   force_o_tu. Default FALSE.
 #' @param use_nbr logical; enable the distance-weighted neighbour-contagion term
 #'   (occurrence track). Forwarded to generate_rprocess_csnippet() and used to
-#'   build the per-partition kernel + beta_nbr coef column. Default FALSE (no
-#'   change; byte-identical to pre-nbr).
+#'   build the per-partition kernel + beta_nbr coef column. Default FALSE.
 #' @param nbr_rho_km numeric; kernel decay bandwidth in km. Default 500.
 #' @param nbr_gadm_path path to the validated GADM geopackage (ADM1 centroids).
 #' @param nbr_cache_dir directory for the cached ADM1 distance matrix.

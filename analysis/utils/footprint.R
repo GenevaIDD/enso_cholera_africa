@@ -16,25 +16,13 @@
 #   footprint_member_rows() is purely additive. Callers source base.R; dplyr /
 #   tibble via `::`.
 
-# Why footprints. 03_prepare_siz.R collapses the episode table to ONE row per
-# (gid, year_seas, admin_level) footprint: cases are SUMMED across every
-# location period that resolves to the same gid in the same season-year, and
-# every other column is taken with `dplyr::first()`. So the surviving `uid` /
-# `location_period_id` on a size (and therefore duration) episode is a
-# REPRESENTATIVE LABEL, not the identity of the thing whose cases the row
-# carries. Measured on the Aug-2026 corpus (`--pop_source crosswalk
-# --composite_policy drop_collapse`): 314 / 1581 rows (19.9%) carry more cases
-# than their own (uid, lp) total in outbreak_metadata.rds; those rows hold
-# 29.7% of the size-track case mass; the worst ratio is 127x.
-#
-# Anything that attaches an EXTERNAL per-location-period quantity to a
-# size/duration episode (e.g. the monthly case series of
-# 01b_preprocess_outbreaks_monthly.R) therefore cannot join on
-# (uid, location_period_id). It must join on the footprint key and know which
-# location periods fed each footprint -- the membership map this module
-# returns as a first-class output, so 03_prepare_siz.R (producer) and
-# 03_prepare_mon.R (consumer) share one definition of a footprint instead of
-# duplicating the seasonality / crosswalk match cascade.
+# Why footprints: 03_prepare_siz.R collapses episodes to one row per
+# (gid, year_seas, admin_level), summing cases over every location period (LP)
+# that resolves to that gid and season-year. The surviving uid /
+# location_period_id is a representative label, not the source of the cases.
+# So anything that attaches a per-LP quantity to a size/duration episode (e.g.
+# the 01b monthly case series) must join on the footprint key through the
+# membership map this module returns, never on (uid, location_period_id).
 
 # The collapse key. Named once so a consumer cannot spell it differently from
 # the producer -- the exact failure this module exists to prevent.
@@ -75,9 +63,9 @@ FOOTPRINT_KEY <- c("gid", "year_seas", "admin_level")
 
 #' unify_footprint_ids
 #'
-#' LEGACY-ONLY id unification, moved verbatim from 03_prepare_siz.R:617-625.
-#' Fixes ONE representative location_period_id / uid per (gid, admin_level)
-#' across ALL season-years, so the per-location_period_id
+#' LEGACY-ONLY id unification, moved verbatim from 03_prepare_siz.R.
+#' Fixes one representative location_period_id / uid per (gid, admin_level)
+#' across all season-years, so the per-location_period_id
 #' `time_to_last_outbreak` recursion downstream tracks each footprint's full
 #' cross-season series instead of restarting per location period.
 #'
@@ -123,31 +111,17 @@ unify_footprint_ids <- function(dat) {
 
 #' footprint_member_rows
 #'
-#' Capture which (uid, location_period_id) rows feed each footprint, BEFORE the
-#' collapse throws the information away.
+#' Capture which (uid, location_period_id) rows feed each footprint, before the
+#' collapse loses that information. `dat` itself is not modified.
 #'
-#' MUST BE CALLED BEFORE `unify_footprint_ids()`, not after. Under
-#' `--pop_source legacy` the unification overwrites `uid` /
-#' `location_period_id` with a single representative across all season-years,
-#' so a map built afterwards would claim every season's cases belong to one
-#' location period -- exactly the double-count this module exists to stop.
-#' Calling it first is behaviour-preserving for the size frame: the map is a
-#' new object, `dat` is returned unmodified by this function, and the
-#' unification/collapse still run in their original order.
+#' Must be called BEFORE `unify_footprint_ids()`: under `--pop_source legacy`
+#' that overwrites `uid` / `location_period_id` with one representative, so a
+#' later map would assign every season's cases to one location period.
 #'
-#' `.member_i` reproduces the row that `dplyr::first()` will pick in
-#' `collapse_to_footprint()`. `group_by() |> summarise()` sorts GROUPS by key but
-#' preserves the original row order WITHIN a group, and `mutate()` never
-#' reorders, so `.member_i == 1L` is the representative. It is recorded rather
-#' than recomputed downstream because that equivalence is a dplyr semantics
-#' detail, and a consumer should not have to know it.
-#'
-#' `apportion_w` is carried because under `--composite_policy keep` a single
-#' location period is expanded into K member rows with cases scaled by
-#' w = H/P_l. An external per-location-period series (monthly cases) is NOT
-#' pre-scaled, so a consumer summing it across footprints would count that LP's
-#' cases K times over. Absent under `--pop_source legacy`, where it defaults
-#' to 1.
+#' `.member_i == 1L` marks the row `dplyr::first()` picks in
+#' collapse_to_footprint(). `apportion_w` (w = H/P_l; 1 under legacy) is
+#' carried because an external per-LP series is not pre-scaled: summed over
+#' the K member rows of a `--composite_policy keep` LP it would count K times.
 #'
 #' @param dat episode table, post-climate-join, pre-collapse
 #' @return tibble, one row per input row: FOOTPRINT_KEY (character) +
@@ -194,7 +168,7 @@ footprint_member_rows <- function(dat) {
 
 #' collapse_to_footprint
 #'
-#' The footprint collapse, moved verbatim from 03_prepare_siz.R:627-634.
+#' The footprint collapse, moved verbatim from 03_prepare_siz.R.
 #'
 #' CASES ARE A FLOW: summing them WITHIN an admin level is correct (ADM3
 #' children -> footprint total at ADM3 resolution; ADM2 report -> footprint
@@ -235,7 +209,7 @@ collapse_to_footprint <- function(dat) {
 #' aggregate_monthly_to_footprint
 #'
 #' Push a per-(uid, location_period_id, month) series through the same
-#' membership the footprint collapse used, so the result is on the SAME
+#' membership the footprint collapse used, so the result is on the same
 #' footprint as the episode's `suspected_cases`, `pop` and `exposure`.
 #'
 #' THE CONSERVATION GATE IS THE POINT. `sum_m cases_month` over a footprint must
@@ -384,40 +358,21 @@ aggregate_monthly_to_footprint <- function(
 # Canonical gid-season episodes (`episodes.key: gid_season`)
 # ===========================================================================
 #
-# WHY. Under the historical `lp_season` key the four tracks disagree on what
-# one outbreak is. Occurrence builds survival intervals per LOCATION PERIOD,
-# censored at that LP's own onset, and only then unions to gid -- so a second
-# LP on the same gid keeps contributing "at risk, no onset" months after the
-# first LP's outbreak has started, and its later onset becomes a second event
-# at the gid. Size/duration/monthly collapse to (gid, year_seas, admin_level),
-# take TL/TR from whichever member happens to come first, and split one
-# gid-season across admin levels. The spatPomp filter, meanwhile, already sees
-# ONE episode per gid-month (e.g. ~1,785 occurrence onsets vs ~1,413 canonical
-# gid-season episodes).
-#
-# WHAT. One table, keyed (gid, year_seas), built by ONE function that
-# 03_prepare_occ.R and 03_prepare_siz.R both call with the same arguments:
-#   onset  = earliest member TL; end = latest member TR;
-#   cases  = the finest-resolution footprint total -- members are grouped by
-#            their REPORTING level (the corpus label, kept as `report_level`),
-#            cases are summed within a level and the level with the largest
-#            total wins (ties -> finer). Nested ADM2 + ADM3 reports of the same
-#            gid would otherwise double-count. This is the rule
-#            spatpomp_core.R::.aggregate_footprint_counts() already applies per
-#            (gid, month), applied here per episode so the monthly
-#            conservation gate stays exact (a sum of per-month maxima is not
-#            the max of per-level sums);
-#   admin_level = the GEOMETRY-DERIVED GADM level of the gid (caller-supplied
-#            `level_of`, built from the canonical population table). The corpus
-#            label never decides the unit's level -- it only decides which
-#            member reports nest inside which (`report_level`);
-#   uid / location_period_id = ONE representative per gid across all seasons,
-#            so uid <-> gid is 1:1 (asserted) and every per-uid / per-LP
-#            grouping downstream (climate lags, time-to-last-outbreak,
-#            episode_id) is per gid.
-#
-# Base-only like the rest of this module: no population/provenance calls. The
-# caller supplies `level_of` and computes the digest (provenance.R).
+# One table keyed (gid, year_seas), built by one function that
+# 03_prepare_occ.R and 03_prepare_siz.R call with the same arguments, so every
+# track trains on the same episodes:
+#   onset = earliest member TL; end = latest member TR;
+#   cases = the finest-resolution footprint total: members grouped by
+#           reporting level (`report_level`), summed within a level, largest
+#           total wins (ties -> finer); the per-episode form of
+#           spatpomp_core.R::.aggregate_footprint_counts(), so the monthly
+#           conservation gate stays exact;
+#   admin_level = the geometry-derived GADM level of the gid (caller-supplied
+#           `level_of`); the corpus label only decides nesting;
+#   uid / location_period_id = one representative per gid across seasons
+#           (uid <-> gid 1:1, asserted).
+# Base-only: no population/provenance calls. The caller supplies `level_of`
+# and computes the digest (provenance.R).
 
 #' footprint_key
 #'
@@ -569,7 +524,7 @@ finest_level_rows <- function(df, value_col, keys, level_col = "admin_level") {
 
 #' representative_ids_by_gid
 #'
-#' ONE (uid, location_period_id) per gid across all seasons: the row with the
+#' One (uid, location_period_id) per gid across all seasons: the row with the
 #' smallest location_period_id -- exactly the rule 03_prepare_occ.R has always
 #' used before its gid union (`order(location_period_id)[1]`), now shared by
 #' both prep scripts.
@@ -811,7 +766,7 @@ canonical_episodes <- function(
 #' THE shared entry point: 03_prepare_occ.R and 03_prepare_siz.R call this
 #' with identical arguments on their post-composite-reduction `ob_ts3`, so the
 #' two tracks (and duration/monthly, which inherit size's episodes) build the
-#' SAME episode table -- the episode digest then proves it.
+#' same episode table -- the episode digest then proves it.
 #'
 #' @param ob_ts3 post-C2 episode rows (one per LP-event per member gid).
 #' @param level_of function(gid) -> canonical level (population.R::canonical_level_lookup()).

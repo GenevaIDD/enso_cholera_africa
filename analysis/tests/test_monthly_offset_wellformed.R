@@ -109,7 +109,7 @@ cat(
   }
 }
 
-# --- the NB count extractor has no default block (formerly "size") -----------
+# --- the NB count extractor has no default block ----------------------------
 cat("\n## Part A1: .extract_nb_count_draws_brms() requires `block`\n")
 {
   err <- tryCatch(
@@ -316,17 +316,14 @@ expect_true(
 # --- B4: offset_logoffset adds log(days_in_month), MINUS the onset-month
 # ---     half-month exposure correction (.ONSET_EXPOSURE_FRAC).
 #
-# A month in the replay is not always a full month of person-time: the episode
-# starts partway through its onset month. The fit's log_offset column is the
-# real overlap (dur_data.R:257), so the per-day rate is estimated having already
-# divided that out; only the replay, which multiplies by days_in_month(), is
-# wrong. .onset_log_offset_adj() (simulator_core.R) adds log(0.5) on mso == 1.
+# The fit's log_offset is the real month overlap
+# (dur_data.R::.expand_active_months()); the replay multiplies by
+# days_in_month(), so .onset_log_offset_adj() (simulator_core.R) adds log(0.5)
+# on the onset month (mso == 1).
 #
-# Three months here, not one: month 1 is the onset month (mso == 1, forced by
-# the huge occ intercept), months 2-3 are interior (mso 2, 3 -- cessation hazard
-# is ~0 and onset cannot re-fire on an already-active unit, since the at-risk
-# set is `active_before == 0`). So one assertion pins all three facts at once:
-# the offset is applied, it is halved exactly on the onset month, and it is
+# Three months: month 1 is the onset month (forced by a huge occ intercept),
+# months 2-3 are interior (cessation ~0, no re-onset on an active unit). One
+# assertion checks the offset is applied, halved on the onset month only, and
 # exactly days_in_month on interior months.
 months3 <- seq(as.Date("2024-01-01"), by = "month", length.out = 3L)
 horizon3 <- list(start = "2024-01-01", end = "2024-03-31")

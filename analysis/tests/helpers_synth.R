@@ -13,18 +13,15 @@
 #   kernel panel, analysis/utils/base.R + enso.R (join_enso_lags,
 #   enso_lag_col_name) and lubridate.
 
-# make_synthetic_occ_panel() keeps test_synthetic_equivalence.R's RNG call
-# order exactly, so that test's draws are unchanged. make_synthetic_kl_panel()
-# extends it with an ENSO-like series joined through the real
-# enso.R::join_enso_lags(), a Gaussian lag-kernel ENSO effect per latent
-# country class, and a line-shaped country adjacency.
+# make_synthetic_kl_panel() adds an ENSO-like series (joined through
+# enso.R::join_enso_lags()), a Gaussian lag-kernel ENSO effect per latent
+# country class and a line-shaped country adjacency.
 #' make_synthetic_occ_panel
 #'
 #' Region -> country -> ADM1 random intercepts, a monthly panel with
 #' sinusoidal climatology + noisy anomalies, a seasonal baseline log-hazard,
-#' 30-day exposures and Poisson counts. With the defaults (countries = NULL,
-#' adm1_per_country = NULL, augment = NULL) the RNG calls and their order are
-#' exactly those of the former inline builder of test_synthetic_equivalence.R.
+#' 30-day exposures and Poisson counts. With the defaults the RNG calls and
+#' their order match test_synthetic_equivalence.R, so its draws are unchanged.
 #'
 #' @param countries optional tibble(country, AFRO_region) fixing the country
 #'   layer (skips the random region assignment)
@@ -129,16 +126,12 @@ make_synthetic_occ_panel <- function(
 
 #' make_synthetic_kl_panel
 #'
-#' Synthetic occurrence panel with a Gaussian lag-kernel ENSO effect that
-#' differs by latent country class. Countries C01..Cn sit on a line (C01-C02,
-#' C02-C03, ...), which gives the spatial tests an adjacency; by default the
-#' classes are contiguous blocks along the line. ENSO is a monthly AR(1) series
-#' shared by all units, joined with enso.R::join_enso_lags() so the lag columns
-#' are exactly the pipeline's enso_lead<k> / enso_lag<k>.
-#'
-#' ENSO effect of a row in country c (class k = z[c]):
-#'   beta[k] * sum_l w_l(mu[k], sigma[k]) * ONI(t - l),  l = lag_min..lag_max
-#' (linear in ONI -- representable by a natural-spline onebasis).
+#' Synthetic occurrence panel with a Gaussian lag-kernel ENSO effect per latent
+#' country class. Countries C01..Cn sit on a line (the adjacency); classes are
+#' contiguous blocks by default. ENSO is a shared monthly AR(1) series joined
+#' with enso.R::join_enso_lags(). Effect of a row in country c, class k:
+#'   beta[k] * sum_l w_l(mu[k], sigma[k]) * ONI(t - l), l = lag_min..lag_max
+#' (linear in ONI, so a natural-spline onebasis can represent it).
 #'
 #' @param mu_true,sigma_true,beta_true per-class kernel truth (length K)
 #' @param z_true integer class per country (default: contiguous blocks)

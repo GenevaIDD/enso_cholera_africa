@@ -682,21 +682,15 @@ attrib_ratio_map_layers <- function(
 }
 
 #' Fig. AE: population in ADM1s with more ENSO-attributable cases (forecast vs
-#' counterfactual, report_attrib_exposure), laid out for a double-column page.
-#' (a) ADM1 map of the ratio of mean forecast to mean counterfactual totals
-#' (log scale, capped at `limits`), with the IPCC robustness classes at the
-#' headline magnitude as hatching (unhatched = robust; diagonal = no robust
-#' signal; crossed = conflicting); an infinite ratio (zero counterfactual) is
-#' drawn at the cap, ADM1s without a ratio (0 vs 0) are left to the base
-#' layer's "no estimate" grey. Its legends sit inside the map, bottom left
-#' (the South Atlantic), as in Figure 4.
-#' (b) Share of each scope's population by IPCC
-#' class (robust + conflicting stacked, horizontal bars) and the Childs shares
-#' on the same bar with their 95% bootstrap intervals (ratio of means: filled,
-#' above the bar centre; ratio of medians: open, below), one column per
-#' magnitude m. Drawn on the headline slice (attribution window, explosive
-#' replicates dropped) of a v2+ artefact. Returns a patchwork (a | b); the
-#' caller adds the panel tags.
+#' counterfactual, report_attrib_exposure), for a double-column page.
+#' (a) ADM1 map of the mean forecast / mean counterfactual ratio (log scale,
+#' capped at `limits`), with the IPCC robustness classes at the headline
+#' magnitude as hatching; an infinite ratio is drawn at the cap, 0 vs 0 is left
+#' grey. Legends sit inside the map, bottom left.
+#' (b) Share of each scope's population by IPCC class (stacked bars) and the
+#' Childs shares with 95% bootstrap intervals (ratio of means filled, ratio of
+#' medians open), one column per magnitude m, on the headline slice of a v2+
+#' artefact. Returns a patchwork (a | b); the caller adds panel tags.
 #' @param adm1,exposure report_attrib_exposure$adm1 / $exposure
 #' @param metric "cases" | "onsets"; @param aset counterfactual analog set
 #' @param magnitude the headline m (style.attrib_headline) the map's classes use

@@ -793,24 +793,12 @@ if (!is.null(obj_c4)) {
 # ===========================================================================
 # T5 — Covariate-name collision fix: .sp_dedigit_covar_names()
 # ===========================================================================
-# spatPomp v1.1.0's construct_spatPomp() flattens the wide covariate table via
-# paste0(covariate_name, unit_index), where unit_index is the bare positional
-# integer 1..U (see .sp_dedigit_covar_names()'s docstring, spatpomp_core_c.R,
-# for the full derivation). That concatenation collides whenever one
-# covariate name is another name plus digits -- exactly what
-# precompute_mon_mso_coefs() produces (mon_mso_coef_j0..j<mso_max>, deployed
-# mso_max 12-26): "mon_mso_coef_j1"+11 == "mon_mso_coef_j11"+1 ==
-# "mon_mso_coef_j111". Collision threshold is U >= 11 (no unit index below 11
-# has a leading "1" long enough to alias the j1/j11 pair).
-# T5: covariate-name collision fix (.sp_dedigit_covar_names(),
-#     spatpomp_core_c.R): spatPomp's internal covariate flatten
-#     (paste0(name, unit_index)) collides whenever one covariate name is
-#     another name plus digits -- exactly what mon_mso_coef_j0..j<mso_max>
-#     produces (deployed mso_max 12-26) once a TU has U >= 11 units. T5a is a
-#     deterministic replay of spatPomp's own flatten logic on a minimal
-#     covar_tbl at and below the U=11 threshold; T5b builds a real spatPomp
-#     object at U=12 with mso_max=12, a config whose names collide without the
-#     de-digiting.
+# spatPomp v1.1.0 flattens covariates as paste0(name, unit_index), which
+# collides when one name is another plus digits: mon_mso_coef_j1 + 11 ==
+# mon_mso_coef_j11 + 1 (deployed mso_max 12-26, a TU with U >= 11 units). See
+# .sp_dedigit_covar_names() (spatpomp_core_c.R). T5a replays spatPomp's flatten
+# on a minimal covar_tbl at and below U = 11; T5b builds a real object at
+# U = 12 with mso_max = 12, whose names collide without the de-digiting.
 cat("\n## T5: .sp_dedigit_covar_names() — covariate-name collision fix\n")
 
 # T5a — direct, deterministic replay of spatPomp's own flatten logic

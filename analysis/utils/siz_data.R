@@ -110,7 +110,7 @@ make_size_data <- function(x, baseline = "1990_2019") {
 #' read_size_data
 #'
 #' Load + filter + scale outbreak-size analysis data. Ports the data-prep
-#' logic from legacy 07_run_outbreak_size_model.R:26-63.
+#' logic from the retired 07_run_outbreak_size_model.R.
 read_size_data <- function(opt, path = make_size_dat_file(opt)) {
   if (!file.exists(path)) {
     stop("read_size_data: missing input ", path)
@@ -118,7 +118,7 @@ read_size_data <- function(opt, path = make_size_dat_file(opt)) {
   d <- readRDS(path)
   ep_rec <- assert_episode_key(opt, path, "size")
 
-  # P0: resolve and validate the estimand ONCE, up front, so a mis-declared
+  # P0: resolve and validate the estimand once, up front, so a mis-declared
   # config fails before any data work rather than producing a plausible-looking
   # fit on mixed units.
   estimand <- resolve_size_estimand(opt)
@@ -277,7 +277,7 @@ read_size_data <- function(opt, path = make_size_dat_file(opt)) {
   # re_adm2_leaf_scope: adm2_only -> is_adm2 / gid_leaf (utils/paths.R).
   d <- .leaf_columns_for(d, opt$size, ep_rec, tag = "read_size_data")
 
-  # P0: the mean_rate table and this data must declare the SAME estimand. The
+  # P0: the mean_rate table and this data must declare the same estimand. The
   # table is built by an independent call that re-reads `path`, so this is a
   # genuine cross-check, not a tautology -- it is the seam where `Q x rbar^H`
   # would appear.

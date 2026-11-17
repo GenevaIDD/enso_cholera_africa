@@ -21,7 +21,7 @@
 #'
 #' Great-circle distance matrix (km) between GADM ADM1 centroids, cached.
 #'
-#' Reads the ADM_1 layer ONCE and filters to `iso3_set`. Deliberately does not
+#' Reads the ADM_1 layer once and filters to `iso3_set`. Deliberately does not
 #' reuse load_gadm_units() (analysis/utils/population_core.R), which st_read()s the
 #' whole continental ADM_1 layer and filters by a single GID_0 afterwards --
 #' calling it per country would re-read the full layer once per country. The
@@ -57,23 +57,13 @@ build_adm1_dist_km <- function(
 
   if (!refresh && file.exists(cache_file)) {
     cached <- readRDS(cache_file)
-    # Cache is only reusable if it covers every requested country. A stale cache
-    # built on a smaller iso3 set would silently give those units zero neighbour
-    # pressure, which looks like a real (null) result rather than a missing input.
-    #
-    # "Covered" = present in the matrix OR requested when the cache was built
-    # (the sidecar's `iso3`). A requested country can legitimately yield no rows.
-    # Counting only matrix rows would make such a country uncoverable, so every
-    # call that requested it would rebuild the matrix from the geopackage --
-    # which needs `sf` (absent on some HPC nodes) and races concurrent array
-    # tasks writing the same file.
-    #
-    # The sidecar is trusted only when it records `gid_adm1: gid_to_adm1`. Ghana's
-    # GADM GID_1 ("GHA1_2", no "." after the ISO3) cannot be keyed by a bare
-    # regex, only by gid_to_adm1(), so a cache built without it lists GHA yet has no
-    # GHA rows, and trusting it would
-    # give every Ghana ADM1 zero neighbour pressure. Such a cache falls back to
-    # matrix-row coverage and is rebuilt.
+    # A cache is reused only if it covers every requested country; a smaller
+    # one gives the missing units zero neighbour pressure, which looks like a
+    # real null. "Covered" = in the matrix or requested when the cache was built
+    # (the sidecar's iso3), so a country with no rows does not force a rebuild
+    # (needs sf; races between array tasks). The sidecar is trusted only with
+    # gid_adm1: gid_to_adm1 (Ghana's GID_1 has no "." after the ISO3); otherwise
+    # coverage falls back to matrix rows.
     cached_iso3 <- sort(unique(stringr::str_extract(
       rownames(cached),
       "^[A-Z]{3}"
@@ -272,7 +262,7 @@ neighbour_pressure <- function(
 #'   K_ij = exp(-d_ij / rho)                       (kernel_from_dist())
 #'   partition: K_ij <- 0 unless group(i) == group(j); units whose country is in
 #'              no group get an all-zero row and column (fit side: NA -> 0)
-#'   rownorm:   K_ij <- K_ij / sum_j K_ij  (over the SAME masked universe), so
+#'   rownorm:   K_ij <- K_ij / sum_j K_ij  (over the same masked universe), so
 #'              K %*% a is the distance-weighted share of active neighbours,
 #'              bounded in [0, 1]; isolated rows stay 0 (0/1, not 0/0)
 #'
@@ -387,28 +377,14 @@ build_contagion_table <- function(
 
 #' build_partition_nbr_kernel
 #'
-#' Dense ADM1 x ADM1 distance-decay kernel for a single simulator partition,
-#' aligned to the partition's own ADM1 ordering.
-#'
-#' The forward simulator (07b_simulator_v1.R) and the spatPomp filter
-#' (07b_simulator_spatpomp.R) both recompute neighbour pressure dynamically from
-#' the simulated / filtered ADM1-active state, rather than folding an exogenous
-#' observed value into `lp_static`. Both need the SAME kernel matrix `K`; they
-#' differ only in WHEN they supply the active vector (R: per simulated step;
-#' C: embedded-matrix matvec in the Csnippet). This helper is that shared build.
-#'
-#' The returned matrix is indexed in `unique(frame_tu$adm1_unit)` order -- the
-#' exact order `make_membership_arrays_c()` (spatpomp_core_c.R) assigns to
-#' `adm1_id`, so the C kernel can flatten it row-major into `WNBR[]` and index it
-#' by the same 0-based ADM1 id. Under `partition_by: country`, the partition's
-#' spatPomp object contains exactly that country's ADM1 units, so restricting `K`
-#' to those gids IS the within-country kernel -- cross-country neighbours are
-#' absent from the object (the deferred cross-country work).
-#'
-#' Partition ADM1 units absent from the GADM-derived distance matrix (e.g. a
-#' crosswalk ADM1 with no ADM_1 feature) get zero rows and columns: they exert
-#' and receive zero neighbour pressure, matching neighbour_pressure()'s
-#' coalesce-missing-to-0 behaviour on the fit side.
+#' Dense ADM1 x ADM1 distance-decay kernel `K` for one simulator partition. The
+#' R simulator (07b_simulator_v1.R) and the spatPomp filter both recompute
+#' neighbour pressure from the simulated ADM1 state with this same `K`.
+#' Rows and columns follow `unique(frame_tu$adm1_unit)`, the order
+#' `make_membership_arrays_c()` assigns to `adm1_id`, so the C kernel can
+#' flatten it row-major into `WNBR[]`. Partition ADM1s missing from the GADM
+#' distance matrix get zero rows and columns (no pressure either way), as on
+#' the fit side.
 #'
 #' @param frame_tu  partition frame; must carry `adm1_unit` (flattened gid, e.g.
 #'   "NGA_1").
@@ -433,7 +409,7 @@ build_partition_nbr_kernel <- function(
 ) {
   adm1_order <- unique(as.character(frame_tu$adm1_unit))
   iso3 <- unique(stringr::str_extract(adm1_order, "^[A-Z]{3}"))
-  # A partition-restricted kernel normalises over the WHOLE group, so the
+  # A partition-restricted kernel normalises over the whole group, so the
   # distance cache must also cover member countries absent from this frame.
   if (!is.null(partition)) {
     grp_here <- unique(partition$group[partition$iso3 %in% iso3])
@@ -497,7 +473,7 @@ nbr_from_adm1_active <- function(Aa1, K_adm1) {
 #'   gadm_path, cache_dir -- passed through from `cfg`
 #'
 #' Under grouping, every group's occurrence fit that carries the term must
-#' carry the SAME name (one kernel per partition); groups whose fit lacks it
+#' carry the same name (one kernel per partition); groups whose fit lacks it
 #' still get beta_nbr = 0 downstream, exactly as before.
 #'
 #' @param cfg       the `simulator.nbr_contagion` list (enable, rho_km,

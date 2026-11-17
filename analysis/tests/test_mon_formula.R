@@ -200,13 +200,13 @@ threw_ok <- tryCatch(
 expect(!isTRUE(threw_ok), "cyclic without a seasonal RE slope is fine")
 
 # --- 5. CB slope RE terms appear iff re_adm1_slope ------------------------------
-# (e) CB slope RE terms (04_fit_mon_brms_cb.R:159-183 pattern) appear iff a
+# (e) CB slope RE terms (04_fit_mon_brms_cb.R pattern) appear iff a
 #     DLNM variable's re_adm1_slope is TRUE.
 cat(
   "\n[5] CB slope RE terms appear iff a DLNM variable's re_adm1_slope is TRUE\n"
 )
 
-# Mirrors 04_fit_mon_brms_cb.R:130-183 -- the CB-term-append logic is inline in
+# Mirrors 04_fit_mon_brms_cb.R -- the CB-term-append logic is inline in
 # that fit script (not a shared function), so this reproduces the same call
 # sequence against the real shared helpers (build_cb_block(), re_group_by_level(),
 # nested_slope_re_terms(), filter_re_terms_for_data()) rather than re-deriving it.

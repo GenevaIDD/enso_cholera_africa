@@ -41,22 +41,16 @@ cat(
 )
 
 # --------------------------------------------------------------------------
-# Shared synthetic corpus.
-#
-# One (country, admin_level, n_rows, events) design is reused for all four
-# tracks; only the column NAMES differ per track, which is exactly the point --
-# the builder is supposed to be view-agnostic.
-#
-# Real ENSO-registry iso3 (analysis/groupings/enso_grouping.csv) so the T3 path
-# is genuinely exercised. KEN/UGA/TZA/RWA are all `enso_east`.
-#   KEN, UGA : rows at ADM1 AND ADM2, both with events -> own cells at T1, and
-#              the two countries spanning >1 level that level_factor needs.
-#   TZA      : ADM1 rows only -> its ADM2 query resolves at T2.
-#   BIGN     : a large ADM1 cell -> the w -> 1 shrinkage check.
-#   ZERO     : an ADM1 cell with exposure but ZERO events -> T1-zero, the tier
-#              that only exists under the pooled estimator.
-#   RWA      : absent from training, present in the registry -> T3.
-#   ZZZ      : absent from training AND the registry -> T4.
+# Shared synthetic corpus: one (country, admin_level, n_rows, events) design
+# for all four tracks; only column names differ (the builder is view-agnostic).
+# Real ENSO-registry iso3 (KEN/UGA/TZA/RWA are enso_east) exercise T3:
+#   KEN, UGA : ADM1 and ADM2 rows with events -> own T1 cells; the two
+#              countries spanning >1 level that level_factor needs
+#   TZA      : ADM1 rows only -> its ADM2 query resolves at T2
+#   BIGN     : a large ADM1 cell -> the w -> 1 shrinkage check
+#   ZERO     : exposure but zero events -> T1-zero (pooled estimator only)
+#   RWA      : not in training, in the registry -> T3
+#   ZZZ      : in neither -> T4
 # --------------------------------------------------------------------------
 CELLS <- tibble::tribble(
   ~country , ~admin_level , ~n_rows , ~rate ,
@@ -69,7 +63,7 @@ CELLS <- tibble::tribble(
   "ZERO"   , "ADM1"       ,   25L   , 0.000
 )
 
-# Bernoulli-ish event draws with a fixed seed, so every track sees the SAME
+# Bernoulli-ish event draws with a fixed seed, so every track sees the same
 # (num, den) pattern and any cross-track difference is the builder's, not the
 # fixture's.
 make_corpus <- function(seed = 7L) {
@@ -97,7 +91,7 @@ stopifnot(
 
 # --- per-track materialisation of the same corpus --------------------------
 #
-# `den` is, for every track, EXACTLY the product of that track's other offsets
+# `den` is, for every track, exactly the product of that track's other offsets
 # (that identity is the entire mechanism: mu = <other offsets> x anchor x
 # exp(lp), so exp(Intercept) ~ 1). Each writer below therefore has to produce a
 # panel whose view() reconstructs `den` from the panel's own columns.
@@ -243,8 +237,8 @@ cat("## 1) build_base_rate_table: one schema, all four tracks\n")
     )
   }
 
-  # The four tracks are the SAME corpus expressed four ways, and each panel is
-  # written so that the track's own view() reconstructs the SAME (num, den). The
+  # The four tracks are the same corpus expressed four ways, and each panel is
+  # written so that the track's own view() reconstructs the same (num, den). The
   # four views differ only in which columns they read and how they recombine them
   # (occ derives exposure from t_start/t_end, mon multiplies pop x exposure, siz
   # divides by pop alone), so agreeing cell-for-cell is the check that the shared
@@ -300,7 +294,7 @@ cat("\n## 2) Tier assignment: T1 / T1-zero / T2 on the cell table\n")
   }
 
   # T1-zero is not cosmetic: `w = 0` must make the cell fall back to its country
-  # parent EXACTLY, with no continuity correction leaking in.
+  # parent exactly, with no continuity correction leaking in.
   z <- dplyr::filter(brt$occ$cell, country == "ZERO", admin_level == "ADM1")
   expect_equal(
     z$w_shrink,
@@ -458,7 +452,7 @@ cat(
   "\n## 6) Global rescaling leaves mu invariant, per track (intercept absorption)\n"
 )
 {
-  # THE load-bearing check, generalised from test_mean_rate_table.R:142-175 to
+  # THE load-bearing check, generalised from test_mean_rate_table.R to
   # all four tracks.
   #
   #   mu = <that track's OTHER offsets> x anchor x exp(lp)
@@ -576,7 +570,7 @@ cat("\n## 8) attach_base_rate: joins the column the FORMULA will name\n")
 }
 
 # The formula gate (.OFFSET_SPEC, utils/config.R) and the draws-bundle flag
-# (.BUNDLE_ANCHOR_COL, utils/simulator_core.R) name the SAME column for every
+# (.BUNDLE_ANCHOR_COL, utils/simulator_core.R) name the same column for every
 # track. Neither module may source the other (config.R is sourced by
 # everything; anchor.R depends on paths/provenance/occ_data), so that agreement
 # is a convention, and a convention with no test is a bug waiting for a rename.

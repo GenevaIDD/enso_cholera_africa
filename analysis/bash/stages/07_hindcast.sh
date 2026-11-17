@@ -1,45 +1,31 @@
 #!/bin/bash
 # stages/07_hindcast.sh — submit the season-by-season forecast-skill test
-# (hindcast) as a set of spatPomp SLURM ARRAY JOBS, one per
-# (ENSO group x launch year) config produced by make_hindcast_configs.R, with
-# one ARRAY TASK per COUNTRY in that config's simulator.scope.countries and
-# intra-task parallelism over REPLICATE CHUNKS only.
+# (hindcast): one spatPomp SLURM array job per (ENSO group x launch year)
+# config from make_hindcast_configs.R, one task per country of its
+# simulator.scope.countries, replicate chunks in parallel inside a task.
 #
-# This mirrors stages/07_forecast_groups.sh: it submits each config through
-# analysis/bash/slurm/submit_forecast_groups.sh (the spatPomp array script
-# that runs 07b_simulator_spatpomp.R per country) — NOT the v1 task-array path.
-# The hindcast configs declare simulator.backend: spatpomp and carry the
-# filter.handoff_month / enso.forecast_source: observed seams, which only the
-# spatpomp engine reads; routing them through the v1 replay kernel would ignore
-# both the backend key and the seams.
+# Configs go through slurm/submit_forecast_groups.sh (07b_simulator_spatpomp.R),
+# never the v1 task-array path: only the spatPomp engine reads their
+# filter.handoff_month / enso.forecast_source: observed seams. Jobs are
+# independent and run in parallel.
 #
-# Each hindcast_<group>_<year>.yml is an independent array job (distinct
-# run_tag/run_id -> distinct parts/merged dirs) and can run fully in parallel;
-# within one array job countries are independent array tasks, and within one
-# array task replicate chunks are independent background processes.
-#
-# The config set is REQUIRED: either --deploy <prod_run<N>.yml> (config dir,
-# hindcast manifest and partition_by are read from `deploy_prod_run.R --stage
-# resolve`) or an explicit --config-dir. Explicit --config-dir / --manifest /
-# --partition_by / --obs-panel win over --deploy. There is no run-specific
-# default. --deploy also supplies the --postprocess observed panel (OBS_PANEL,
-# the survival panel matching the run's episodes.key); without --deploy or
-# --obs-panel it falls back to the lp_season panel.
+# The config set is REQUIRED: --deploy <prod_run<N>.yml> (config dir, hindcast
+# manifest, partition_by and the --postprocess observed panel from
+# deploy_prod_run.R --stage resolve) or --config-dir. Explicit --config-dir /
+# --manifest / --partition_by / --obs-panel win. Without --deploy or
+# --obs-panel the observed panel falls back to the lp_season panel.
 #
 # Usage (D=analysis/configs/deploy/prod_run<N>.yml):
-#   bash analysis/bash/stages/07_hindcast.sh --deploy $D                      # submit all
-#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --list               # print, don't submit
-#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --group enso_east    # one ENSO group
-#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --glob '*_2015.yml'  # one launch year
-#   bash analysis/bash/stages/07_hindcast.sh --config-dir <dir>               # an explicit config set instead
+#   bash analysis/bash/stages/07_hindcast.sh --deploy $D                   # all
+#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --list            # print only
+#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --group enso_east
+#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --glob '*_2015.yml'
 #   bash analysis/bash/stages/07_hindcast.sh --deploy $D --n_replicates 300 --chunk_size 50 --Np 10000
-#   bash analysis/bash/stages/07_hindcast.sh --deploy $D --dry-run            # forward --dry-run to the Rscript
 #   bash analysis/bash/stages/07_hindcast.sh --deploy $D --postprocess --pp-workers 8 --pp-mem 64G
-#                                     # chain 07c/07d --hindcast, 8 runs scored in parallel
+#                                  # chain 07c/07d --hindcast, 8 runs scored at once
 #
-# --n_replicates/--chunk_size/--Np/--dry-run/--overwrite are forwarded to
-# slurm/submit_forecast_groups.sh and then (per replicate chunk) to
-# 07b_simulator_spatpomp.R.
+# --n_replicates / --chunk_size / --Np / --dry-run / --overwrite go through
+# slurm/submit_forecast_groups.sh to 07b.
 
 set -euo pipefail
 

@@ -39,42 +39,18 @@
   m
 }
 
-# The rules in one place:
-#
-#   season_end_month(min_seas)          the end of the cholera year: min_seas - 1
-#                                       (mod 12; min_seas 1 -> December)
-#   season_end_by_country(panel)        gid -> country: the modal min_seas (ties
-#                                       -> the later season end)
-#   season_end_span(months)             circular spread of season-end months
-#   first_season_end(from, end, min)    first `end` month at least `min` months
-#                                       after `from`
-#   event_window_end(peak, end, lags)   event rule: first end on or after the
-#                                       peak + the largest positive lag
-#   hindcast_window_end(launch, end, min_lag, min_window_months)
-#                                       hindcast rule: first end at least
-#                                       `min_window_months` after the launch
-#                                       + max(min_lag, 0)
-#   onset_rate_troughs(surv, ...)       per-country onset-rate trough + its
-#                                       bootstrap stability (occurrence panel)
-#   season_trough_by_country(cal, ...)  trough per country: onset rate where
-#                                       supported, else the modal min_seas
-#   season_window_of(trough, year, ...) --season_window rule: month after the
-#                                       trough (floored at floor_month) to the
-#                                       next trough + max(min_lag, 0)
-#   season_cut_share(onsets, start, fl) onset share of the months the floor cuts
-#   read_panel_season_calendar(path)    (gid, country, min_seas) of a sim panel,
-#                                       with its path and content digest
-#                                       (panel_season_calendar() for a panel in
-#                                       memory; season_end_source() its record)
-#   season_end_spread_warnings()        by_group diagnostic: a group whose
-#                                       members' ends span > 4 months
-#   season_ends_csv_path() / write_season_ends_csv()
-#                                       the season_ends_<manifest stem>.csv
-#                                       written next to each manifest
-#   gid_min_seas_source(members, lp_source)
-#                                       per-gid calendar SOURCE (seasonality
-#                                       estimate vs the January default), for
-#                                       03_prepare_occ.R's sidecar
+# The rules (each function's roxygen has the details):
+#   season end        min_seas - 1 (mod 12; min_seas 1 -> December); per
+#                     country the modal min_seas (ties -> later end)
+#   event window      first season end on or after peak + largest positive lag
+#   hindcast window   first end at least min_window_months after
+#                     launch + max(min_lag, 0)
+#   season window     month after the trough (floored at floor_month) to the
+#                     next trough + max(min_lag, 0); trough = onset-rate trough
+#                     where supported, else the modal min_seas
+# Also: the panel calendar reader with its digest, the by_group spread
+# warning (> 4 months), the season_ends_<stem>.csv writer and the per-gid
+# calendar source for 03_prepare_occ.R's sidecar.
 #
 #' season_end_month
 #'

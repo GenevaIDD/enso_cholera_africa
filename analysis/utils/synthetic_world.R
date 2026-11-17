@@ -19,22 +19,14 @@
 # ---------------------------------------------------------------------------
 # Geography
 # ---------------------------------------------------------------------------
-# The world is built from analysis/groupings/synthetic_countries.csv: fake
-# countries with ISO 3166 user-assigned codes (XAA..XAD, never a real country)
-# and invented ADM1 / ADM2 names, laid out as 1-degree squares over open ocean
-# inside the Africa bounding box, so no real name, code or polygon appears in
-# any synthetic file. Raw inputs written, in the formats of the real sources:
-#
-#   <root>/<vintage>/combined_outbreaks_cholera.csv, stage1_geo/*.geojson (OutbreakExtractR stage 2)
-#   data/geodata/gadm_410-levels.gpkg, gadm_valid.gpkg                (GADM 4.1, ADM_1 / ADM_2)
-#   data/climate_parquet/<ISO3>/Africa_<ISO3>_v410_..._observation.parquet.gzip (daily CHIRPS / ERA5-Land)
-#   data/worldpop/<iso3>_pop_<year>_CN_100m_R2025A_v1.tif, data/country_boundaries/<ISO3>_adm0.geojson
-#   data/who_annual_report_africa/*  (WHO annual report, dashboard annual / weekly, sitrep cumulative)
-#   data/best_seasonality_estimates.csv, data/hmm_country_clusters.csv
-#   data/lenssen/extracted/<model>/step01_InitVerifInfo.Rda            (piControl Nino3.4)
-#   data/geodata/Africa_waterbody.shp, rivers_africa_37333.shp         (basemap layers)
-#   generated_data/enso_{oni,nino34,nino34_oisst}_cache.rds, enso_cfsv2_cache.rds (+ download metas)
-#   generated_data/wpp2024_national_totals.csv
+# Built from analysis/groupings/synthetic_countries.csv: fake countries with
+# ISO 3166 user-assigned codes (XAA..XAD) and invented ADM1 / ADM2 names, laid
+# out as 1-degree squares over open ocean, so no real name, code or polygon
+# appears in any synthetic file. Raw inputs are written in the real sources'
+# formats: the OutbreakExtractR outbreak CSV and stage-1 geojson, GADM levels,
+# daily climate parquet, WorldPop rasters and country boundaries, the WHO
+# tables, seasonality and HMM cluster CSVs, piControl Nino3.4, basemap layers,
+# the ENSO / CFSv2 caches and WPP national totals.
 
 #' synth_registry
 #' The synthetic country registry.

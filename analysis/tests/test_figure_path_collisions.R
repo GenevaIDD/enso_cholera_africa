@@ -122,7 +122,7 @@ cat(sprintf(
 # key exactly as 06_fit_figures.R computes it; a key shared by configs
 # resolving to DIFFERENT underlying fits (make_run_file(opt, "fit" |
 # "size_fit" | "dur_fit")) is flagged. A key shared by configs that resolve to
-# the SAME fit is not: that is a harmless re-run of the same result under two
+# the same fit is not: that is a harmless re-run of the same result under two
 # names, not a silent overwrite of two different ones.
 cat("\n[1] no new collision\n")
 

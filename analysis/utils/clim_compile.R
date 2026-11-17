@@ -257,7 +257,7 @@ get_clim_vars <- function(var) {
   } else if (var == "precip") {
     clim_vars <- get_precip_vars()
   } else if (var == "all_parquet") {
-    # The parquet source puts every variable in ONE file per admin unit, so it
+    # The parquet source puts every variable in one file per admin unit, so it
     # has no temp/precip split to dispatch on. Branch added so the untouched
     # compute_baseline_stats() / compute_extremes() can be reused verbatim.
     clim_vars <- get_clim_vars_parquet()
@@ -491,26 +491,13 @@ compile_all_extremes <- function(
 
 # Climate data stats — parquet source -------------------------------------
 #
-# Jahn et al. (2026), doi 10.21203/rs.3.rs-9508034/v1: the same upstream
-# CHIRPS/ERA5-Land admin-level product as data/climate_data/, re-released as ONE
-# parquet file per admin unit covering 1981-01-01..2024-12-31.
-#
-# These functions sit ALONGSIDE the CSV ones above; nothing there is edited, so
-# `--climate_source csv` remains bit-identical and old-vs-new comparison stays
-# possible indefinitely. The CSV readers cannot be reused because:
-#   * get_clim_files_gid() ends in str_subset("1980|1990|2000|2010|2020"), which
-#     rejects every `..._1981_2024_...` filename outright;
-#   * get_match_pattern()'s "CHIRPS_total_precipitation" /
-#     "ERA5_Land_2m_temperature" strings do not occur in the new names;
-#   * the whole one-file-per-variable architecture (compile_stats() mapping over
-#     `var`, then full_join-ing) collapses when one file holds every variable.
-#
-# That last point is the reason for the switch: compile_stats()'s
-# purrr::reduce(full_join) cartesian-multiplies whenever the substring file match
-# returns more than one CSV per (gid, variable), which is exactly what GADM's
-# malformed Ghana ids cause (`GHA5_2` substring-matches `GHA5.10_2`,
-# `GHA5.15_2`, ...). Three Ghana gids ended up holding 99.7% of the 8.5 GB
-# climate_stats.sqlite. One file per gid removes the join entirely.
+# Reads the parquet release (Jahn et al. 2026, doi 10.21203/rs.3.rs-9508034/v1):
+# the same CHIRPS / ERA5-Land admin-level product as data/climate_data/, one
+# file per admin unit, all variables, 1981-01..2024-12. These functions sit
+# beside the CSV readers above, which stay unchanged (`--climate_source csv`
+# is bit-identical). One file per gid also removes compile_stats()'s
+# full_join, which multiplied rows when a gid substring-matched several files
+# (malformed GADM Ghana ids).
 
 #' make_clim_parquet_core
 #' The region-independent tail of a unit's parquet filename, derived from its gid.

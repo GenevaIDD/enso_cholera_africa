@@ -426,7 +426,7 @@ guard_missing_climate_data <- function(dat) {
 
 #' guard_outbreak_episodes
 #' Drops episode-level outbreak rows that fail plausibility checks (QA of the
-#' Aug 2026 OutbreakExtractR refresh): non-positive/implausibly small case
+#' OutbreakExtractR corpus): non-positive/implausibly small case
 #' counts and multi-year spans that are very likely merge artefacts. Written to
 #' be called on `outbreak_metadata.rds` right after it is read, so every track
 #' describes the identical corpus. Always LOUD: reports what it drops via
@@ -952,7 +952,7 @@ check_outbreak_data <- function(dat, ref) {
 # ---------------------------------------------------------------------------
 # One survival history per (gid, season-year), built from the canonical
 # episode table (utils/footprint.R::build_canonical_episodes()) instead of per
-# location period: ONE onset per gid-season at the earliest member onset, the
+# location period: one onset per gid-season at the earliest member onset, the
 # gid censored after it, and the at-risk window of a no-episode year = the
 # UNION of the gid's member LPs' surveillance coverage, read on the gid's
 # canonical season calendar. make_surv_data() itself is reused unchanged.
@@ -1032,17 +1032,11 @@ gid_season_surv_input <- function(episodes, at_risk) {
 #' national_zero_surv_rows
 #'
 #' National zero-fill (`episodes.national_zero_fill`, gid_season only): the
-#' no-onset rows to add to the gid-season occurrence panel for every
-#' national-zero month (01_preprocess_national_zero_months.R) of a panel gid's
-#' country that is not already a panel row. A month at or after an onset in its
-#' season-year is never added (the gid is censored after its onset). A new
-#' season-year may start mid-season (left-truncated): each row is an exposure
-#' interval at its own season month.
-#'
-#' Rows are built by make_surv_data() over the whole season-year (TL_seas = the
-#' season-year's last day) and then filtered to the national-zero months, so
-#' they carry exactly the columns, t_start_seas / t_end_seas and climate joins
-#' of every other panel row.
+#' no-onset rows to add for every national-zero month of a panel gid's country
+#' that is not already a panel row, never at or after an onset in its
+#' season-year (a new season-year may start mid-season). Rows are built by
+#' make_surv_data() over the whole season-year and then filtered, so they carry
+#' the same columns, season times and climate joins as every other panel row.
 #'
 #' @param surv_dat the gid-season panel built so far (gid, t_start, outbreak).
 #' @param nz_months national-zero months (country, month).
@@ -1051,10 +1045,9 @@ gid_season_surv_input <- function(episodes, at_risk) {
 #' @param build,map_fn make_surv_data() / purrr::map_dfr by default (the prep
 #'   passes furrr::future_map_dfr; tests pass a stub builder).
 #' @param episodes canonical episodes (gid, TL, TR) or NULL (legacy). When
-#'   given (a named national-zero rule), a candidate month that
-#'   lies inside one of its gid's own episode spans -- typically the previous
-#'   season's episode still running -- is not added either
-#'   (.own_episode_span_hits(rule = "span")); attribute n_in_episode counts them.
+#'   given, a month inside one of the gid's own episode spans is not added
+#'   either (.own_episode_span_hits(rule = "span")); attribute n_in_episode
+#'   counts them.
 #' @return the new rows with outbreak = FALSE and national_zero_fill = TRUE.
 #'   Attributes: n_candidates, n_after_onset (dropped), n_season_years,
 #'   n_new_season_years (no previous panel row in that season-year), and
@@ -1173,7 +1166,7 @@ national_zero_surv_rows <- function(
 
 #' .own_episode_span_hits
 #'
-#' Which panel rows lie inside a canonical episode of their OWN gid -- the one
+#' Which panel rows lie inside a canonical episode of their own gid -- the one
 #' predicate the panel masks and the national-zero rule share.
 #'
 #' @param surv rows with gid, t_start, t_end (Dates).

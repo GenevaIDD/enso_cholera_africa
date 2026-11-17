@@ -372,7 +372,7 @@ grp_arg_08 <- if (!is.null(art) && isTRUE(art$grouped)) {
   NULL
 }
 
-# Neighbour-contagion build-time guard, resolved ONCE here (art is loaded) and
+# Neighbour-contagion build-time guard, resolved once here (art is loaded) and
 # threaded into both the native Phase-A build_spatpomp_tu_c() filter build and
 # the forecast_from_filtered() handoff. On only when the config flag is set AND
 # the (per-group) occurrence fit carries an nbr_lag1_r* FE; FALSE ⇒ every nbr
@@ -1169,7 +1169,7 @@ run_forecast_phase <- function(
   # Diagnostic (hindcast-only): observation-anchored handoff. When enabled,
   # each TU's handoff active/mso is overwritten with the OBSERVED active
   # footprint at the launch month, bypassing PF cold-start under-recruitment.
-  # Load the observed duration panel ONCE here (not per TU).
+  # Load the observed duration panel once here (not per TU).
   anchor_obs_active <- isTRUE(opt$simulator$forecast$observed_active_handoff)
   obs_dur_panel <- NULL
   if (anchor_obs_active) {
@@ -1423,7 +1423,7 @@ run_forecast_phase <- function(
 
     # Forecast. In chunked mode (--replicate_offset passed) this invocation only
     # simulates one replicate-chunk of `tu`; nest under a repoff= subdirectory so
-    # concurrently-running chunks of the SAME tu never overwrite each other's
+    # concurrently-running chunks of the same tu never overwrite each other's
     # event_table/monthly_summary — aggregate_partitions() (07b) already globs
     # `_SUCCESS` sentinels recursively, so this needs no change on the read side.
     # Unchunked calls keep the exact prior flat "tu=<tu>" path.

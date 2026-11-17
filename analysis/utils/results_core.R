@@ -52,7 +52,7 @@ if (!exists("%||%", mode = "function")) {
 #' both scripts ("occurrence", "duration", "monthly") are the literal `track`
 #' values dispatched by select_best_lag() (analysis/utils/loo_lags.R -- it only
 #' special-cases "occurrence", so these names are usable as-is). The other
-#' three tables key off the SAME per-track filesystem/archive conventions used
+#' three tables key off the same per-track filesystem/archive conventions used
 #' elsewhere in the repo (04_fit_<TRACK_CODE>_brms_cb.R, make_run_file()-family
 #' kind prefixes, <lag_loo_batch>_<LOO_DIR_STUB>_grouped_enso_singlelag/
 #' batches). Kept as one registry rather than split across the two scripts:
@@ -111,22 +111,12 @@ results_group_meta <- function(ctx = NULL) {
 }
 
 # ---------------------------------------------------------------------------
-# Group display labels
-#
-# Group IDS (enso_east, ...) never change: they key the fit files, the
-# configs, the manifests and every 09 artefact (enso_group columns; `region` /
-# `scope` columns hold the sidecar's stored `short`). What a figure or a table
-# PRINTS is resolved at display time in 10 / 11 from results.style.group_labels:
-#   registry  the sidecar's label / short / short_fig (the default)
-#   lag       a class letter ordered by the deployed OCCURRENCE lag, longest
-#             lead first (ties in sidecar order): "Class A (ENSO lead 6)" /
-#             short "A −6", "Class D (ENSO lag +7)" / "D +7", "Class B (ENSO
-#             lag 0)" / "B 0". The lags come from the group_labels artefact
-#             (09 step, read from the deployed fits), never from a constant.
-#   centroid  the group's geographic centroid name from the sidecar's
-#             display-only fields (centroid_label / centroid_short, display
-#             order centroid_order): "West [GW]" / short "GW". No lags
-#             needed.
+# Group display labels. Group IDS never change (they key fits, configs and
+# every 09 artefact); what 10 / 11 print comes from results.style.group_labels:
+#   registry  the sidecar's label / short / short_fig (default)
+#   lag       class letter ordered by deployed occurrence lag, from the
+#             group_labels artefact (never a constant)
+#   centroid  the sidecar's centroid_label / centroid_short
 # Colours stay keyed by id in every mode.
 # ---------------------------------------------------------------------------
 
@@ -594,35 +584,13 @@ param_family <- function(term) {
 #' provenance stamp can see; the stamp catches every *decision* change on its
 #' own. The `cases-mon` token in the attribution filename is part of the key:
 #' the cases metric is the mon track's cases_month.
-# enso_relation: the `erf` table with 50% CrI columns (lo50/hi50/IRR_lo50/
-# IRR_hi50, erf_from_draws()) for Figure 1d's inner ribbon, `adm1_draws`
-# (per-draw ADM1 log-IRR array, extract_adm1_logrr_draws()), `enso_conds` and
-# `n_draws`; the ONI conditions come from results.derivation.enso_conds.
-# attribution: load_sim_run_monthly() keys countries by gid ISO3. Ribbons carry
-# 2.5% / 97.5% quantiles (*_q025 / *_q975) for uniform 50% + 95% bands;
-# `cum_totals` (paired replicate totals of cases and onsets over the analogue
-# window, Figure 3c); per-arm launches (results.derivation.arm_alignment):
-# factual_start / arm_starts / stitch_months / ratio_label; `country_ribbon`
-# (forecast / counterfactual monthly ribbon per country); `cells`
-# (attrib_cells(): window x explosive mode) and `africa_window` -- with a
-# common window the cells attribution_common / post_fork_common /
-# attribution_firm sit beside the others -- plus cum_totals_cells /
-# ratio_stats_cells, the ribbons' `continuation` flag and africa_scope
-# (table S28).
-# smoothing: quantile ribbons (q025 / q975); `by_country` (masked / unmasked
-# ribbons + observed per country and metric) and `country_group`;
-# `validation` (smoothing_validation_tables(): randomised PIT histograms of
-# the observed monthly onsets and cases, onset frequency by calendar month,
-# episode durations, fraction of covered unit-months active, onset frequency
-# given an ongoing outbreak in the previous month in the same ADM1 / another
-# ADM1 of the country / another country of the TU, and season_onsets /
-# max_season_onsets / n_unit_seasons, the structural check of
-# simulator.onset_eligibility: season; observed vs across replicates). Inputs
-# include the coverage mask's aggregated series and the HMM cluster file.
-# oni: ONI envelope with lo95 / hi95, `obs_full` (the whole observed ONI
-# record), `phases` (NOAA ENSO-episode runs on it, extended by the CFSv2
-# ensemble mean) for the ONI strips and phase shading of Figures 1 and 3,
-# and `handoffs` (per arm).
+# Artefact contents (beyond the roxygen above):
+# enso_relation: `erf` with 50% CrI columns, `adm1_draws`, `enso_conds`,
+# `n_draws`. attribution: countries keyed by ISO3; ribbons q025 / q975;
+# `cum_totals`, per-arm launches, `country_ribbon`, `cells` (attrib_cells())
+# and `africa_window`. smoothing: ribbons, `by_country`, `country_group`,
+# `validation` (smoothing_validation_tables()). oni: ONI envelope, `obs_full`,
+# `phases` (NOAA episodes + CFSv2 mean) and `handoffs`.
 RESULTS_SCHEMA <- c(
   enso_relation = "v3",
   attribution = "v10",
@@ -637,25 +605,11 @@ RESULTS_SCHEMA <- c(
   # population + country parameter estimates (every term except
   # ENSO, which is Figures 1/2).
   track_params = "v1",
-  # Manuscript "key numbers" report artefacts (phase 11 notebook
-  # reads these; 09 derives them). Each is a bundle of tidy,
-  # kable-ready tibbles keyed as noted in make_results_run_file().
-  # report_dataset: coverage on OBSERVED sub-ADM1 populations
-  # (build_adm1_obs_pop, recover_dropped=TRUE), episodes_by_country
-  # (ENSO group x country x admin level, table S2), cascade
-  # (processing counts, table S1), raw_counts / raw_table1
-  # (01's outbreak set, ADM0 excluded, Zheng layout incl. ADM3),
-  # outbreaks (one row per analysis outbreak with its season-year
-  # DJF ENSO state, gid and afro_subregion, for 11's gtsummary
-  # tables), table1_region (the analysis set by admin level incl.
-  # All, for Africa and each WHO-AFRO subregion; table S2) and
-  # enso_region / enso_region_p (outbreaks by season-year ENSO
-  # state per block, outbreaks per cholera year of the state,
-  # Kruskal-Wallis p; table S3).
-  # report_effects: effects population on the sub-ADM1 basis;
-  # effects_region and effects_country keep range_lo / range_hi
-  # (the group crossbasis's fitted ONI range, from
-  # enso_relation), so 11 daggers conditions outside it.
+  # Phase-11 "key numbers" artefacts (09 derives, 11 reads; keys in
+  # make_results_run_file()). report_dataset: coverage, episodes_by_country,
+  # cascade, raw counts, outbreaks, table1_region, enso_region (tables S1-S3).
+  # report_effects: effects with range_lo / range_hi so 11 daggers conditions
+  # outside the fitted ONI range.
   report_dataset = "v5",
   report_effects = "v6",
   # report_forecast: horizon_totals with the annualised
@@ -871,7 +825,8 @@ sets_key <- function(sets) paste(sort(sets), collapse = "-")
 #'
 #' Needed for two things: deriving the artefact run tag (so artefacts land under
 #' generated_data/results/<tag>/), and printing the exact re-run command when 10
-#' finds a missing or stale artefact. Same idiom as 07a_simulator_tasks.R:47.
+#' finds a missing or stale artefact. Same idiom as 07a_simulator_tasks.R
+#' section 2.
 #' Select the reported series (results.series) from a simulator/smoothing table.
 #'   "latent"   -- the table as-is (pre-existing behaviour).
 #'   "detected" -- what the surveillance record would have shown: rows/values of
@@ -1010,7 +965,7 @@ results_attrib_factual_differs <- function(man, man_attrib) {
 #' Refuse an attribution manifest (utils/make_forecast_attrib_configs.R) that was
 #' not generated from the forecast manifest the results read, or whose units and
 #' counterfactual runs differ from it: the attribution pairs its factual with the
-#' SAME counterfactual runs the display reads.
+#' same counterfactual runs the display reads.
 results_attrib_manifest_check <- function(
   man,
   man_attrib,
@@ -1253,21 +1208,10 @@ resolve_factual_start <- function(man, groups, sets = NULL) {
 # ---------------------------------------------------------------------------
 # Artefact freshness + provenance contract
 # ---------------------------------------------------------------------------
-# One predicate, two wrappers. An mtime-only rule would be blind to the
-# decisions that produce the table (see attach_results_provenance()'s docstring, utils/provenance.R).
-#
-# The input list is declared by 09 at derivation time and CARRIED ON THE STAMP,
-# rather than recomputed by each reader. That is what lets phase 10 verify
-# freshness without ever touching a fit archive: enumerating the ENSO
-# exposure-response inputs means resolving the best-lag manifest and the
-# per-track LOO batch directory,
-# and giving 10 those accessors would reopen exactly the path to a fit object
-# that the split closes. 10 instead re-stats what 09 recorded.
-#
-# Globs are recorded alongside the resolved files for the one case re-stat'ing
-# cannot see: a file ADDED to a directory that is read by pattern (the
-# loo_compare_lags_*.rds batch). Re-globbing is pure filesystem work, so 10 can
-# do it knowing nothing about what the files contain.
+# One predicate, two wrappers; not mtime-only (see
+# attach_results_provenance(), utils/provenance.R). 09 records its inputs ON THE
+# STAMP so 10 re-stats them without resolving any fit archive. Globs are kept
+# too, so 10 can see a file ADDED to a pattern-read directory.
 
 #' Resolve an input declaration to a flat character vector of paths.
 #'
@@ -1370,7 +1314,7 @@ results_inputs <- function(files = character(0), globs = list()) {
 #' changing a font or a DPI is presentation, and must not invalidate a table.
 .RESULTS_STAMPED_BLOCKS <- c("inputs", "scope", "derivation", "thresholds")
 
-#' Step-scoped decisions: stamped leaves (dot-path prefixes) that shape ONE
+#' Step-scoped decisions: stamped leaves (dot-path prefixes) that shape one
 #' kind's artefact only. Every artefact still carries them in its stamp, but
 #' .results_decision_diff() compares them only for that kind (the stamp's
 #' `kind`), so switching an optional step on re-derives that step alone, not
@@ -2298,7 +2242,7 @@ read_handoff_map <- function(sim_root, run_tag) {
 #' The prefix specification load_sim_run_monthly() takes: smoothing events
 #' (read_smoothing_parts_events()) over [start, end_excl).
 #' `replace = TRUE` (smoothing-as-factual reading): the smoothing
-#' replaces EVERY month the partition simulates (start / end_excl / months are
+#' replaces every month the partition simulates (start / end_excl / months are
 #' then taken from the partition's own month grid), so the factual series is
 #' the smoothing replicate each forecast replicate was handed off from, over
 #' the run's whole window.
@@ -2696,8 +2640,8 @@ finish_adm1_ratio <- function(
   (n - sum(findInterval(f, sort(g)))) / n
 }
 
-#' Unpaired probability-of-shift per ADM1 unit: cross-compare EVERY forecast
-#' replicate against EVERY counterfactual replicate (replicate_id pairing is
+#' Unpaired probability-of-shift per ADM1 unit: cross-compare every forecast
+#' replicate against every counterfactual replicate (replicate_id pairing is
 #' ignored on purpose). `keep_means = FALSE` returns only prob_larger /
 #' prob_smaller (the slim variant 09's sensitivity grid uses).
 adm1_prob_stats <- function(df, value_col, threshold, keep_means = TRUE) {

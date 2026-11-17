@@ -1,5 +1,5 @@
 # test_loo_compare_paths.R — HARD: LOO ranking artefacts live under
-#   generated_data/loo_compare/<batch>/ and every reader uses ONE locator.
+#   generated_data/loo_compare/<batch>/ and every reader uses one locator.
 #
 # Usage:
 #   Rscript analysis/tests/test_loo_compare_paths.R

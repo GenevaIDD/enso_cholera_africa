@@ -1280,7 +1280,7 @@ cat("\n## 22) write_validation_summary — Phase 7 report sections\n")
 # state coarse, at ADM1 (gid "NGA_20"). An exact-(gid) membership test drops the
 # coarse report (its gid is not a frame gid); the region_key basis maps it to its
 # ADM1 region (which the sim forecasts) and recovers the case mass. Region MWI_5
-# is reported at ADM2 on a frame gid and must be retained by BOTH bases.
+# is reported at ADM2 on a frame gid and must be retained by both bases.
 # --------------------------------------------------------------------------
 cat("\n## 23) compute_crps_total_cases — exact_gid vs region_key basis\n")
 {

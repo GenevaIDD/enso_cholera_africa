@@ -202,27 +202,17 @@ cb_meta_mon <- list(
 )
 
 # ===========================================================================
-# Step 1 — simulate ONE ground-truth realization (occurrence + duration + mon)
+# Step 1 — simulate one ground-truth realization (occurrence + duration + mon)
 # ===========================================================================
-# Design (mirrors test_spatpomp_recovery.R's N-independent-runs pattern):
-#   1. Build a spatPomp object (measurement="occurrence_duration_mon_NB") under
-#      known occurrence + duration + mon parameters and simulate() ONE
-#      ground-truth realization -> true Yout/active/mso/mu trajectories.
-#   2. Draw a monthly case count at every active month from
-#      rnbinom(mu = true mu, size = size_phi) -- the mon Csnippet's own hurdle
-#      shape -- to stand in for an "observed" outbreak-size panel.
-#   3. Feed Yout + the drawn case counts back as obs_data (obs_Y, obs_CM via
-#      mon_case_col) and rebuild under the state-conditioning sibling
-#      "occurrence_duration_mon_NB_state" (near-delta on Yout, NegBin term on
-#      obs_CM gated on active -- see .SP_DUNIT_MON_NB_STATE).
-#   4. Run bpfilter (Np particles, save_states=TRUE); check:
-#        - the object builds and bpfilter completes with a finite logLik
-#          (the actual "does the C filter work" question),
-#        - Yout recovery is near-exact (directly observed, as in the parent
-#          recovery test),
-#        - the filtered `mu` state is positive on active unit-months and
-#          correlates with the true mu trajectory (sanity that mon_mu_block's
-#          mso lookup table is actually being read, not zeroed/NaN).
+# Design (as test_spatpomp_recovery.R):
+#   1. Build measurement="occurrence_duration_mon_NB" under known occurrence,
+#      duration and mon parameters; simulate() one ground truth.
+#   2. Draw a case count at every active month from rnbinom(mu, size_phi).
+#   3. Rebuild under "occurrence_duration_mon_NB_state" with Yout and the
+#      counts as obs_data (obs_Y, obs_CM via mon_case_col).
+#   4. bpfilter (save_states = TRUE); check a finite logLik, near-exact Yout
+#      recovery, and a filtered `mu` that is positive on active unit-months and
+#      correlates with the true mu (the mso lookup is read, not zeroed).
 cat("## Step 1: simulate ground-truth occurrence+duration+mon trajectory\n")
 
 obj_truth <- tryCatch(

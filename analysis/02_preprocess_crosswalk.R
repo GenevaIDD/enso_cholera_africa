@@ -63,32 +63,13 @@ dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(opt$outdir_gen, recursive = TRUE, showWarnings = FALSE)
 
 # 3. The location-period roster (attributes only — no geometry is used) --------
-# Why the crosswalk and not the centroid. The centroid match reduces each
-# location period to ONE st_centroid() and st_join()s it to GADM. That is
-# correct only when an LP is a single admin unit. A COMPOSITE LP such as
-#
-#   EMR::SDN::Gedaref|Gezira|Kassala|Khartoum|Blue Nile|River Nile|Red Sea
-#
-# is a union of 7 states with exactly one centroid, so all 7 states' cases AND
-# all 7 states' population land on one arbitrary gid (SDN_3_1) while the 6
-# siblings are recorded as never having had an outbreak. Same signature for
-# COD_17_1, ETH_8_1, NGA_19_1, TCD_22_1_1. SDN_3_1 then simulates 311,653
-# cases against 6,188 observed.
-#
-# The crosswalk already contains the answer the centroid throws away: the
-# WorldPop mass H[l,g] of every LP inside every gid it overlaps. An LP's true
-# footprint is {g : H[l,g] > 0}, and its split is w[l,g] = H / P_l. Composite
-# status is then a MEASURED property (gid_cover < threshold), never a guess
-# from parsing pipes out of a name string.
-#
-# Why a separate script: 02_preprocess_climate.R does two jobs -- match, then
-# extract climate -- and only the match is superseded. Splitting the match out
-# also drops the GADM dependency: no gadm_valid.gpkg, no st_make_valid(), no
-# st_join(), no per-country group_modify. `sf` is still loaded, but ONLY to
-# read the outbreak layer's attribute table (admin_level / country per LP); no
-# geometric predicate is evaluated here, because the intersection was already
-# done once, properly, in 02a/02b.
-#
+# Match location periods (LPs) to GADM via the population crosswalk, not a
+# centroid: a composite LP (a union of several units) has one centroid, which
+# puts all its cases and population on one arbitrary gid. The crosswalk holds
+# the WorldPop mass H[l,g] of each LP in each gid: footprint = {g : H > 0},
+# split w[l,g] = H / P_l, and composite status is measured (gid_cover), never
+# parsed from the LP name. No geometry is evaluated here (02a/02b did the
+# intersection); `sf` only reads the outbreak layer's attributes.
 shp_path <- file.path(opt$indir, "outbreak_shapefiles.gpkg")
 if (!file.exists(shp_path)) {
   stop("[lp_match] outbreak shapefiles not found: ", shp_path)
@@ -146,7 +127,7 @@ message(sprintf(
 ))
 
 # 5. Level selection, then the match -------------------------------------------
-# The crosswalk is extracted at BOTH tilings; an LP must be read at exactly one
+# The crosswalk is extracted at both tilings; an LP must be read at exactly one
 # or its pieces are counted twice.
 #
 # The tiling comes from the LP's OWN GEOMETRY (`lp_level`, frozen by
@@ -304,7 +285,7 @@ if (nrow(unmatched)) {
 # resolve_lp_population() is the sanctioned LP denominator and never returns NA.
 # Recording its tier here means the fallback count is a reported QC number at
 # match time rather than a surprise inside 03_prepare_siz.R.
-# resolve_lp_population() reads ONE tiling per call, so iterate the levels rather
+# resolve_lp_population() reads one tiling per call, so iterate the levels rather
 # than passing gadm_level[1] — a mixed-level roster would otherwise be resolved
 # entirely at whichever level happened to sort first.
 lp_years <- matched %>% distinct(lctn_pr, year, gadm_level)
@@ -367,7 +348,7 @@ matched <- matched %>% select(all_of(keep)) %>% arrange(lctn_pr, year, desc(H))
 # 8. Report + write ------------------------------------------------------------
 u_gids_crosswalk <- sort(unique(matched$gid[!is.na(matched$gid)]))
 
-# Reported over EVERY matched LP-year, not only the ADM1-tiled ones: `matched`
+# Reported over every matched LP-year, not only the ADM1-tiled ones: `matched`
 # carries exactly one level per LP, so an ADM1 filter would silently omit
 # every LP whose geometry put it at ADM2.
 comp <- matched %>%

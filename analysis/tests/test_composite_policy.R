@@ -27,14 +27,12 @@ near <- function(a, b, tol = 1e-9) {
   isTRUE(length(a) == length(b)) && all(is.finite(a)) && all(abs(a - b) <= tol)
 }
 
-# THE ONE THING MOST LIKELY TO GO WRONG, and the reason for section [2]: two
-# non-equivalent definitions of "composite" coexist:
-#
-#   is_composite  DOMINANCE     gid_cover < 0.90        315/1409 LPs   (22.4%)
-#   apportioned   MULTIPLICITY  n_members > 1          8779/9036 rows  (97.0%)
-#
-# `drop` keys on DOMINANCE. Keying it on MULTIPLICITY instead would discard ~97%
-# of event rows and would not error.
+# Two non-equivalent definitions of "composite" coexist (the reason for
+# section [2]):
+#   is_composite  dominance     gid_cover < 0.90
+#   apportioned   multiplicity  n_members > 1
+# `drop` keys on dominance; keying it on multiplicity would silently discard
+# almost every event row.
 # ---------------------------------------------------------------------------
 # Fixture — the three cases that separate DOMINANCE from MULTIPLICITY
 #
@@ -43,8 +41,8 @@ near <- function(a, b, tol = 1e-9) {
 #   lp_single     w = 1            gid_cover = 1    not composite, single
 #   lp_absent     not in crosswalk                  passthrough
 #
-# lp_dominant is the whole point: it is the ~88% of row inflation that `drop`
-# alone leaves behind and only `collapse` removes.
+# lp_dominant is the key case: multi-member but not composite, so only
+# `collapse` (not `drop`) removes its row inflation.
 #
 # lp_boundary sits at gid_cover EXACTLY 0.90 — `<` means it is NOT composite.
 # ---------------------------------------------------------------------------
@@ -455,7 +453,7 @@ cat(
 # into its TAs, gid_cover reads the biggest TA's share of its own district, and
 # `drop_collapse` deletes a perfectly ordinary district. 256 of 1410 corpus LPs
 # were destroyed this way. The crosswalk now carries the geometry-derived
-# `lp_level`; `.match_lp_members()` reads it, so ONE change covers both tracks and
+# `lp_level`; `.match_lp_members()` reads it, so one change covers both tracks and
 # all four policies.
 {
   # One district. GADM ADM1 = the district itself; GADM ADM2 = its 25 TAs.

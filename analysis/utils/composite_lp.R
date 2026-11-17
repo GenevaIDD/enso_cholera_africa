@@ -13,25 +13,19 @@
 
 #' .match_lp_members
 #'
-#' The member-matching core shared by `apportion_composite_cases()` (which expands
-#' one LP row into K member rows) and `collapse_composite_lps()` (which reduces one
-#' LP row to its dominant member). Extracted verbatim from
-#' `apportion_composite_cases()` so the two policies cannot drift apart in how they
-#' pick a tiling, snap a year, or renormalise the population shares.
-#'
-#' Does three things and nothing else:
-#'   1. per-row tiling (ADM1 vs ADM2) — from the crosswalk's geometry-derived
-#'      `lp_level` under `tiling = "derived"`, or from the corpus's own
-#'      `admin_level` string under `"corpus_label"` — with a fallback to
-#'      whatever tiling the crosswalk actually carries;
-#'   2. nearest-year snapping per (LP, tiling) via `.nearest_crosswalk_year()`;
-#'   3. the join to the member pieces, renormalising `apportion_w = H / sum(H)`
-#'      over the SURVIVING pieces (the sliver filter in population_core.R can
-#'      drop pieces after `w` was derived, and conservation depends on
-#'      `sum(w) == 1` exactly).
-#'
-#' It makes no decision about what to do with the match -- no scaling, no
-#' dropping, no column rewriting. That is the caller's job.
+#' The member-matching core shared by `apportion_composite_cases()` (one LP row
+#' -> K member rows) and `collapse_composite_lps()` (one LP row -> its dominant
+#' member), so the two policies pick tilings, snap years and renormalise shares
+#' the same way. It does three things:
+#'   1. per-row tiling (ADM1 vs ADM2): the crosswalk's `lp_level` under
+#'      `tiling = "derived"`, the corpus `admin_level` under "corpus_label",
+#'      falling back to whatever tiling the crosswalk carries;
+#'   2. nearest-year snapping per (LP, tiling), `.nearest_crosswalk_year()`;
+#'   3. the join to member pieces, renormalising `apportion_w = H / sum(H)`
+#'      over the surviving pieces (the sliver filter can drop pieces, and
+#'      conservation needs `sum(w) == 1` exactly).
+#' It makes no decision about the match (no scaling, dropping or rewriting);
+#' that is the caller's job.
 #'
 #' @param dat        tibble; one row per (location period, event).
 #' @param xwalk      crosswalk from load_population_crosswalk().
@@ -171,7 +165,7 @@
     dplyr::group_by(.data$lctn_pr, .data$gadm_level, .data$year) %>%
     # Renormalise over the surviving pieces rather than trusting a carried `w`:
     # the sliver filter in population_core.R can drop pieces after w was
-    # derived, and conservation of cases depends on sum(w) == 1 EXACTLY.
+    # derived, and conservation of cases depends on sum(w) == 1 exactly.
     dplyr::mutate(
       apportion_w = .data$H / sum(.data$H),
       n_apportion_members = dplyr::n(),
@@ -212,8 +206,8 @@
 #'
 #' Per-INPUT-ROW composite classification, using the dominance criterion
 #'   gid_cover = max_g w[l->g] ,   is_composite := gid_cover < cover_threshold
-#' i.e. exactly `compute_gid_cover()` (population_core.R:662) and
-#' `derive_crosswalk_shares()` (:646-654), but
+#' i.e. exactly `compute_gid_cover()` and
+#' `derive_crosswalk_shares()` (population_core.R), but
 #'
 #'   (a) evaluated at RUN time against a caller-supplied `cover_threshold`,
 #'       rather than read back from the `is_composite` column frozen into the
@@ -317,36 +311,14 @@ lp_composite_status <- function(
 
 #' collapse_composite_lps
 #'
-#' The REDUCING counterpart to `apportion_composite_cases()`: instead of expanding
-#' one location-period row into K member rows, keep exactly ONE row per input
-#' row, relocated to the LP's dominant member gid and carrying the WHOLE LP.
-#'
-#' WHY THIS EXISTS. Expansion turns one real observation into K pseudo-
-#' observations that the likelihood treats as K independent data points. On the
-#' occurrence track the indicator is propagated, so "at least one member had an
-#' outbreak" is fitted as "all K members had one"; on the size track cases and
-#' population are scaled by the same w, so all K siblings carry an IDENTICAL
-#' implied attack rate and row-wise PSIS-LOO is optimistic by a factor that
-#' scales with K -- and K is geographically clustered. This function removes the
-#' pseudo-replication at source.
-#'
-#' WHAT IT IS, IN ONE LINE. Legacy centroid matching, but pick the
-#' dominant-POPULATION member instead of the polygon centroid, and use the
-#' crosswalk population. A strict improvement on the legacy path, which put all
-#' 7 Sudanese states' cases AND population on one arbitrary gid
-#' (02_preprocess_crosswalk.R:6-24).
-#'
-#' NOTHING IS SCALED. The occurrence indicator and the size count both pass
-#' through untouched, which is why there is no `cases_col` argument. The
-#' denominator is `P_l` (the whole LP), not the dominant member's `H`, so the
-#' implied attack rate stays exactly `Y_l / P_l` -- identical to what the LP
-#' reported and to what `apportion_composite_cases()` yields per member.
-#'
-#' TRUE COMPOSITES ARE DROPPED, NOT COLLAPSED (`drop_composites = TRUE`). When
-#' no member owns the LP (`gid_cover < cover_threshold`) there is no defensible
-#' representative, so the honest treatment is to remove the observation. Callers
-#' must remove the matching AT-RISK rows too, or dropping the numerator while
-#' keeping the denominator biases the hazard downward.
+#' The reducing counterpart to `apportion_composite_cases()`: one row per input
+#' row, relocated to the LP's dominant-population member gid and carrying the
+#' whole LP. This avoids the K pseudo-observations that expansion creates.
+#' Nothing is scaled: the occurrence indicator and the case count pass through,
+#' and the denominator is `P_l`, so the attack rate stays `Y_l / P_l`.
+#' True composites (`gid_cover < cover_threshold`) are dropped, not collapsed
+#' (`drop_composites = TRUE`); callers must drop the matching at-risk rows too,
+#' or the hazard is biased downward.
 #'
 #' @inheritParams .match_lp_members
 #' @param drop_composites drop rows whose LP is a true composite by the
@@ -462,7 +434,7 @@ collapse_composite_lps <- function(
 
   out_hit <- dat[dom$.row, , drop = FALSE] %>% base_cols()
   out_hit[[gid_col]] <- dom$member_gid
-  # P_l, not H: the collapsed row stands for the WHOLE location period, so the
+  # P_l, not H: the collapsed row stands for the whole location period, so the
   # attack rate must remain Y_l / P_l exactly.
   out_hit$pop <- dom$P_l
   # base_cols() captured pop_lp from `dat$pop` BEFORE `pop` above was

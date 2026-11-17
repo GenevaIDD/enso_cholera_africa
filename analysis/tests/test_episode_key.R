@@ -4,7 +4,7 @@
 #   Rscript analysis/tests/test_episode_key.R
 #
 # Details:
-#   `episodes.key: gid_season` makes ONE outbreak episode per (gid, year_seas)
+#   `episodes.key: gid_season` makes one outbreak episode per (gid, year_seas)
 #   the shared object of all four tracks (utils/footprint.R::
 #   build_canonical_episodes()): onset = earliest member TL, end = latest
 #   member TR, cases = the finest-resolution member total, admin_level = the

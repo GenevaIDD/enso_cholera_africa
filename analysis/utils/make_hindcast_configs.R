@@ -259,27 +259,18 @@ option_list <- list(
     help = "Replicates per hindcast run; 0 = the template's simulator.n_replicates [default: %default]"
   )
 )
-# The three seams that make a run a hindcast:
-#   1. filter.handoff_month  -> pins the smoothing handoff to <year>-<launch>
-#      (an INTERIOR month of the single final smoothing cache) instead of the
-#      end of coverage. 07b_simulator_spatpomp.R slices filter_traj at that
-#      month (see load_smoothing_distribution() / filter_traj_to_warmup()).
-#   2. enso.forecast_source  -> "observed": leave the panel's observed enso_lag
-#      columns unmodified (no CFSv2/C3S override). See utils/simulations.R.
-#   3. climate_panel         -> the HISTORICAL continuous panel (observed
-#      climate + observed enso_lag), NOT the projection panel (zero-filled
-#      future climate) the forecast template ships with.
-# The smoothing_input, grouping, measurement, delta and output blocks are
-# inherited VERBATIM from the forecast template, so the same final smoothing
-# cache is reused for every (group, year) launch.
+# A hindcast differs from its forecast template in three seams:
+#   1. filter.handoff_month: handoff at <year>-<launch>, an interior month of
+#      the final smoothing cache (07b slices filter_traj there);
+#   2. enso.forecast_source = "observed": observed enso_lag, no CFSv2 override;
+#   3. climate_panel: the historical panel, not the zero-filled projection.
+# Everything else is inherited verbatim, so one smoothing cache serves every
+# launch.
 #
-# patch_hindcast_config(): one (unit, launch) hindcast config off the inherited
-# forecast template -- the three hindcast seams (interior handoff, observed ENSO,
-# historical climate panel), the partition and episode keys and the anchors.
-# Top level so the
-# event attribution (make_event_attribution_configs.R) builds its factual arm
-# with the same code; `opt` carries climate_panel, partition_by,
-# partition_source, nbr_partition_source and episode_key.
+# patch_hindcast_config(): one (unit, launch) config off the template (seams,
+# partition and episode keys, anchors). Shared with
+# make_event_attribution_configs.R (factual arm); `opt` carries climate_panel,
+# partition_by, partition_source, nbr_partition_source and episode_key.
 patch_hindcast_config <- function(
   cfg,
   opt,
@@ -811,51 +802,20 @@ generate_hindcast_configs <- function(opt) {
   # ---- Pass 1: per FIT GROUP -- deployed lags, anchors, per-year firm windows --
   # Horizon per (group, year):
   #   launch      = <year>-<launch_month>
-  #   season_end  = first day of --season_end_by_group[group] month strictly after
-  #                 launch (rolled +1yr if <= launch); else launch + --horizon_months
-  #   horizon_end = season_end + max(0, min(best_lag_occ, best_lag_dur,
-  #                 best_lag_mon)) when --add_best_lag.
-  #                 A deployed ENSO lead (negative min lag) does not shorten the
-  #                 window: the hindcast reads OBSERVED ENSO (perfect foresight),
-  #                 so no lag limits which months can be simulated. (The forecast
-  #                 keeps last CFSv2 month + min lag, where a lead does limit it.)
-  #
-  # Season ends (--season_end):
-  #   by_group (default)     the --season_end_by_group month of the country's fit
-  #                          group, as above; output unchanged. Warns when a
-  #                          group's member countries' cholera-year ends (from the
-  #                          panel) span more than 4 months.
-  #   by_country_from_panel  each country's own cholera-year end, min_seas - 1 of
-  #                          its modal gid calendar in --climate_panel
-  #                          (utils/season_calendar.R::season_end_by_country());
-  #                          season_end = the first such month at least
-  #                          --season_min_window_months (default 6) after the
-  #                          launch; firm horizon = that + max(0, min lag) per
-  #                          country. A group's horizon_end is the max over its
-  #                          members and a unit runs to the max over its member
-  #                          countries. The manifest gains countries.<iso>
-  #                          (season_end_month, min_seas_mode, modal_share,
-  #                          years.<y>.firm_horizon_end / unit_horizon_end) and
-  #                          season_end_source (panel path + min_seas digest), and
-  #                          season_ends_<manifest stem>.csv is written next to it.
-  #
-  # Season windows (--season_window; replaces --launch_month and --season_end;
-  # registry units only):
-  #   trough       each country's onset-rate trough in its occurrence panel
-  #                (--trough_rule onset_rate, where it has >= --trough_min_onsets
-  #                onsets and a trough stable under a bootstrap over years,
-  #                >= --trough_min_stability), else its modal min_seas of
-  #                --climate_panel (season_calendar.R::season_trough_by_country())
-  #   season       the month after the trough to the next trough; launch = the
-  #                season start, floored at --launch_floor_month (May: after the
-  #                ONI spring predictability barrier); firm horizon = season end
-  #                + max(0, min lag) (season_calendar.R::season_window_of())
-  #   runs         one per (unit, launch month, season year), keyed "<year>-<MM>":
-  #                the unit is simulated whole, only the countries whose season
-  #                starts that month are scored in it (units.<u>.years.<key>.scored;
-  #                countries.<iso>.years.<key> only under that key)
-  #   reporting    countries.<iso> (trough source, floor cut and its onset share),
-  #                manifest season_window (rule + inputs) and the CSV.
+  #   season_end  = first --season_end_by_group[group] month after launch
+  #                 (else launch + --horizon_months)
+  #   horizon_end = season_end + max(0, min lag over occ/dur/mon) under
+  #                 --add_best_lag (closed: simulated). A lead does not shorten
+  #                 it: the hindcast reads observed ENSO (perfect foresight).
+  # --season_end by_country_from_panel: each country's own cholera-year end
+  #   (season_calendar.R::season_end_by_country()), at least
+  #   --season_min_window_months after launch; group / unit horizons = max over
+  #   members. Writes season_ends_<manifest stem>.csv and countries.<iso> keys.
+  # --season_window trough (registry units only; replaces --launch_month and
+  #   --season_end): seasons run trough to trough (season_calendar.R::
+  #   season_trough_by_country(), season_window_of()), launch floored at
+  #   --launch_floor_month; one run per (unit, launch month, season year), key
+  #   "<year>-<MM>", scoring only the countries whose season starts then.
   group_info <- list()
   for (g in groups) {
     bl <- lapply(stats::setNames(nm = c("occ", "dur", "mon")), function(tr) {

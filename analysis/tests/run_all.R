@@ -430,7 +430,7 @@ results$nbr_partition_token <- run_one(
   hard_fail = TRUE
 )
 
-# Grouped fits of ONE country (e.g. enso_nga) keep their country-level REs
+# Grouped fits of one country (e.g. enso_nga) keep their country-level REs
 # under a normal(0, 0.05) sd prior instead of having them trimmed: the trimmed
 # group names (ADM1, ADM1:gid) are not mapped by the simulator / smoothing
 # extractor, which zeroed those REs silently. HARD: replay correctness.

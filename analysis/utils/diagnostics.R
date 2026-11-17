@@ -29,7 +29,7 @@ DIAG_EXCLUDE <- "^(lp__|lprior)$"
 #' the RE standard deviations (`sd_`, `sds_`), fixed effects and shapes stay.
 DIAG_SCOPES <- list(all = NULL, population = "^(r_|z_|zs_)")
 
-#' Bounds of the deploy gate that are not reported thresholds: R-hat on EVERY
+#' Bounds of the deploy gate that are not reported thresholds: R-hat on every
 #' parameter (the simulator draws the `r_` levels too) and the minimum E-BFMI
 #' per chain (Stan's convention).
 DIAG_GATE <- c(rhat_any = 1.05, ebfmi = 0.3)
@@ -278,7 +278,7 @@ diag_scope_summary <- function(summary, scope = "population") {
 #'
 #' Pure pass / fail verdict of one fit_diagnostics() result (the deploy
 #' convergence gate). The scoped parameters (DIAG_SCOPES) are held to R-hat <=
-#' `rhat_max` and bulk and tail ESS >= `ess_min`; EVERY parameter to R-hat <=
+#' `rhat_max` and bulk and tail ESS >= `ess_min`; every parameter to R-hat <=
 #' `rhat_any`; the summed divergences to <= `max_divergent`; every chain's
 #' E-BFMI to >= `ebfmi_min`. Max-treedepth hits are reported, never gated.
 #' Fails closed: an empty or all-NA scope, or an NA divergence / E-BFMI

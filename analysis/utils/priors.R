@@ -24,52 +24,23 @@
 
 #' .PRIOR_DEFAULTS
 #'
-#' One table of default brms prior strings per track. `sd` is split into two
-#' group-scoped tiers, `sd_region_country` and `sd_adm1` (see
-#' .re_group_tiers()/.tiered_sd_priors() below) -- ADM2 counts as the ADM1
-#' tier. Both tiers default to the same value (2.5 for occurrence/duration,
-#' 0.5 for size/monthly). A config can differentiate the two tiers via
-#' `prior_sd_region_country` / `prior_sd_adm1`; the legacy `prior_sd` key
-#' still works and seeds both tiers uniformly (see .prior_strings()). The 5x
-#' gap between occurrence/duration and size/monthly, and the `lkj(2)` vs
-#' no-`cor`-prior split, remain deliberate, unexplained asymmetries on
-#' structurally identical crossbasis random slopes (nested_slope_re_terms()).
-#' Do not change these values as part of a refactor commit.
+#' Default brms prior strings per track. `sd` has two group-scoped tiers,
+#' `sd_region_country` and `sd_adm1` (ADM2 counts as ADM1; see
+#' .re_group_tiers() / .tiered_sd_priors()), equal by default: 2.5 for
+#' occurrence / duration, 0.5 for size / monthly. A config sets them through
+#' `prior_sd_region_country` / `prior_sd_adm1`; the legacy `prior_sd` seeds both
+#' (.prior_strings()).
 #'
-#' `intercept_anchored` is the intercept prior used when the track's empirical
-#' baseline-rate anchor is switched on (`.anchor_gate_on()`). It is deliberately
-#' the SAME for all four tracks, because with the anchor on the intercept no
-#' longer has to span that track's offset scale -- the anchor's denominator is
-#' exactly the product of the track's other offsets, so
-#' `mu = <other offsets> x anchor x exp(lp)` and `exp(Intercept) ~ 1` is the
-#' correct prior centre everywhere. The four DIFFERENT un-anchored values above
-#' are four different corrections for four different offset scales; the anchored
-#' value is one residual-scale prior. See utils/anchor.R's header for the
-#' prior-predictive blowups that motivated it.
+#' `intercept_anchored` is the Intercept prior when the baseline-rate anchor is
+#' on (.anchor_gate_on()). It is the same for every track: with the anchor on,
+#' `mu = <other offsets> x anchor x exp(lp)`, so `exp(Intercept) ~ 1`.
 #'
-#' `sds` is the wiggliness prior on a penalised-spline basis --
-#' the occurrence/duration `basehaz_poisson: cyclic|seasonal` term
-#' `s(t_start_seas, bs = 'cc', k = 8)` and the size/monthly `seasonal_term:
-#' cyclic` term `s(month, bs = 'cc', k = 6)`. It is entered here at EXACTLY
-#' brms's own package default, `student_t(3, 0, 2.5)` (verified via
-#' `brms::get_prior()` for both the Poisson and negbinomial families, and at
-#' the Stan level: adding this prior explicitly produces byte-identical
-#' `make_stancode()` output -- `lprior += student_t_lpdf(sds_1 | 3, 0, 2.5)` --
-#' to leaving it implicit). So this key is a no-op at its default; it makes
-#' the value visible and overridable (`prior_sds:`) instead of inherited from
-#' brms.
+#' `sds` is the wiggliness prior of the penalised seasonal splines. Its default,
+#' `student_t(3, 0, 2.5)`, is brms's own, so the key is a no-op at the default
+#' and only makes the value visible and overridable (`prior_sds:`).
 #'
-#' That visibility is the point. In prior predictive checks with the
-#' baseline-rate anchor on, the occurrence track overshoots the observed total
-#' far more than the other three tracks, and this term is the cause: a
-#' `factor` basehaz instead of the spline removes most of the overshoot, while
-#' tightening `prior_b` or both sd tiers does not. Unlike `sd` below, `sds` is not a
-#' nuisance variance: it
-#' is the smoothing penalty on the seasonal baseline hazard, i.e. directly on
-#' the project's headline scientific object. Whether 2.5 is defensible is an
-#' open question; changing it would alter every deployed occurrence config, so
-#' -- exactly like the `sd` values above -- do not change it as part of a
-#' refactor commit.
+#' Do not change any value here in a refactor commit: they define every
+#' deployed config that does not override them.
 .PRIOR_DEFAULTS <- list(
   occurrence = list(
     intercept = "normal(0, 1.5)",
@@ -115,30 +86,17 @@
 
 #' .prior_strings
 #'
-#' Resolve each of a track's prior keys as
-#' `brms_block[[paste0("prior_", k)]] %||% .PRIOR_DEFAULTS[[track]][[k]]` --
-#' config can override, but the hardcoded default always exists.
-#' `opt$occurrence$brms$prior_sd` would be honoured if someone added it, but
-#' config_defaults.yml/get_default_options() do not.
+#' Resolves each prior key of a track as
+#' `brms_block[[paste0("prior_", k)]] %||% .PRIOR_DEFAULTS[[track]][[k]]`. The
+#' tier keys `sd_region_country` / `sd_adm1` fall back to the legacy `prior_sd`
+#' first, so a config with only `prior_sd:` seeds both tiers.
 #'
-#' The `sd_region_country` / `sd_adm1` tier keys additionally fall back to the
-#' legacy blanket `prior_sd` key before the hardcoded default, so a config that sets
-#' `prior_sd:` keeps working unchanged and seeds both tiers identically.
-#'
-#' Superseded legacy key: when BOTH tier keys are set,
-#' `prior_sd` is never read. The local .prior_sd_superseded() then warns
-#' (class "prior_sd_superseded"; a warning, not an error: the tiers are the
-#' explicit choice) if `prior_sd` is not the track's default. Same
-#' value-as-signal rule as .intercept_prior_string() below: a merged
-#' `brms_block` cannot tell "written in the YAML" from "came down from the
-#' defaults", and the legacy key does come down from them (config_defaults.yml
-#' / get_default_options() set `prior_sd` for size, duration and monthly, and
-#' the batch generator writes it into the configs beside the tier keys), so
-#' a `prior_sd` equal to the default carries no information and is superseded
-#' silently. The default is the blanket value, which both tier defaults in
-#' .PRIOR_DEFAULTS restate; compared with whitespace removed. Local rather than
-#' top-level so the module's symbol table (tests/test_config_split_symbols.R)
-#' is unchanged.
+#' When both tier keys are set, `prior_sd` is never read. The local
+#' .prior_sd_superseded() then warns (class "prior_sd_superseded") if
+#' `prior_sd` differs from the track default (compared with whitespace removed);
+#' a value equal to the default came down from the defaults and is ignored
+#' silently. It is local so the module's symbol table
+#' (tests/test_config_split_symbols.R) does not change.
 #'
 #' @param brms_block opt$<track>$brms (or the brms_cb %||% brms merge already
 #'   computed by a `_cb` fit script's call site)
@@ -198,28 +156,15 @@
 
 #' .intercept_prior_string
 #'
-#' The `Intercept` prior for a track, honouring the anchor gate.
-#'
-#' The config-pin trap this exists to close: 322 configs in the repo carry an
-#' explicit `prior_intercept:` key, and `config_defaults.yml` /
-#' `get_default_options()` set one for size / duration / monthly too. Flipping
-#' `offset_baserate: true` on such a config while the pin still resolved would
-#' put an un-anchored intercept prior on an anchored formula -- the offset
-#' correction applied twice, silently, with a perfectly plausible-looking fit
-#' coming out the other end.
-#'
-#' A merged `brms_block` cannot distinguish "the user wrote this in their YAML"
-#' from "this came down from the defaults", so the value itself is the signal:
-#'
-#'   - pin == the track's own UN-ANCHORED default -> inherited (or a redundant
-#'     restatement of it). It carries no information the default does not, so it
-#'     is superseded by `intercept_anchored` silently. This is the case for all
-#'     322 configs (233 x `normal(-3, 1)`, 89 x `normal(0, 1.5)`), which is
-#'     what lets an existing config be anchored by flipping one flag.
-#'   - pin != that default -> a deliberate, hand-tuned choice whose intent under
-#'     an anchored offset is genuinely unknowable. HARD ERROR rather than guess.
-#'     `prior_intercept_anchored:` is the escape hatch and resolves through the
-#'     ordinary `.prior_strings()` mechanism.
+#' The `Intercept` prior for a track, honouring the anchor gate. A merged
+#' `brms_block` cannot tell a pin the user wrote from one inherited from the
+#' defaults, so the value decides:
+#'   - pin == the track's un-anchored default: inherited; superseded by
+#'     `intercept_anchored` silently, so an existing config is anchored by
+#'     flipping `offset_baserate` alone.
+#'   - pin != that default: a deliberate choice whose meaning under an anchored
+#'     offset is unknown, so a HARD ERROR (it would apply the offset correction
+#'     twice). `prior_intercept_anchored:` is the escape hatch.
 #'
 #' @param s resolved prior strings from .prior_strings()
 #' @param brms_block the same brms block that was passed to .prior_strings()
@@ -256,8 +201,8 @@
 #' .prior_formula_gates
 #'
 #' The has_b / has_sd / has_cor gate logic copy-pasted across the occurrence
-#' and duration inline prior blocks (04_fit_occ_brms.R:158,
-#' 04_fit_dur_brms.R:201-204). Occurrence and duration differ in which gates
+#' and duration inline prior blocks (04_fit_occ_brms.R,
+#' 04_fit_dur_brms.R). Occurrence and duration differ in which gates
 #' they actually use (see build_occ_priors()/build_duration_priors()), but the
 #' computation itself is identical.
 #'
@@ -384,28 +329,14 @@
 
 #' .has_smooth_terms
 #'
-#' TRUE iff the track's model formula contains a penalised mgcv smooth, i.e.
-#' iff brms will create a class="sds" parameter. Gating is MANDATORY, not
-#' defensive: `set_prior(class = "sds")` against a formula with no smooth is
-#' the same hard `.validate_prior()` failure as an absent sd tier ("The
-#' following priors do not correspond to any model parameter"), verified
-#' empirically. 99 occurrence/duration configs in the repo have no smooth.
-#'
-#' Two resolution paths, because the smooth enters the formula at two
-#' different layers:
-#'   - occurrence: the baseline-hazard block is assembled by the FIT SCRIPT
-#'     (04_fit_occ_brms.R:149-153 / 04_fit_occ_brms_cb.R:201-205), not by
-#'     build_formula_terms(), so it is absent from `parts` and there is nothing
-#'     to scan. Resolved from the same backend block the script used, through
-#'     the same .occ_basehaz() call -- that shared helper is what guarantees
-#'     the prior and the formula cannot disagree about whether the spline is
-#'     there.
-#'   - duration / size / monthly: the smooth IS in `parts` (as $seas_terms,
-#'     from .seasonal_terms() or the duration seasonal-basehaz switch), so it
-#'     is detected by the term string itself rather than re-resolved from
-#'     config -- the sibling of .re_group_tiers()'s "classify the terms you
-#'     actually built, never a static prediction" rule, and for the same
-#'     reason: any drift between prediction and formula is a hard brms error.
+#' TRUE iff the track's formula has a penalised mgcv smooth, i.e. brms creates
+#' a class "sds" parameter. The gate is required: an "sds" prior on a formula
+#' without a smooth is a hard brms error.
+#'   - occurrence: the baseline-hazard block is built by the fit script, not by
+#'     build_formula_terms(), so it is resolved from the backend block through
+#'     the same .occ_basehaz() call the script uses.
+#'   - duration / size / monthly: detected from the term strings in `parts`
+#'     ($seas_terms), never predicted from config.
 #'
 #' @param parts    formula-parts list; $bh_terms / $seas_terms / $fixed_terms
 #'   are scanned when present (absent treated as character(0)). Unused for
@@ -472,7 +403,7 @@
 #'   $phi_intercept, $phi_sd
 #' @param phi_re "constant" | "region" | "region_country" | "region_country_adm1"
 #' @return brmsprior of length 2, or NULL
-# Prior on the country-level RE sds of a grouped fit of ONE country
+# Prior on the country-level RE sds of a grouped fit of one country
 # (formula.R::.single_country_keep(): the country terms are kept with a single
 # level instead of being trimmed). One level carries no information on its sd,
 # so a tight prior keeps the country deviation near 0 (the intercept and fixed
@@ -665,7 +596,7 @@ build_occ_priors <- function(opt, parts, brms_cfg = NULL, nlpar = NULL) {
 #' because brms errors on a prior for an empty class, and the constant-hazard
 #' null variant (basehaz_duration: none, no covariates, no slopes) genuinely
 #' has no population-level effects beyond the intercept
-#' (04_fit_dur_brms.R:194-199).
+#' (04_fit_dur_brms.R).
 #'
 #' `prior_mso_band` (brms block, default NULL): its own prior on the
 #' episode-age band effects, one `class = "b", coef = "mso_band<level>"` row

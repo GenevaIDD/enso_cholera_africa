@@ -1,56 +1,38 @@
 #!/bin/bash
 # stages/05_loo_compare.sh — submit the per-group LOO lag re-selection
-# (05_fit_postprocess_loo_lags.R) as a SLURM ARRAY job.
+# (05_fit_postprocess_loo_lags.R) as a SLURM array: one task per
+# (track, group), after the grouped ENSO single-lag sweeps finish.
 #
-# This is step 5 of the 2024 data-refresh rebuild runbook: after the occ/dur/mon
-# grouped ENSO single-lag sweeps finish (step 4), each (track, group) LOO ranking
-# is independent, so they fan out as one array task each instead of the serial
-# double loop:
-#
-#   for G in enso_east enso_horn enso_south enso_west; do
-#     for B in <occ_batch> <dur_batch> <mon_batch>; do
-#       Rscript analysis/05_fit_postprocess_loo_lags.R -d $B --group $G --redo
-#     done
-#   done
-#
-# With the default 3 tracks × 4 groups that is a 12-task array. (The size track
-# is retired downstream and is not ranked here.)
-#
-# Each task writes its ranking to generated_data/loo_compare/<batch>/ (NOT into
-# the batch config dir; see make_loo_compare_run_file() in utils/paths.R). That
-# directory is gitignored: after the array finishes, copy it back to the
-# local checkout if the fits ran on a cluster.
+# Each task writes its ranking to generated_data/loo_compare/<batch>/
+# (paths.R::make_loo_compare_run_file()), which is gitignored: copy it back to
+# the local checkout if the fits ran on a cluster.
 #
 # Usage (D=analysis/configs/deploy/prod_run<N>.yml):
 #   bash analysis/bash/stages/05_loo_compare.sh --deploy $D
-#   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --groups enso_east,enso_west
 #   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --track occ --concurrency 4
-#   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --track dur
 #   bash analysis/bash/stages/05_loo_compare.sh --track mon --mon-dir <dir>
 #   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --no-redo --list
-#   # per-lag sidecar only (pointwise elpd, Pareto-k, crossbasis draws; ranking files untouched):
-#   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --no-redo --extra "--lag_sidecar --sidecar_only" --time 1:00:00
+#   bash analysis/bash/stages/05_loo_compare.sh --deploy $D --no-redo \
+#       --extra "--lag_sidecar --sidecar_only" --time 1:00:00   # sidecar only
 #
 # Options:
-#   --deploy FILE             Deploy config; supplies every batch dir (and the
-#                             group list) via deploy_prod_run.R --stage resolve
-#   --track {occ|dur|mon|all} Which track(s) to rank  [default: all] (all = occ+dur+mon)
-#   --groups G1,G2,...        Comma list of ENSO groups   [default: from --deploy, else enso_east,enso_horn,enso_south,enso_west]
-#   --occ-dir DIR             Occurrence batch config dir [default: from --deploy; required otherwise]
-#   --dur-dir DIR             Duration batch config dir   [default: from --deploy; required otherwise]
-#   --mon-dir DIR             Monthly batch config dir    [default: from --deploy; required otherwise]
-#   Explicit --*-dir / --groups win over --deploy. There is no run-specific default.
-#   --concurrency K           Cap simultaneous array slots [default: all]
-#   --no-redo                 Reuse cached per-fit LOO (drop --redo)
-#   --lag-sidecar             Pass --lag_sidecar to 05 (also write the per-(batch, group)
-#                             lag_loo_sidecar_*.rds; loads every fit even when its LOO is cached)
-#   --sidecar-only            Pass --sidecar_only to 05 (the sidecar alone; ranking rds + png
-#                             not written, so 09's enso_relation freshness is not moved)
-#   --extra "ARGS"            Extra 05_fit_postprocess_loo_lags.R arguments, passed verbatim
-#                             (e.g. "--lag_sidecar --sidecar_only")
-#   --time T                  SLURM wall time per array task [default: the payload's #SBATCH --time]
-#   --dependency SPEC         Forwarded verbatim to sbatch --dependency (e.g. afterok:12345:12346)
-#   --list                    Print the (track, group) job list and exit (no submit)
+#   --deploy FILE        Deploy config: batch dirs and group list via
+#                        deploy_prod_run.R --stage resolve
+#   --track T            occ | dur | mon | all [default: all = occ+dur+mon]
+#   --groups G1,G2,...   ENSO groups [default: from --deploy, else enso_east,
+#                        enso_horn, enso_south, enso_west]
+#   --occ-dir / --dur-dir / --mon-dir DIR
+#                        Batch config dirs [default: from --deploy; required
+#                        otherwise]. Explicit dirs / --groups win over --deploy.
+#   --concurrency K      Cap simultaneous array slots [default: all]
+#   --no-redo            Reuse cached per-fit LOO (drop --redo)
+#   --lag-sidecar        Pass --lag_sidecar (per-(batch, group) sidecar too)
+#   --sidecar-only       Pass --sidecar_only (sidecar alone; rankings untouched,
+#                        so 09's enso_relation freshness does not move)
+#   --extra "ARGS"       Extra 05_fit_postprocess_loo_lags.R arguments, verbatim
+#   --time T             Wall time per task [default: the payload's #SBATCH]
+#   --dependency SPEC    Forwarded to sbatch --dependency
+#   --list               Print the (track, group) jobs and exit
 
 set -euo pipefail
 

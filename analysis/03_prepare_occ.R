@@ -53,30 +53,16 @@ source("analysis/utils/national_zero.R") # national_zero_rule_params() / nationa
 source("analysis/utils/coverage.R") # build_coverage_mask() -- --contagion_coverage_report
 
 # 2. User-supplied options -----------------------------------------------------
-# The population / composite / episode surface (--baseline, --enso_source,
-# --refresh_enso, --min_pop, --pop_source [default crosswalk], --crosswalk_path,
-# --gid_pop_path, --wpp_path, --composite_policy, --cover_threshold,
-# --composite_tiling, --episode_key) is shared with the other three
-# 03_prepare_* scripts: utils/provenance.R::prep_cli_options(). Track-specific
-# extras below.
-#
-# --pop_source: "legacy" = the centroid match (one arbitrary member of a
-# composite LP carries the outbreak); "crosswalk" = propagate the outbreak
-# indicator to EVERY member gid (see section 6a for why propagation, not
-# w-scaling, is the only defensible expansion here).
-#
-# --composite_policy (crosswalk only): keep = expand to K member rows (K
-# pseudo-independent observations); collapse = one row per LP-event at the
-# dominant-population member; drop = remove TRUE composites, expand the rest;
-# drop_collapse = remove TRUE composites, collapse the rest. `drop` keys on
-# DOMINANCE (gid_cover < --cover_threshold, ~22% of LPs), the row inflation on
-# MULTIPLICITY (~97% of rows); only collapse removes the latter. See
-# lp_composite_status(). --composite_tiling: derived (the crosswalk's
-# geometry-based lp_level) | corpus_label (legacy behaviour).
-#
-# --episode_key gid_season: ONE canonical episode per (gid, year_seas), shared
-# with 03_prepare_siz.R (utils/footprint.R::build_canonical_episodes()); the
-# survival history is built per gid, not per location period.
+# The population / composite / episode options are shared with the other
+# 03_prepare_* scripts (provenance.R::prep_cli_options()); track extras below.
+# --pop_source: legacy = centroid match; crosswalk = propagate the outbreak
+# indicator to every member gid (section 6a).
+# --composite_policy (crosswalk only): keep / collapse / drop / drop_collapse,
+# as in 03_prepare_siz.R; `drop` keys on dominance (gid_cover <
+# --cover_threshold), only collapse removes the row multiplicity
+# (lp_composite_status()). --composite_tiling: derived | corpus_label.
+# --episode_key gid_season: one canonical episode per (gid, year_seas)
+# (footprint.R::build_canonical_episodes()); histories are built per gid.
 option_list <- c(
   list(
     make_option(
@@ -141,7 +127,7 @@ option_list <- c(
     # output). Recorded in the policy stamp; 04_fit_occ_* refuses a
     # contagion.partition: group fit whose grouping.source differs.
     # A comma list: the FIRST registry still writes the _pg pair;
-    # EVERY registry writes nbr_lag1_r<rho>[_rn]_part<token> siblings, the
+    # Every registry writes nbr_lag1_r<rho>[_rn]_part<token> siblings, the
     # columns of contagion.partition: registry fits (utils/paths.R).
     make_option(
       "--contagion_partition_source",
@@ -633,34 +619,13 @@ ob_ts3_first <- ob_ts3 # discarded-onset table (gid_season)
 
 # 6a. Propagate composite location periods to their member gids ----------------
 #
-# THE OCCURRENCE CONTRACT DIFFERS FROM THE SIZE CONTRACT, deliberately.
-#
-# The size track apportions cases by w = H/P_l, because cases are an extensive
-# quantity that must be conserved. The outbreak indicator is NOT. It is a 0/1
-# event, and w-scaling it produces a number no Bernoulli or survival likelihood
-# can consume. So it is PROPAGATED UNCHANGED: every member gid of a composite LP
-# records the outbreak.
-#
-# This is not a convenience — it is the only expansion consistent with the
-# operator already in this file. The collapse below reads
-#
-#     group_by(gid, t_start, t_end) %>% summarise(outbreak = any(outbreak))
-#
-# i.e. an observation over a footprint IS an any() over its members. A composite
-# LP observation is exactly that any() at the LP scale, so unfolding it back to
-# its members and letting the same any() re-collapse them is an identity, not an
-# assumption.
-#
-# SEASONALITY. As in the size track, min_seas / year_seas are inherited from the
-# centroid gid and not re-resolved per member.
-#
-# --composite_policy SELECTS WHICH OF THE ABOVE ACTUALLY RUNS. Everything from
-# here down sees the REDUCED set: reducing ob_ts3 removes the numerator and, via
-# the at-risk padding at section 7a (which inner_joins ob_ts3's distinct gids),
-# the matching denominator too. That is what makes `drop` a coverage caveat
-# rather than a hazard bias -- but it also means dropped units stop feeding the
-# spillover lags at section 8. Documented, not fixed: it is the direct cost of
-# reducing early.
+# Unlike size (cases apportioned by w), the 0/1 outbreak indicator is
+# PROPAGATED unchanged to every member gid. This is consistent with the
+# collapse below, any(outbreak) over (gid, t_start, t_end): re-collapsing the
+# members gives back the LP observation. min_seas / year_seas stay those of the
+# centroid gid. --composite_policy picks the reduction; everything below sees
+# the reduced set, including the at-risk padding (7a) and the spillover lags
+# (section 8), so dropped units stop feeding those lags.
 if (use_xwalk) {
   xwalk_path <- if (nzchar(opt$crosswalk_path)) {
     opt$crosswalk_path
@@ -671,30 +636,12 @@ if (use_xwalk) {
   xwalk_occ <- load_population_crosswalk(xwalk_path)
 
   # --- explicit drop of crosswalk-unmatched LPs -------------------------------
-  # An LP the crosswalk never saw has NO population decomposition, so neither
-  # reduction path can act on it: lp_composite_status() refuses to call it
-  # composite (no basis for the claim), and both collapse_composite_lps() and
-  # apportion_composite_cases() would pass it through untouched under
-  # `keep_unmatched = TRUE`, tagged pop_tier = "unmatched_lp". Such a row then
-  # reaches the model frame carrying its centroid gid and no crosswalk
-  # population -- i.e. exactly the un-reduced composite that --composite_policy
-  # exists to remove, smuggled past the policy by an absent measurement.
-  #
-  # Dropping here is a no-op on the final row set under the default
-  # `drop_collapse`: the LPs that miss the crosswalk are the multi-ADM1 unions
-  # (a 6-ADM1 composite has gid_cover ~ 0.17, far below --cover_threshold 0.90),
-  # so the policy would drop them anyway once they were matchable. The point is
-  # that the drop is stated rather than contingent on a match succeeding.
-  #
-  # This is CONTAINMENT, NOT A FIX. The absent crosswalk rows are an upstream
-  # data defect (duplicate/parent-inherited LP geometry in the Taxonomy API);
-  # the defect is deliberately left in place so the next data refresh surfaces
-  # it again through the count logged below, instead of being silently absorbed.
-  #
-  # Placed BEFORE the counters below so every gate downstream keeps comparing
-  # like with like -- n_before, sig_before and the case-conservation accounting
-  # all describe the matchable corpus, and none of them has to special-case a
-  # row set the crosswalk could not describe.
+  # An LP absent from the crosswalk has no population decomposition, so no
+  # composite policy can reduce it; kept, it would reach the model frame as an
+  # un-reduced composite. Dropped explicitly (a no-op under drop_collapse).
+  # Containment, not a fix: the upstream geometry defect is left so the next
+  # data refresh surfaces it in the count below. Placed before the counters
+  # so every gate compares the matchable corpus only.
   st_match <- lp_composite_status(
     ob_ts3,
     xwalk_occ,
@@ -704,8 +651,9 @@ if (use_xwalk) {
     tiling = opt$composite_tiling,
     cover_threshold = opt$cover_threshold
   )
-  # One row per input row, arranged by .row (composite_lp.R:241), so this is a
-  # positional mask on ob_ts3.
+  # One row per input row, arranged by .row
+  # (composite_lp.R::lp_composite_status()), so this is a positional mask on
+  # ob_ts3.
   unmatched <- !st_match$matched
   unmatched_lp <- sort(unique(as.character(ob_ts3$location_period_id[
     unmatched
@@ -984,22 +932,11 @@ if (!gid_season) {
     fill_synthetic_afro_region() %>% # utils/gid.R: the synthetic countries (no-op for real data)
     arrange(location_period_id, t_start)
 
-  # Aggregate to the simulator's emission granularity: ONE union observation per
-  # (gid, month). The occurrence model and the forward simulator must be
-  # calibrated at the same spatial resolution. Because ADM3 reporting units are
-  # relabelled to their parent ADM2 GID_2 upstream (02_preprocess_climate.R:77-105),
-  # a single ADM2 gid footprint can carry many location-period rows in the same
-  # month (the ADM2 report plus every nested ADM3 sub-district), all sharing
-  # identical gid-level climate covariates. Left unaggregated, the fit sees
-  # ~5-10 near-duplicate rows per (gid, month) and calibrates the hazard at
-  # subdistrict resolution, whereas the simulator emits ONE Bernoulli per
-  # (gid, month) -> systematic occurrence mismatch (see seam-gap investigation).
-  # Collapse to one row per (gid, t_start, t_end): outbreak = ANY onset anywhere
-  # in the footprint (union); every covariate is constant across the siblings so
-  # first() is loss-free. A single representative uid/location_period_id per gid
-  # is fixed BEFORE the collapse so downstream season-aware climate lags (grouped
-  # by uid) and the time_to_last_outbreak recursion (grouped by
-  # location_period_id) both operate per footprint.
+  # Collapse to one union row per (gid, t_start, t_end), the simulator's
+  # emission grain: outbreak = any onset in the footprint, covariates first()
+  # (identical across siblings). A representative uid / location_period_id per
+  # gid is fixed BEFORE the collapse so the climate lags (by uid) and the
+  # time_to_last_outbreak recursion (by location_period_id) run per footprint.
   surv_dat_all <- surv_dat_all %>%
     group_by(gid) %>%
     mutate(
@@ -1019,21 +956,12 @@ if (!gid_season) {
 } else {
   # D'/E'. Gid-season survival histories (--episode_key gid_season) ---------
   #
-  # ONE survival history per (gid, season-year), built from the canonical
-  # episode table that 03_prepare_siz.R builds with the identical call
-  # (utils/footprint.R::build_canonical_episodes()). Compared with the lp_season
-  # branch above, which builds a history PER LOCATION PERIOD, censors each at
-  # its own onset and only then unions the LPs per (gid, t_start, t_end):
-  #   * one onset per gid-season, at the EARLIEST member onset -- a second LP's
-  #     later onset inside a running outbreak is not a second event;
-  #   * the gid is censored after that onset -- no "at risk, no onset" months
-  #     contributed by sibling LPs while the outbreak is running;
-  #   * a covered season without an episode is at risk until the UNION of the
-  #     member LPs' coverage ends;
-  #   * no union step, so no duplicate t_start rows per gid (the incomplete
-  #     union the simulator's build_obs_panel() had to repair with a max);
-  #   * admin_level is the gid's GEOMETRY-DERIVED level, one per gid; the
-  #     corpus label is kept only as admin_level_corpus.
+  # One survival history per (gid, season-year) from the canonical episodes
+  # (footprint.R::build_canonical_episodes(), same call as 03_prepare_siz.R).
+  # Unlike the lp_season branch: one onset per gid-season (earliest member
+  # onset), censored after it; a covered season with no episode stays at risk
+  # until the union of member coverage ends; no union step; admin_level is the
+  # gid's geometry level (corpus label kept as admin_level_corpus).
   gid_pop_path_ep <- if (nzchar(opt$gid_pop_path)) {
     opt$gid_pop_path
   } else {
@@ -1454,7 +1382,7 @@ hmm_clusters <- read_csv("data/hmm_country_clusters.csv") %>%
   select(iso3, cluster)
 
 # ADM1 x calendar-month activity grid, built outside the `calendar` branch
-# because the distance-weighted neighbour contagion needs it on BOTH
+# because the distance-weighted neighbour contagion needs it on both
 # spillover_grouping paths -- it is a pure function of adm1_outbreak and
 # references nothing branch-local. `ongoing_outbreak`/`ongoing_outbreak_lag1` only depend on
 # t_start (TL/TR tested at t_start / t_start - 30 above), so collapsing t_end
@@ -1594,7 +1522,7 @@ if (identical(opt$spillover_grouping, "calendar")) {
 # across the mixed ADM0/ADM1/ADM2 rows, and at which self-exclusion (Inf diagonal
 # in build_adm1_dist_km()) cleanly separates the neighbour term from the unit's own
 # `ongoing_outbreak_lag1`. ADM2 rows inherit their parent ADM1's value.
-# Keyed on (ADM1, t_start) on BOTH spillover_grouping paths: these columns depend
+# Keyed on (ADM1, t_start) on both spillover_grouping paths: these columns depend
 # only on t_start, never t_end, which is exactly the leakage-free property the
 # calendar path argues for above. Do not mirror own_key/country_key/tu_key.
 adm1_dist_km <- build_adm1_dist_km(
@@ -1867,7 +1795,7 @@ gid_seas_source <- gid_seas_source[
 ]
 
 # LP -> gid member bridge sidecar (gid_season only): the panel keeps
-# ONE representative location_period_id per gid, so a coverage mask bridged
+# one representative location_period_id per gid, so a coverage mask bridged
 # through the panel misses the other member LPs' reporting windows. Every
 # build_coverage_mask() caller reads this file when it exists
 # (utils/coverage.R::coverage_lp_bridge()) and falls back to the panel otherwise.

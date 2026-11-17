@@ -28,20 +28,10 @@
 # ---------------------------------------------------------------------------
 # .check_fit_pair_consistency
 # ---------------------------------------------------------------------------
-# The simulator draws from an occurrence fit and (optionally) duration and
-# monthly fits that were trained independently. Only the occurrence fit's
-# baseline is ever read downstream (`opt_occ$baseline`, used to resolve the
-# survival panel and hence the climate normalisation); the other tracks'
-# `$baseline` is never consulted. So if a duration/monthly fit was trained
-# against a different baseline period its draws are applied to covariates
-# standardised on the *other* period's climatology -- a scale error with no
-# symptom other than wrong numbers.
-#
-# Warn rather than stop: a deliberate mismatch is conceivable, and erroring
-# here would break runs that are currently completing.
-#
-# opt_dur / opt_mon: NULL (the default) skips that track's check -- both
-# tracks are optional in the simulator.
+# Only the occurrence fit's baseline is read downstream (it resolves the
+# survival panel and so the climate normalisation). A duration/monthly fit
+# trained on another baseline would get covariates on the wrong climatology,
+# silently. Warns rather than stops. opt_dur / opt_mon NULL skip that track.
 .check_fit_pair_consistency <- function(
   opt_occ,
   label = NULL,
@@ -81,18 +71,12 @@
 # load_artefacts
 # ---------------------------------------------------------------------------
 #
-# Loads the fitted artefacts (occurrence fit, optional duration / monthly
-# fits, climate panel), builds the location frame, extracts draws bundles,
-# constructs per-replicate
-# ENSO scenarios, and (optionally) builds hybrid warmup panels.
-#
-# Extension vs 07b_simulator_v1.R:
-#   When `simulator.filter.enable = TRUE` (bpfilter mode), also loads the
-#   survival panel and attaches it as `art$surv_panel`. The bpfilter warmup
-#   needs the `outbreak` column (0/1) to score particles, but the projection
-#   climate panel does not carry that column.  The caller is responsible for
-#   joining `surv_panel[, c("gid","t_start","outbreak")]` onto `panel_tu_warmup`
-#   before calling `build_obs_for_tu`.
+# Loads the fits (occurrence, optional duration / monthly) and the climate
+# panel, builds the location frame, draws bundles, per-replicate ENSO
+# scenarios and, optionally, hybrid warmup panels. In bpfilter mode
+# (simulator.filter.enable) it also attaches the survival panel as
+# art$surv_panel; the caller joins its (gid, t_start, outbreak) onto
+# panel_tu_warmup before build_obs_for_tu().
 
 # ---------------------------------------------------------------------------
 # .discover_group_fit — locate a per-group fit RDS in fits_dir by token glob.
@@ -1795,34 +1779,23 @@ load_artefacts <- function(opt, enso_sim_months_start = NULL) {
 #' Validate and (if needed) filter the location frame against the occurrence
 #' draws bundle. Three checks:
 #'
-#' 1. **ADM1-level gids under ADM2 scope.** When `scope.admin_level = "ADM2"`
-#'    but some gids satisfy `gid == adm1_unit`, those locations come from
-#'    ADM1-level fit data and will be simulated at ADM1 resolution. A warning
-#'    is issued so the caller knows the declared admin level is only partially
-#'    achieved.
-#'
-#' 2. **Gids absent from the adm2 RE matrix (unseen_adm1 policy).** If a gid
-#'    is in the frame but has no column in `draws$re_intercept$adm2`, the
-#'    kernel silently falls back to the parent-level REs (adm1 + country +
-#'    region) with adm2 RE = 0. Behaviour is controlled by `scope.unseen_adm1`:
-#'    - `"restrict"` (default): drop those gids from the frame and emit a
-#'      message. Errors if all locations are removed.
-#'    - `"marginalise"`: warn and proceed; the kernel's silent-zero fallback is
-#'      already the correct marginalisation.
-#'
-#' 3. **ADM1 units absent from the adm1 RE matrix.** Same silent-zero fallback
-#'    applies at the adm1 bucket. Always a warning (no filtering policy).
+#' 1. ADM1-level gids (`gid == adm1_unit`) under `scope.admin_level = "ADM2"`:
+#'    warn that they are simulated at ADM1 resolution.
+#' 2. Gids with no column in `draws$re_intercept$adm2`: the kernel falls back
+#'    to the parent REs with adm2 RE = 0. `scope.unseen_adm1 = "restrict"`
+#'    (default) drops them (error if none remain); `"marginalise"` warns and
+#'    keeps them.
+#' 3. ADM1 units absent from the adm1 RE matrix: same zero fallback, warning
+#'    only.
 #'
 #' @param frame tibble from build_location_frame().
 #' @param draws_occ draws bundle from extract_occurrence_draws().
 #' @param sim_scope list from `opt$simulator$scope`.
 #' @param drop_region logical — TRUE for grouped (region-dropped) fits, so the
 #'   RE-matrix lookups use `country/ADM1`-only composite keys. Default FALSE.
-#' @param draws_mon optional monthly draws bundle. When given, its adm2 (leaf)
-#'   and adm1 intercept keys are checked against the frame too -- WARN ONLY,
-#'   never restrict. Historically only the occurrence bundle was inspected, so
-#'   a monthly leaf key absent from the frame (or a frame unit absent from the
-#'   monthly fit) silently contributed an RE of 0. NULL (the default) skips it.
+#' @param draws_mon optional monthly draws bundle; its adm2 (leaf) and adm1
+#'   intercept keys are checked against the frame too, warn only, never
+#'   restrict. NULL (the default) skips it.
 #' @return frame, possibly with rows removed (restrict policy).
 check_frame_vs_draws <- function(
   frame,

@@ -272,7 +272,7 @@ expect(
 )
 # `outdir` defaults to "generated_data/" WITH a trailing slash, so file.path()
 # yields "generated_data//results/...". That doubled separator is the house
-# behaviour of every sibling builder (make_sim_run_file, paths.R:1011-1013) and is
+# behaviour of every sibling builder (paths.R::make_sim_run_file()) and is
 # inert on disk; normalise rather than diverge from the siblings here.
 expect(
   all(grepl("^generated_data/+results/manuscript/", paths)),

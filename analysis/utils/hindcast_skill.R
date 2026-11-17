@@ -226,7 +226,7 @@ hindcast_run_index <- function(
       # as one row per FIT group -- its member countries, its own firm window --
       # so every downstream rollup stays keyed by the fit group. Under
       # per-country season ends a group's countries end at different months
-      # (horizon cohorts): each country is read up to its OWN firm horizon
+      # (horizon cohorts): each country is read up to its own firm horizon
       # (country_horizons, .hindcast_read_part()) and the row's horizon_end is
       # the group's latest, the same for every unit row of the group. When all
       # members share one horizon this is the former single-window row.
@@ -1809,30 +1809,15 @@ score_case_references <- function(totals, references, taus) {
 # 5b. Monthly and season case skill (fixed-support references)
 # ===========================================================================
 # On when results.derivation.hindcast.case_skill_supports is non-empty.
-# Units, per run and support:
-#   month   one per (area, month) inside each country's window: grain "adm1"
-#           (area = ADM1 region key) and "country"
-#   season  one per (country, lead class, plus "all") total: grain "country";
-#           "region_sum" adds the group's countries (secondary table)
-# Under case_mask "coverage" a unit sums only surveilled (ADM1, month) cells,
-# for the model, the observation and every reference alike.
-# References are built from the observed history on the scored run's FIXED
-# support (its gids and population shares), scaled to the scored year's
-# population (case_pop_scale "wpp": resolve_gid_population() with the WPP2024
-# rescale outside the gid table's years). Registry (.CASE_SKILL_REFERENCES):
-#   clim_pooled         same calendar month +/- case_clim_halfwidth (month) or
-#                       the same window (season) in the other season years,
-#                       leaving out the scored season and every season whose
-#                       window overlaps it (WMO cross-validated climatology;
-#                       ECMWF window pooling)
-#   clim_launch_state   clim_pooled restricted to years whose activity in the
-#                       month before launch (observed cases > 0 in the unit's
-#                       areas) matches the scored year's
-#   persistence_season  each month's value in the same calendar month of the
-#                       latest year before launch (point forecast)
-#   persistence_last    the month before launch, held for every lead (point
-#                       forecast; month units only)
-# A season reference with fewer than case_season_min_ref values is NA.
+# Units per run and support: month = (area, month) in the country window
+# (grain adm1 or country); season = (country, lead class, "all") total
+# ("region_sum" adds the group's countries). Under case_mask "coverage" every
+# unit sums only surveilled (ADM1, month) cells, for model, observation and
+# references alike. References use the observed history on the scored run's
+# fixed support, scaled to the scored year's population; registry
+# .CASE_SKILL_REFERENCES (clim_pooled, clim_launch_state, persistence_season,
+# persistence_last). A season reference with fewer than case_season_min_ref
+# values is NA.
 
 #' case_obs_history
 #'

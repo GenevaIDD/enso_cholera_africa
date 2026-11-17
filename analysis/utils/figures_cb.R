@@ -173,14 +173,10 @@ get_re_draws_mat <- function(arr, lbl, K, cb_names) {
 # ---------------------------------------------------------------------------
 #' Shared brms group-RE extraction scaffold for the manuscript-results phase.
 #'
-#' Factors the draw-loading preamble that derive_enso_relation()'s three
-#' extractors (extract_country_erf / extract_adm1_irr / dir_pop_ci,
-#' 09b_postprocess_results.R) duplicated verbatim: population fixed-effect means
-#' + a seeded posterior-draw subsample, the grouped-vs-ungrouped RE group-key
-#' selection (AFRO_region dropped under grouping.enable), the per-tier ranef
-#' arrays, and the flattened grouping-level string parser. It is also the
-#' extraction contract for the scalar region/country parameter summaries
-#' (09's derive_track_params()).
+#' Loads population fixed-effect means and a seeded posterior-draw subsample,
+#' selects the RE group keys (AFRO_region dropped under grouping.enable) and
+#' returns the per-tier ranef arrays plus a grouping-level string parser. Used
+#' by derive_enso_relation()'s extractors and 09's derive_track_params().
 #'
 #' @param fit       a brms fit object.
 #' @param variables character — the model parameters to pull. For the ENSO
@@ -436,7 +432,7 @@ drop_small_islands <- function(afro_sf, iso3 = c("MUS", "REU")) {
 #
 # Lifted out of 09_postprocess_results.R (extract_adm1_irr, extract_country_erf)
 # and the 06_fit_figures_cb_grouped* scripts' inline copies, so the figure
-# scripts and the manuscript derivation run ONE implementation. All pure;
+# scripts and the manuscript derivation run one implementation. All pure;
 # every call is `::`-qualified, callers load nothing beyond sourcing this file.
 # ===========================================================================
 
@@ -515,7 +511,7 @@ adm1_logrr_draws <- function(
   Z_targets %*% t(b_comb_d)
 }
 
-#' Per-draw log rate ratios of EVERY ADM1 level of one fit, as one array.
+#' Per-draw log rate ratios of every ADM1 level of one fit, as one array.
 #'
 #' Same draw contract as extract_adm1_irr() (grid resolution, seed, subsample,
 #' b_pop + region + country + ADM1 slope REs), so the per-ADM1 C x D slices are

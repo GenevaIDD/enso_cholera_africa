@@ -62,27 +62,12 @@ fit_training_mean_rate <- function(fit) {
 # Population provenance stamp -- the mean_rate ordering guard
 # ===========================================================================
 #
-# `build_mean_rate_table()` computes every cell from `suspected_cases / pop`.
-# Changing `pop` -- which is exactly what wiring the LP x gid crosswalk into
-# `03_prepare_siz.R` does -- changes EVERY cell of that table. But the table is
-# persisted once and thereafter read as a FROZEN sidecar, both by the fit
-# scripts and by `simulator_core.R`. Nothing in the pipeline notices when a
-# NEW population meets an OLD rate table:
-#
-#   pop fix -> mean_rate rebuild -> size refit -> Phase-A rebuild -> forecast
-#              ^^^^^^^^^^^^^^^^^^
-#              skip this and the pairing is silently wrong
-#
-# The failure is invisible because both numbers are individually plausible: the
-# rates look like rates and the populations look like populations. Only their
-# PROVENANCE distinguishes a correct pairing from an incorrect one, so
-# provenance is what gets recorded and compared.
-#
-# The stamp is deliberately a content digest, not a timestamp. A timestamp
-# answers "which is newer", which is not the question -- rebuilding the size
-# data from unchanged inputs must NOT invalidate the sidecar, and a file copied
-# between machines must not either. The question is "were these two artefacts
-# built from the same populations", and only the content answers it.
+# build_mean_rate_table() divides by `pop`, so a population change alters every
+# cell, but the table is persisted once and read as a frozen sidecar by the
+# fits and simulator_core.R. The stamp records which populations built each
+# artefact, so a new population never pairs silently with an old rate table.
+# It is a content digest, not a timestamp: rebuilding from unchanged inputs or
+# copying between machines must not invalidate it.
 
 #' pop_provenance_stamp
 #'
@@ -129,41 +114,19 @@ digest_or_null <- function(x) {
 
 #' pop_stamp_sidecar_path / persist_pop_stamp_sidecar / current_pop_digest_token
 #'
-#' Content-addresses the `size_mean_rate` sidecar path (`make_size_run_file()`,
-#' below) by the population that produced it, fixing the root cause described
-#' at that call site: a path keyed on (min_pop, max_attack_rate, estimator)
-#' alone lets a legacy-built and a crosswalk-built table with the same three
-#' values collide on one file, which `persist_mean_rate_table()`'s
-#' `if (!file.exists(path))` never rewrites. With the population folded in, a
-#' population change yields a different path and the table rebuilds
-#' automatically -- staleness becomes unrepresentable rather than detectable.
+#' Content-addresses the `size_mean_rate` sidecar path (`make_size_run_file()`)
+#' by the population that built it, so a population change gives a new path and
+#' the table rebuilds instead of `persist_mean_rate_table()`'s
+#' `file.exists()` skip reusing a stale one. The digest must come from `opt`
+#' alone (most readers never load the size table), so `03_prepare_siz.R`, the
+#' only writer of that population, persists the stamp here right after
+#' computing it.
 #'
-#' The digest must be obtainable from `opt` ALONE: most readers of the
-#' `size_mean_rate` path (05_fit_postprocess.R, 07b_simulator_v1.R,
-#' 07a_simulator_tasks.R, 07c_simulator_postprocess.R,
-#' smoothing_core.R, utils/simulations.R) never load
-#' `outbreak_size_analysis_data.rds` themselves -- they only have `opt`.
-#' `03_prepare_siz.R` is the sole writer of that population; it persists a
-#' standalone copy of the stamp here immediately after computing it (right
-#' beside `attach_pop_provenance(size_dat, ...)`), so any reader can obtain the
-#' CURRENT digest for a few bytes instead of a full readRDS() of the
-#' outbreak-size table.
-#'
-#' `current_pop_digest_token()` degrades to `NA_character_` (no pop token; falls
-#' back to the pre-fix filename) when the sidecar has not been written yet
-#' (pre-fix artefact tree, or `03_prepare_siz.R` has not re-run under this
-#' code) or when `digest` was unavailable when it was stamped -- fail-open,
-#' the same posture as `digest_or_null()` itself.
-#'
-#' Known residual limitation: the digest is a function of `pop` only. If the
-#' underlying outbreak-size table changed for some OTHER reason (e.g. an
-#' outbreak-filtering rule) while `pop` happened to stay numerically
-#' identical, the mean_rate table would actually change but the digest would
-#' not move, and `persist_mean_rate_table()`'s "if (!file.exists(path))" skip
-#' would resolve to the same (now stale) file. This is a strict improvement
-#' over the status quo (which could not distinguish ANY input change), not a
-#' complete fix for every possible drift; `persist_mean_rate_table()`'s
-#' reconciliation assert against `data$mean_rate` remains the backstop.
+#' `current_pop_digest_token()` returns `NA_character_` (the pre-fix filename,
+#' no pop token) when the sidecar is missing or `digest` was unavailable:
+#' fail-open, like `digest_or_null()`. The digest covers `pop` only; a change
+#' elsewhere in the size table with `pop` unchanged is caught only by
+#' `persist_mean_rate_table()`'s reconciliation assert.
 pop_stamp_sidecar_path <- function(opt) {
   # Episode-key token ("" by default): a gid_season size frame carries a
   # different population vector, so it gets its own stamp beside its own frame.
@@ -368,41 +331,14 @@ assert_pop_provenance <- function(
 
 #' fit_pop_stamp_path / persist_fit_pop_stamp / assert_fit_pop_provenance
 #'
-#' Layer 4 of the mean_rate sidecar fragility fix (see `pop_stamp_sidecar_path()`
-#' for Layer 1, `pop_provenance_of()` for Layer 2, `assert_pop_provenance()`'s
-#' `require_stamp` default for Layer 3): Layers 1-3 make the mean_rate
-#' sidecar itself self-healing and fail-closed, but the size FIT object
-#' (`04_fit_siz_brms.R` / `04_fit_siz_brms_cb.R`'s
-#' `size_fit`) is one hop further downstream and Layer 1 does not cover it --
-#' `size_fit`'s path is NOT content-addressed by population (it is keyed on
-#' country/admin_level/family/... only, matching the legacy `04_fit_*`
-#' convention), so an expensive brms fit trained on a now-stale
-#' population is silently reused for as long as its file happens to sit on
-#' disk with `--overwrite` unset. This is exactly the failure mode that
-#' motivated the original bug report, one artefact later: a stale mean_rate
-#' offset baked permanently into a trained model's coefficients, not just
-#' recomputed at read time.
-#'
-#' Deliberately a bounded companion-stamp mechanism, not the full
-#' manifest-based `assertArtefactChain()` sketched in the original proposal
-#' (explicitly optional/large there) -- this targets the single highest-risk
-#' gap (a stale, costly-to-refit model silently reused) with the same
-#' small-sidecar-next-to-a-big-artefact pattern already used elsewhere in
-#' this codebase (e.g. `cb_meta` sidecars).
-#'
-#' `persist_fit_pop_stamp()` is called ONLY from the branch of each
-#' `04_fit_siz_*.R` script that just performed a FRESH fit, never from a
-#' skip-reuse branch that loaded an old fit off disk -- stamping there would
-#' misattribute the CURRENT run's population to a fit that never saw it.
-#'
-#' `assert_fit_pop_provenance()`'s `require_stamp` deliberately defaults to
-#' FALSE, narrower than `assert_pop_provenance()`'s library-wide `TRUE`
-#' (Layer 3): no size fit deployed before this layer existed carries a
-#' companion stamp, and defaulting to fatal-on-missing would immediately
-#' hard-stop the entire simulator/forecast pipeline against every
-#' pre-existing artefact. Callers that want the stricter posture (e.g. a
-#' fresh benchmark run where every fit is known to postdate this layer) may
-#' pass `require_stamp = TRUE` explicitly.
+#' A population stamp next to each size FIT, whose path is not keyed on
+#' population, so a fit trained on a stale population is not silently reused.
+#' `persist_fit_pop_stamp()` is called only from the fresh-fit branch of each
+#' `04_fit_siz_*.R` script, never from a skip-reuse branch (that would credit
+#' the current population to a fit that never saw it).
+#' `assert_fit_pop_provenance()` defaults to `require_stamp = FALSE`, narrower
+#' than `assert_pop_provenance()`, because fits from before the stamp existed
+#' have none; pass `TRUE` where every fit is known to carry one.
 fit_pop_stamp_path <- function(fit_path) {
   paste0(tools::file_path_sans_ext(fit_path), ".pop_stamp.rds")
 }
@@ -442,39 +378,17 @@ assert_fit_pop_provenance <- function(
 
 #' prep_policy_stamp_path / persist_prep_policy_stamp / read_prep_policy_stamp
 #'
-#' Companion sidecar recording WHICH COMPOSITE POLICY built a 03_prepare_*.R
-#' output. Same pattern and same reasoning as `fit_pop_stamp_path()` above: a small
-#' stamp file next to a big artefact.
+#' Sidecar recording which `--composite_policy` built a `03_prepare_*.R` output.
+#' The policy changes a prep file's content but not its name, and renaming is
+#' not practical (`make_surv_dat_file()` has many bare `list(baseline = ...)`
+#' callers), so the stamp makes a policy mismatch name its cause instead of
+#' surfacing as a bare `pop_digest` mismatch. A file survives where the
+#' `attach_pop_provenance()` attribute is stripped.
 #'
-#' WHY A SIDECAR AND NOT A RENAME. `--composite_policy` changes the CONTENT of
-#' `outbreaks_survival_data_base-<baseline>.rds` and
-#' `outbreak_size_analysis_data.rds` without changing their names, so two runs
-#' under different policies overwrite each other silently. The obvious fix --
-#' put the policy in the filename -- is not available: `make_surv_dat_file()` has
-#' ~15 call sites, most passing a bare `list(baseline = ...)` with no policy
-#' field to read, and the size path is a hardcoded string in five more places
-#' including `config_defaults.yml`. Renaming would drag the simulator configs in
-#' for no gain over a stamp.
-#'
-#' WHY A FILE AND NOT ONLY THE ATTRIBUTE. `attach_pop_provenance()`'s attribute is
-#' explicitly fragile -- any operation that strips attributes drops the guard
-#' silently, and a prep artefact passes through many. A sidecar survives that.
-#'
-#' THE ONE EXCEPTION: `episodes.key`. A composite policy reduces the SAME
-#' episode universe in different ways; the episode key changes what an episode
-#' IS (one row per LP-season vs one per gid-season). Those are different
-#' artefacts that must coexist, so the prep path builders carry an "_ep-gs"
-#' token under `gid_season` (empty by default, so the bare `list(baseline=)`
-#' call sites above still resolve the historical file). The key and a digest
-#' of the episode table are ALSO stamped here (`episode_key`,
-#' `episode_digest`), which is what `assert_episode_coherence()` compares.
-#'
-#' WHAT IT BUYS, precisely. `pop_digest` already moves when the population
-#' vector changes, and Layer 1 content-addresses the `mean_rate` path on it, so
-#' the NEXT hop is already protected without this stamp. What this adds is a
-#' LEGIBLE failure: `pop_source` reads "crosswalk" under every policy, so
-#' without it the eventual complaint is a bare digest mismatch that names no
-#' cause. With it, the policy that produced each side is on the record.
+#' Exception: `episodes.key` changes what an episode is, so `gid_season` prep
+#' files carry an `_ep-gs` path token and coexist with the default ones. The
+#' key and an episode-table digest (`episode_key`, `episode_digest`) are also
+#' stamped here; `assert_episode_coherence()` compares them.
 prep_policy_stamp_path <- function(path) {
   paste0(tools::file_path_sans_ext(path), ".policy.rds")
 }
@@ -661,7 +575,7 @@ prep_stamp_inherit <- function(upstream_path) {
 # Episode fingerprint (cross-track episode definition)
 # ===========================================================================
 #
-# Four prep scripts, four fits and the simulator all have to agree on what ONE
+# Four prep scripts, four fits and the simulator all have to agree on what one
 # outbreak episode is. Under `episodes.key: gid_season` every prep output is
 # stamped with a digest of the canonical (gid, year_seas, TL, TR) table built
 # by utils/footprint.R::build_canonical_episodes(); every loader checks its own
@@ -1028,7 +942,7 @@ sim_episode_check <- function(
       recs[[n]] <- episode_stamp_of(p)
     }
   }
-  # The run's OWN declared key is a participant too: a historical (lp_season)
+  # The run's own declared key is a participant too: a historical (lp_season)
   # config must not consume gid_season fits/panels even when those agree with
   # each other. (gid_season is already enforced by require_gid_season below.)
   if (!identical(episode_key, "gid_season") && length(recs)) {
@@ -1049,7 +963,7 @@ sim_episode_check <- function(
 #'
 #' Deploy-side authority for a generated simulator config's episode
 #' definition (deploy_prod_run.R -> make_forecast_configs.R /
-#' make_hindcast_configs.R). The deploy YAML's `deploy.episodes.key` is the ONE
+#' make_hindcast_configs.R). The deploy YAML's `deploy.episodes.key` is the one
 #' declaration for a rollout; this writes it into every generated config
 #' (top-level `episodes.key`) so no template can silently fall back to the
 #' historical definition. Rules:
@@ -1505,27 +1419,12 @@ resolve_inherited_episode_key <- function(opt, upstream_path, track) {
 # The size estimand stamp
 # ===========================================================================
 #
-# WHY a whole stamp for four scalars. The size mean is
-#
-#     mu_i = pop_i * mean_rate_{c(i)} * exp(eta_i)
-#
-# with BOTH offsets FIXED. The likelihood therefore never estimates the
-# absolute scale -- it lives entirely in the two denominators, and the fitted
-# `exp(eta)` is only meaningful relative to them. Pairing a fit whose
-# offset(log(pop)) was a whole-gid population with a `mean_rate` table built on
-# a reporting footprint is not a mild inconsistency; it is a dimensional error
-# that silently multiplies every prediction by 1/coverage.
-#
-# The existing machinery cannot catch it. `assert_pop_provenance()` compares
-# population DIGESTS, so it fires when the two sides used different population
-# *numbers* -- but `Q x rbar^H` uses the correct numbers on both sides and is
-# still wrong, because it uses them as different *units*. Digests see bytes,
-# not semantics. This stamp is the semantic layer.
-#
-# Design mirrors `prep_policy_stamp()` deliberately: a pure builder, a
-# structural slot plus an attribute for carriage, a compare that returns one
-# string per disagreeing field, and an assert on top. Readers must not have to
-# know which producer wrote the artefact they are holding.
+# The size mean mu_i = pop_i * mean_rate_{c(i)} * exp(eta_i) has both offsets
+# fixed, so its absolute scale lives entirely in the two denominators. A fit
+# and a mean_rate table built on different denominator UNITS (whole gid vs
+# reporting footprint) scale every prediction by 1/coverage, and
+# assert_pop_provenance() cannot see it (it compares digests, not meaning).
+# This stamp is that semantic check; its design mirrors prep_policy_stamp().
 
 SIZE_ESTIMAND_DENOMINATORS <- c("gid", "footprint")
 SIZE_POP_ELASTICITY_MODES <- c("fixed", "free", "free_by_level")
@@ -1592,7 +1491,7 @@ estimand_spec <- function(track = "size") {
 #'     the bug while the config claims otherwise.
 #'
 #' Absent keys DO default (to today's deployed behaviour), so every existing
-#' config keeps running unchanged -- on BOTH tracks. `footprint` + `fixed` is
+#' config keeps running unchanged -- on both tracks. `footprint` + `fixed` is
 #' what mon has always done implicitly.
 .resolve_track_estimand <- function(opt, track = "size") {
   spec <- estimand_spec(track)
@@ -1970,40 +1869,24 @@ assert_size_estimand <- function(
 
 #' build_mean_rate_table
 #'
-#' ONE country x admin-level `mean_rate` table, in place of a single global
-#' scalar (`mean(suspected_cases/pop)` over ALL of Africa). Built ONCE, globally --
-#' across every country and all
-#' three admin levels -- and persisted (see `persist_mean_rate_table()`) so every
-#' fit script and the simulator read the SAME artefact instead of each
-#' re-deriving its own number.
+#' One global country x admin-level `mean_rate` table, persisted by
+#' `persist_mean_rate_table()` so every fit and the simulator read the same
+#' artefact. It reads the raw analysis data from `path` itself, not
+#' `read_size_data()`'s output, because that admin-level filter would drop the
+#' rows that key the level contrasts. The min_pop / max_attack_rate /
+#' non-NA-TL-TR guards are applied as in `read_size_data()`; `opt$country` is
+#' ignored.
 #'
-#' This function loads the raw analysis-data RDS itself (via
-#' `path`) rather than taking an already-`read_size_data()`-filtered `size_dat`,
-#' because `read_size_data()` applies `apply_admin_level_filter(opt$size$admin_level)`,
-#' which drops rows at OTHER admin levels -- exactly the rows this table needs
-#' to key ADM1 vs ADM2 vs ADM3 contrasts. Applying that filter here would
-#' silently let ADM3 rows survive an "ADM1-ADM2" filter. The min_pop / max_attack_rate /
-#' non-NA-TL-TR quality guards ARE applied (identically to `read_size_data()`),
-#' and `opt$country` is deliberately ignored -- this is a global artefact, not
-#' scoped to whatever country subset one particular fit call restricts to.
-#'
-#' Estimator: the offset enters the model as `log(mean_rate)` in a
-#' log-link NB-GLMM, so cell/parent/group/global centres are always computed
-#' on the log scale (geometric mean), regardless of `opt$size$mean_rate$estimator`.
-#' That option only changes the *reported* `mr_raw` diagnostic column (the
-#' unshrunk empirical cell estimate) -- `arithmetic` and `pooled` are provided
-#' for QC comparison against legacy behaviour, never for the production value.
-#'
-#' Fallback ladder (all arithmetic on the log scale, provenance-tagged
-#' via `mr_tier` -- see `resolve_mean_rate()` for T3/T4/T5, applied at join time):
-#'   T1 own (country, level) cell, n>=1: EB-shrunk toward the country's
-#'      level-adjusted parent rate. `w = n/(n+k)`, `k = sigma2_within /
-#'      tau2_between`, estimated from this call's data, never hard-coded.
-#'   T2 country present, this level absent: country parent + `L(level)`.
-#'   (T3/T4/T5 are resolved by `resolve_mean_rate()` against `$group`/`$global`.)
-#' `L(level)` is the country-demeaned admin-level contrast (ADM1 = 0
-#' reference); a level whose 95% CI crosses 0 is gated to 0 rather than
-#' applying a noise estimate.
+#' Centres are always geometric (log scale), since the offset enters as
+#' `log(mean_rate)`; `opt$size$mean_rate$estimator` changes only the reported
+#' `mr_raw` diagnostic. Fallback ladder (tagged in `mr_tier`):
+#'   T1 own (country, level) cell, n >= 1: EB-shrunk toward the country's
+#'      level-adjusted parent, `w = n/(n+k)`, `k = sigma2_within / tau2_between`
+#'      estimated from the data.
+#'   T2 country present, level absent: country parent + `L(level)`.
+#'   T3/T4/T5: resolved at join time by `resolve_mean_rate()`.
+#' `L(level)` is the country-demeaned admin-level contrast (ADM1 = 0); a level
+#' whose 95% CI crosses 0 is set to 0.
 #'
 #' @param opt options list (`opt$size$min_pop`, `opt$size$max_attack_rate`,
 #'   `opt$size$mean_rate$estimator`; `opt$country` ignored, see above).
@@ -2182,28 +2065,14 @@ build_mean_rate_table <- function(
 
   # --- L(level): country-demeaned admin-level contrast vs ADM1, CI-gated ----
   #
-  # `level_factor` is a FALLBACK AND BORROWING device, not a model
-  # term. It encodes "finer admin units have higher cases per person, so scale
-  # by this much when borrowing a rate across levels", and it is used in three
-  # places: to level-adjust rows before forming country/group/global parents, to
-  # re-inflate a borrowed country parent to the target level (T2), and likewise
-  # for T3/T4.
-  #
-  # Why removal is defensible: measured on the deployed frame, 616 of 616 gids
-  # resolve at T1 -- every cell has its own data, so the borrowing path never
-  # fires. `level_factor` reaches T1 cells only through the shrinkage target, at
-  # a median parent weight of 1.4-4.5%, and dropping it moves the frame
-  # aggregate by 0.35% (x0.9965). It also does NOT vanish on its own once the
-  # denominator is fixed: under Q it is ADM2 +0.600 [0.415, 0.785], ADM3 +0.502
-  # [0.241, 0.763], both kept by the CI gate. Removal is a decision, not a
-  # consequence.
-  #
-  # WARNING -- this is only near-free BECAUSE the frame equals the outbreak
-  # corpus. Once the frame extends to gids with no outbreak history (the
-  # projection case) T2/T3/T4 fire, and `level_factor` is the only thing keeping
-  # a borrowed ADM1 parent rate from being applied unadjusted to a finer cell.
-  # If the frame is expanded, either restore it or replace it with an explicit
-  # in-model level term. Default stays TRUE so no existing run changes.
+  # `level_factor` is a fallback and borrowing device, not a model term: it
+  # scales a rate borrowed across admin levels (level-adjusting rows before
+  # forming parents, re-inflating borrowed parents at T2-T4). On the deployed
+  # frame every gid resolves at T1, so dropping it is near-free.
+  # WARNING: that holds only while the frame equals the outbreak corpus. If the
+  # frame grows to gids with no outbreak history, T2-T4 fire and level_factor is
+  # what adjusts a borrowed ADM1 rate: restore it or replace it with an in-model
+  # level term. Default stays TRUE.
   use_level_factor <- opt$size$mean_rate$level_factor %||% TRUE
 
   multi_level <- d %>%
@@ -2429,7 +2298,7 @@ build_mean_rate_table <- function(
 #' The ONLY lookup path a consumer should ever use to obtain a `mean_rate`
 #' from a table built by `build_mean_rate_table()`. Fit time (`read_size_data()`)
 #' and simulate time (`build_location_frame()`) both call this same function
-#' on the SAME persisted table, so the two sides cannot drift. Resolves
+#' on the same persisted table, so the two sides cannot drift. Resolves
 #' T1/T2 by exact (country, admin_level) match against `mrt$cell`; falls
 #' through to T3 (`mrt$group`, via `mrt$meta$country_group`) and T4
 #' (`mrt$global`) for countries entirely absent from the training data; T5
@@ -2490,8 +2359,8 @@ resolve_mean_rate <- function(country, admin_level, mrt) {
 #' `read_size_data()`'s return value to the shared, run-invariant sidecar path
 #' (`make_size_run_file(opt, "size_mean_rate")` -- deliberately excludes the
 #' per-run tokens country/admin_level/family/... so every 04_fit_siz_*.R
-#' invocation resolves to the SAME file and none of them recomputes a second
-#' copy), and assert that `data$mean_rate` reconciles EXACTLY against a fresh
+#' invocation resolves to the same file and none of them recomputes a second
+#' copy), and assert that `data$mean_rate` reconciles exactly against a fresh
 #' lookup in the ON-DISK sidecar -- catching any
 #' drift between what this run computed in-memory and what is persisted for
 #' every other consumer. Call once, immediately after `read_size_data()`, from
@@ -2616,19 +2485,12 @@ manifest_add_provenance <- function(manifest, name, value, default) {
 # ---------------------------------------------------------------------------
 # Processing-step counts (supplementary table S1, the processing cascade)
 # ---------------------------------------------------------------------------
-# The early pipeline steps (00 ingest, 01 outbreak preprocessing, 02 crosswalk)
-# write their record / location-period counts once to
-# generated_data/prep_counts/<step>.yml, read by
-# 09's report_dataset (utils/results_derive.R) for the cascade table. The 03
-# prep steps keep theirs in the .policy.rds stamps (prep_policy_stamp()).
-#
-# The file also records the outbreak-database directory the
-# step read (`indir`, normalised) and its last component (`data_vintage`, e.g.
-# outbreak_data_Aug_2026; default paths.R::default_outbreak_data_dir()), so the
-# cascade says which snapshot each count comes from and a data leg run on two
-# vintages is visible. Both are metadata, not counts: read_step_counts() leaves
-# them out (its return shape stays the one report_cascade() expects: step,
-# written, counts), read_step_provenance() returns them (NA in older files).
+# Steps 00-02 write record / location-period counts to
+# generated_data/prep_counts/<step>.yml for 09's report_dataset cascade table
+# (03 keeps its counts in the .policy.rds stamps). Each file also records the
+# outbreak-database `indir` and `data_vintage`: metadata that
+# read_step_counts() leaves out and read_step_provenance() returns (NA in
+# older files).
 
 #' Keys of a count file that are metadata, not counts (reserved in `counts`).
 .STEP_COUNTS_META <- c("step", "written", "indir", "data_vintage")

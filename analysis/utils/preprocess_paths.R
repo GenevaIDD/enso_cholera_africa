@@ -108,28 +108,23 @@ if (!is.null(deploy_yaml)) {
   )
 }
 
-# Prints, one per line on stdout:
+# Prints KEY=value lines on stdout:
 #   OUTBREAK_VINTAGE=<paths.R::OUTBREAK_DATA_VINTAGE>
 #   VINTAGE_DIR=<default_outbreak_data_dir(), ~ expanded>
 #   SECURE_ROOT=<SECURE_OUTBREAK_DIR, no trailing slash>
-# and with --deploy (the deploy YAML's deploy.episodes block, which selects the
-# national-zero months 01_preprocess_national_zero_months.R must build):
-#   NZ_RULE=<national_zero_rule, "" = legacy>
-#   NZ_THRESHOLD=<national_zero_threshold, 0 = exact zeros>
-# plus what stages/03_prepare.sh passes to the 03 steps:
-#   EPISODE_KEY=<episodes.key>
-#   AT_RISK_START=<episodes.at_risk_start>   ADM1_OVERLAP=<episodes.adm1_overlap>
-#   ENSO_CONT_ARGS=<03_prepare_sim_panel_projection.R flags of
-#                   deploy.enso_continuation>
-#   CFSV2_ARGS=<its CFSv2 correction flags, from the sim.forecast overlay's
-#               simulator.enso.cfsv2_calibration[_target]; "" = the default>
-# and with --outputs, the files the 01-02 steps write (to copy back from the
+# With --deploy (deploy.episodes: the national-zero months 01 builds, and the
+# flags stages/03_prepare.sh passes to the 03 steps):
+#   NZ_RULE ("" = legacy), NZ_THRESHOLD (0 = exact zeros), EPISODE_KEY,
+#   AT_RISK_START, ADM1_OVERLAP
+#   ENSO_CONT_ARGS  03_prepare_sim_panel_projection.R flags
+#                   (deploy.enso_continuation)
+#   CFSV2_ARGS      CFSv2 correction flags from the sim.forecast overlay's
+#                   simulator.enso.cfsv2_calibration[_target] ("" = default)
+# With --outputs, the files the 01-02 steps write (to copy back from the
 # cluster):
-#   SEC=<path>   under SECURE_ROOT (outbreak-identifying); SECDIR= a folder
-#   GEN=<path>   under the repo root (generated_data/); GENDIR= a folder
-# The population artefacts follow -C <config> (its population: block); the
-# national-zero months follow --deploy. The 02 crosswalk / climate outputs are
-# the fixed generated_data/ names those scripts write.
+#   SEC= / SECDIR=  file / folder under SECURE_ROOT (outbreak-identifying)
+#   GEN= / GENDIR=  file / folder under generated_data/
+# Population artefacts follow -C <config>; national-zero months --deploy.
 kv <- function(k, v) cat(sprintf("%s=%s\n", k, v))
 kv("OUTBREAK_VINTAGE", OUTBREAK_DATA_VINTAGE)
 kv("VINTAGE_DIR", path.expand(default_outbreak_data_dir()))

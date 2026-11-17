@@ -31,32 +31,16 @@ source("analysis/utils/who_annual.R")
 source("analysis/utils/national_zero.R")
 
 # 2. Options -------------------------------------------------------------------
-# Rule (utils/national_zero.R):
-#   ((national 0 AND no WHO > 0) OR (WHO 0 AND no national > 0))
-#     AND no sub-national cases that month AND no active database outbreak
-#     AND not excluded (default ETH 2011-2014, AWD-era WHO zeros).
-# Inputs: <indir>/time_series_preoutbreak_extraction.rds (the weekly series
-#   01_preprocess_outbreaks.R reads); ~/secure/cholera_outbreak_data/
-#   outbreak_metadata.rds (01_preprocess_outbreaks.R); the WHO annual report +
-#   dashboard (utils/who_annual.R::build_who_annual_zero_mask()).
-# Threshold variant (--zero_threshold N > 0): WHO country-years with fewer
-#   than N cases (max over sources) also count, except the last --window
-#   months unless the next year is also below N (an episode's >= 50 cases can
-#   run into the next year); country-years whose database episode cases
-#   exceed --db_tolerance x the WHO total are left out of that branch
-#   (utils/national_zero.R::db_who_consistency()).
-# Named rule (--rule): a parameter set of analysis/national_zero_rules.yml
-#   (`legacy` = these options' defaults, read from the registry; `r2` = head
-#   guard 4, consistency scope all, ETH 2010-2016). Under a rule its
-#   parameters win; an explicitly passed option that differs from the rule is
-#   an error. The threshold stays --zero_threshold.
-# Outputs: ~/secure/cholera_outbreak_data/national_zero_months.rds
-#   (make_national_zero_months_file()), national_zero_months_t<N>[_<rule>].rds
-#   for a threshold / rule, + its .policy.rds sidecar, the D32 audit
-#   (<months>.audit.csv, national_zero_audit()) and the database-vs-WHO table
-#   (national_zero_months[_t<N>]_db_who_consistency.csv on the rule-free stem,
-#   read by report_who_scale).
-# One source for today's parameters: the registry's legacy entry.
+# Rule (utils/national_zero.R): ((national 0 AND no WHO > 0) OR (WHO 0 AND
+# no national > 0)) AND no sub-national cases AND no active database outbreak
+# AND not excluded (default ETH 2011-2014).
+# --zero_threshold N: WHO country-years under N cases also count (see
+# national_zero.R::db_who_consistency() for the exclusions). --rule: a named
+# parameter set from analysis/national_zero_rules.yml (`legacy` = defaults);
+# its parameters win, and a passed option that differs is an error.
+# Outputs: make_national_zero_months_file() (+ _t<N>[_<rule>] variants), the
+# .policy.rds sidecar, the audit CSV and the database-vs-WHO table read by
+# report_who_scale.
 NZ_LEGACY <- national_zero_rule_params("legacy")
 
 option_list <- list(

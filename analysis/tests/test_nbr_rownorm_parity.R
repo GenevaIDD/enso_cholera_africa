@@ -6,7 +6,7 @@
 # Details:
 #   Run from the project root. The occurrence fit's contagion columns
 #   (build_contagion_table(), 03_prepare_occ.R) and the simulator kernels
-#   (build_partition_nbr_kernel() -> v1 / spatPomp C) must yield the SAME
+#   (build_partition_nbr_kernel() -> v1 / spatPomp C) must yield the same
 #   value for the same ADM1 activity; both go through build_nbr_kernel().
 #   Pinned for every scale x partition, including a frame that is a strict
 #   subset of its partition (unseen_adm1: restrict), where the row-normalising

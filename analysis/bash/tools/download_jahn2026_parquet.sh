@@ -3,39 +3,26 @@
 # CHIRPSv3 / ERA5-Land parquet observations for Africa from the public Box share.
 #
 # Usage:
-#   bash analysis/bash/tools/download_jahn2026_parquet.sh                       # all 48 African countries (3.60 GB)
-#   bash analysis/bash/tools/download_jahn2026_parquet.sh --iso3 LSO,STP,COM    # subset (smoke test)
-#   bash analysis/bash/tools/download_jahn2026_parquet.sh --dry-run             # print the plan and total bytes
-#   bash analysis/bash/tools/download_jahn2026_parquet.sh --outdir /scratch/cp   # alternative landing zone
+#   bash analysis/bash/tools/download_jahn2026_parquet.sh                     # all countries
+#   bash analysis/bash/tools/download_jahn2026_parquet.sh --iso3 LSO,STP,COM  # subset
+#   bash analysis/bash/tools/download_jahn2026_parquet.sh --dry-run           # plan + bytes
+#   bash analysis/bash/tools/download_jahn2026_parquet.sh --outdir /scratch/cp
 #
-# WHY THIS EXISTS
-# ---------------
-# generated_data/climate_stats.sqlite covers only 751 of the 2,218 gids the
-# population crosswalk needs, and its Ghana rows are cartesian-inflated (three
-# gids hold 99.7% of the 8.5 GB file — see analysis/utils.R:493's
-# purrr::reduce(full_join) over a substring file match). The upstream author has
-# since released the same product as one parquet file PER ADMIN UNIT covering
-# 1981-01-01..2024-12-31, which both closes the coverage gap for all of Africa
-# and structurally removes the join that caused the corruption.
+# One parquet file per admin unit, 1981-01-01..2024-12-31; it covers gids the
+# climate_stats.sqlite lacks. Lands in data/climate_parquet/ (not
+# data/climate_data/), so 02_preprocess_climate.R can read either source
+# (--climate_source csv|parquet).
 #
-# Landing zone is data/climate_parquet/, deliberately NOT data/climate_data/, so
-# the CSV corpus stays byte-untouched and 02_preprocess_climate.R can be pointed at
-# either source (--climate_source csv|parquet) for old-vs-new comparison.
-#
-# CONSTRAINTS
-#   * Box rejects HTTP Range requests (400), so a partial download cannot be
-#     continued and individual zip members cannot be fetched remotely. Archives
-#     are downloaded whole, to a .part file, and only promoted once the byte
-#     count matches the manifest. That is why there is no --resume flag: a
-#     country is either fully extracted (and skipped) or refetched from scratch.
-#   * The share needs no authentication, but it is a browser endpoint — the
-#     User-Agent below matters.
+# Box rejects HTTP Range requests: archives download whole to a .part file and
+# are promoted only when the byte count matches the manifest, so there is no
+# --resume (a country is extracted or refetched). The share is a browser
+# endpoint; the User-Agent below matters.
 #
 # Steps:
 #   1. Read analysis/data_manifests/jahn2026_africa_zips.tsv (iso3, file_id, bytes).
-#   2. Skip any country already extracted; download + size-verify + unzip the rest.
-#   3. Append iso3/bytes/sha256/timestamp to <outdir>/DOWNLOAD_MANIFEST.tsv, which
-#      02_preprocess_climate.R stamps into generated_data/climate_db_provenance.yml.
+#   2. Skip extracted countries; download, size-check and unzip the rest.
+#   3. Append iso3 / bytes / sha256 / time to <outdir>/DOWNLOAD_MANIFEST.tsv,
+#      which 02_preprocess_climate.R stamps into climate_db_provenance.yml.
 
 set -euo pipefail
 

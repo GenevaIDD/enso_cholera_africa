@@ -19,28 +19,14 @@
 #
 # See: analysis/utils/README.md
 
-# Why anchors exist. Every track's linear predictor is
-# `mu = <offsets> * exp(intercept + ...)`, and the `Intercept` prior is a
-# statement about `exp(intercept)`. Without an anchor, offsets that multiply by
-# exposure-days and/or raw population make the prior-predictive total
-# overshoot the observed total by 10^2-10^3 before any random effect
-# contributes. The size track was well behaved because it carries an empirical
-# per-row rate anchor, `offset(log(mean_rate))`, so its intercept only corrects
-# a small residual. This module generalises that mechanism to every track, so
-# that for each one
-#
-#     denominator(anchor) == product of that track's OTHER offsets
-#
-# and `exp(intercept) ~ 1` is the right prior scale everywhere: one intercept
-# default (`normal(0, 1)`).
-#
-# Relation to provenance.R: `build_mean_rate_table()` / `resolve_mean_rate()` /
-# `persist_mean_rate_table()` are the size-track originals and stay untouched.
-# The table schema here is deliberately identical (`cell` / `group` / `global`
-# / `meta`, same T1-T5 tier labels, same `mean_rate` column name), which lets
-# `resolve_base_rate()` delegate to `resolve_mean_rate()` instead of
-# duplicating the fallback ladder, and lets the size track be built through
-# either function and compared cell-for-cell.
+# Why anchors exist: mu = <offsets> * exp(intercept + ...), so without an
+# anchor the offsets alone push the prior-predictive total far above the
+# observed one. Each track gets an empirical rate anchor such that
+#   denominator(anchor) == product of that track's other offsets,
+# so exp(intercept) ~ 1 and one intercept prior, normal(0, 1), fits every track.
+# The table schema matches provenance.R's size-track mean-rate table (cell /
+# group / global / meta, tiers T1-T5, column mean_rate), so
+# resolve_base_rate() delegates to resolve_mean_rate() for the fallback ladder.
 
 # ---------------------------------------------------------------------------
 # Track registry
@@ -184,7 +170,7 @@ anchor_enabled <- function(opt, track) {
 #
 # Each view applies that track's own quality guards but deliberately NOT the
 # country or admin_level subsetting its fit-time loader applies. Same deviation,
-# and same reason, as `build_mean_rate_table()` (provenance.R:769-774): the anchor
+# and same reason, as `build_mean_rate_table()` (provenance.R): the anchor
 # table is GLOBAL -- built once, shared by every country/group/backend config --
 # so a per-run subset in here would make one run's table disagree with another's
 # while both resolve to the same filename.
@@ -216,7 +202,8 @@ anchor_enabled <- function(opt, track) {
 
 #' Duration view: cessations per exposure-day.
 #'
-#' `den` reproduces `dur_data.R:350`'s `log_offset = log(pmax(exposure, 1))`.
+#' `den` reproduces `dur_data.R::make_duration_panel()`'s `log_offset =
+#' log(pmax(exposure, 1))`.
 .dur_anchor_view <- function(opt, d) {
   if (isTRUE((opt$duration %||% list())$canonical_admin_level)) {
     d <- .apply_p3(d, opt, "duration", tag = "build_base_rate_table/dur/P3")
@@ -286,7 +273,7 @@ anchor_enabled <- function(opt, track) {
 
 #' Size view: cases per person, on the DECLARED population denominator.
 #'
-#' Reproduces `build_mean_rate_table()`'s P0/P2/P3 preamble (provenance.R:741-784)
+#' Reproduces `build_mean_rate_table()`'s P0/P2/P3 preamble (provenance.R)
 #' verbatim in effect: estimand-resolved `pop` column, canonical admin level, and
 #' the `min_pop` / `max_attack_rate` quality guards. Those are genuinely
 #' size-specific (they police a population denominator the other three tracks
@@ -335,43 +322,19 @@ anchor_enabled <- function(opt, track) {
 # like-for-like refit of an archived size fit needs.
 #' Build the estimator engine for a view.
 #'
-#' Both estimators reduce to the same three primitives, which is what lets the
-#' table assembly below be written once:
-#'
-#'   `units`    the rows the parents aggregate over -- observations for
-#'              `geometric`, (country, admin_level) cells for `pooled`.
-#'   `agg_adj`  a subset of `units` -> its ADM1-EQUIVALENT log rate (used for the
-#'              country / ENSO-group / global parents, which pool across levels
-#'              and so must be level-adjusted first).
-#'   `agg_raw`  a subset of `units` -> its log rate AS OBSERVED (used for own-cell
-#'              and own-(group, level) estimates, which are already single-level).
-#'
-#' GEOMETRIC (size original, provenance.R:822-953)
-#'   Cell estimate is `mean(log(num/den))`; the EB weight is `n/(n + k)` with
-#'   `k = sigma2_within / tau2_between` -- a variance-ratio shrinkage in which
-#'   `n` counts OBSERVATIONS.
-#'
-#' POOLED (occ / dur / mon)
-#'   Cell estimate is `log(Y_c / E_c)` with `Y_c = sum(num)`, `E_c = sum(den)`.
-#'   There is no `sigma2_within` analogue -- a cell's sampling variance is not
-#'   estimated from a spread of per-row log rates (there are none: most rows are
-#'   0), it is implied by the Poisson likelihood. The delta-method variance of
-#'   `log(Y/E)` under `Y ~ Poisson(E r)` is `1/Y`, so the EB weight is
-#'
-#'       w = tau2 / (tau2 + 1/Y)  =  Y / (Y + 1/tau2)
-#'
-#'   which is EXACTLY the existing `n/(n + k)` form under two substitutions:
-#'   `n := Y_c` (event count, not row count) and `k := 1/tau2_between`. The
-#'   shrinkage code below is therefore shared verbatim; only these two inputs
-#'   change. `tau2_between` is a method-of-moments estimate over cells with at
-#'   least one event: `var(log r_c) - mean(1/Y_c)`, i.e. observed spread minus
-#'   expected sampling noise, floored at 1e-6.
-#'
-#'   Zero-event cells (`Y_c = 0`) get `w = 0` and fall back to the parent
-#'   EXACTLY, tier "T1-zero" -- a distinct label from T2 ("cell absent entirely")
-#'   so diagnostics can tell "observed, saw nothing" from "never observed". No
-#'   continuity correction: a `+0.5` would bias each cell by an amount varying
-#'   with its own `E_c`, whereas the parents already pool the whole corpus.
+#' Both estimators reduce to three primitives, so the table assembly is written
+#' once: `units` (observations for `geometric`, (country, admin_level) cells
+#' for `pooled`); `agg_adj` (a subset of units -> its ADM1-equivalent log rate,
+#' for the parents that pool across levels); `agg_raw` (-> its log rate as
+#' observed, for single-level estimates).
+#'   geometric: cell estimate `mean(log(num/den))`, EB weight `n/(n + k)`,
+#'     `k = sigma2_within / tau2_between`, `n` = observations.
+#'   pooled: cell estimate `log(Y_c / E_c)`; the delta-method variance of
+#'     `log(Y/E)` is `1/Y`, so `w = Y / (Y + 1/tau2)`: the same `n/(n + k)` form
+#'     with `n := Y_c`, `k := 1/tau2_between`. `tau2_between` is
+#'     `var(log r_c) - mean(1/Y_c)` over cells with an event, floored at 1e-6.
+#'     Zero-event cells get `w = 0` (parent exactly, tier "T1-zero"); no
+#'     continuity correction.
 #'
 #' @param d view tibble (country, admin_level, num, den), post-guards.
 #' @param estimator "geometric" | "arithmetic" | "pooled".
@@ -468,7 +431,7 @@ anchor_enabled <- function(opt, track) {
 #' Cross-admin-level contrast `L(level)`, CI-gated.
 #'
 #' Same device, same gate and same default as `build_mean_rate_table()`
-#' (provenance.R:837-897): a fallback/borrowing correction that says "finer admin
+#' (provenance.R): a fallback/borrowing correction that says "finer admin
 #' units have higher events per unit exposure, so scale by this much when
 #' borrowing a rate across levels". It is estimated country-demeaned so that
 #' between-country variation cannot masquerade as a level effect, and any
@@ -563,31 +526,26 @@ anchor_enabled <- function(opt, track) {
 
 #' Build the shared empirical baseline-rate table for one track.
 #'
-#' The generalisation of `build_mean_rate_table()` (provenance.R:718) to all four
-#' tracks. Same output schema, same five-tier fallback ladder, same
-#' `cross_absent_levels` switch, same reconciliation contract -- the differences
-#' are exactly two: the per-track view (which numerator over which denominator)
-#' and the estimator (see `.anchor_engine()`).
+#' `build_mean_rate_table()` (provenance.R) generalised to all four tracks:
+#' same schema, tier ladder, `cross_absent_levels` switch and reconciliation
+#' contract; only the per-track view and the estimator (`.anchor_engine()`)
+#' differ.
 #'
 #' Tiers, cheapest first:
-#'   T1       own (country, admin_level) cell, EB-shrunk toward its country parent
-#'   T1-zero  cell observed but with zero events -- parent exactly (pooled only)
-#'   T2       country seen, this level not -- country parent, level-adjusted
-#'   T3-own   country unseen -- its ENSO group's own (group, level) estimate
+#'   T1       own (country, admin_level) cell, EB-shrunk toward its country
+#'   T1-zero  cell observed with zero events: parent exactly (pooled only)
+#'   T2       country seen, level not: country parent, level-adjusted
+#'   T3-own   country unseen: its ENSO group's own (group, level) estimate
 #'   T3-parent  ... or the group parent, level-adjusted
-#'   T4       group unseen -- global parent, level-adjusted
-#'   T5       nothing resolves -- hard error in `resolve_base_rate()`, never a
-#'            silent default
+#'   T4       group unseen: global parent, level-adjusted
+#'   T5       nothing resolves: hard error in `resolve_base_rate()`
 #'
-#' Config (under `opt$<block>$base_rate`, or `opt$size$mean_rate` for size):
-#'   `estimator`            "pooled" | "geometric" | "arithmetic"
-#'   `level_factor`         TRUE (default) -- see `.anchor_level_factor()`
-#'   `cross_absent_levels`  TRUE (default) -- cross levels no row occupies, so a
-#'                          query at an unobserved level degrades to T2/T3/T4
-#'                          rather than erroring at T5
+#' Config (`opt$<block>$base_rate`, or `opt$size$mean_rate` for size):
+#' `estimator` ("pooled" | "geometric" | "arithmetic"), `level_factor` and
+#' `cross_absent_levels` (both TRUE by default; the latter lets a query at an
+#' unobserved level degrade to T2-T4 instead of T5).
 #'
-#' @param opt options list. NOTE `opt$country` is deliberately IGNORED: this
-#'   table is global, see the views' comment above.
+#' @param opt options list. `opt$country` is ignored: the table is global.
 #' @param track "occ" | "dur" | "mon" | "siz".
 #' @param path override for the prepared panel (default: the track's own
 #'   `make_*_dat_file(opt)`).
@@ -619,7 +577,7 @@ build_base_rate_table <- function(
   d_in <- readRDS(path)
 
   # Capture the population stamp BEFORE the guards, for the same reason the size
-  # original does (provenance.R:724-731): `summarise()` builds a fresh frame and
+  # original does (provenance.R): `summarise()` builds a fresh frame and
   # drops non-standard attributes, so reading it here keeps this function
   # independent of which side of that line any dplyr verb falls on today.
   pop_prov_in <- if (isTRUE(spec$has_pop)) get_pop_provenance(d_in) else NULL
@@ -628,7 +586,7 @@ build_base_rate_table <- function(
   # this function and make_size_run_file()/build_mean_rate_table() cannot disagree
   # about which estimator an under-specified config asked for -- see that
   # helper's doc comment for the silent wrong-table failure it closes. occ/dur/
-  # mon have no such split: their path builders (paths.R:193/615/695) already
+  # mon have no such split: their path builders (paths.R) already
   # hardcode the same "pooled" that `spec$estimator` carries.
   estimator <- if (identical(track, "siz")) {
     size_mean_rate_estimator(opt)
@@ -979,7 +937,7 @@ build_base_rate_table <- function(
         levels_present = paste(valid_levels, collapse = "/"),
         # Which admin_level column this table's cells are keyed on. Recorded
         # because the replay side (.resolve_frame_anchor(), utils/simulator_core.R)
-        # must join on the SAME convention -- the frame carries both the corpus
+        # must join on the same convention -- the frame carries both the corpus
         # label and the canonical one, and picking the wrong column silently
         # resolves a different cell. Same expression `.mon_anchor_view()` gates on.
         canonical_admin_level = isTRUE(
@@ -993,7 +951,7 @@ build_base_rate_table <- function(
   if (identical(track, "siz")) {
     # Structural, not an attribute -- `summarise()` drops attributes, and this
     # table is the side of the seam most likely to be reached via a rebuilt
-    # object. Mirrors provenance.R:997-1003.
+    # object. Mirrors provenance.R::build_mean_rate_table().
     meta$size_estimand <- build_size_estimand_stamp(
       opt,
       extra = list(
@@ -1024,8 +982,8 @@ build_base_rate_table <- function(
 
 #' The ONLY lookup path a consumer should use to obtain a baseline-rate anchor.
 #'
-#' A thin delegate to `resolve_mean_rate()` (provenance.R:1025). This is not
-#' laziness: `build_base_rate_table()` emits the SAME `cell`/`group`/`global`/`meta`
+#' A thin delegate to `resolve_mean_rate()` (provenance.R). This is not
+#' laziness: `build_base_rate_table()` emits the same `cell`/`group`/`global`/`meta`
 #' schema as `build_mean_rate_table()` precisely so the T1->T5 fallback ladder does
 #' not have to exist twice. Two copies of a five-tier fallback chain is exactly
 #' the kind of duplication that drifts silently -- fit time and simulate time
@@ -1043,12 +1001,12 @@ resolve_base_rate <- function(country, admin_level, brt) {
 #' Join a track's resolved anchor onto a model frame.
 #'
 #' Adds `spec$column` (and `spec$tier_col`) and stashes the table itself on the
-#' frame as `attr(d, spec$attr_name)`, mirroring `siz_data.R:225-230`, so
-#' `persist_base_rate_table()` can reconcile in-memory against on-disk without the
-#' caller having to carry the table separately. The attribute is
+#' frame as `attr(d, spec$attr_name)`, mirroring `siz_data.R::read_size_data()`,
+#' so `persist_base_rate_table()` can reconcile in-memory against on-disk
+#' without the caller having to carry the table separately. The attribute is
 #' `"base_rate_table"` on occ/dur/mon and `"mean_rate_table"` on siz, which is
 #' what keeps provenance.R's `persist_mean_rate_table()` and
-#' `tests/gates_estimand_coherence.R:156` working against a frame the shared
+#' `tests/gates_estimand_coherence.R` working against a frame the shared
 #' builder produced.
 #'
 #' @param d model frame (must carry `country` and `admin_level`).
@@ -1073,7 +1031,7 @@ attach_base_rate <- function(d, opt, track, brt = NULL) {
 
 #' Persist a track's anchor table and assert it reconciles against the frame.
 #'
-#' Generalises `persist_mean_rate_table()` (provenance.R:1076). The sidecar path is
+#' Generalises `persist_mean_rate_table()` (provenance.R). The sidecar path is
 #' run-INVARIANT by construction (`make_run_file(opt, spec$kind)` -> the
 #' `*_base_rate` kinds, which carry no country/group/family/lag tokens), so every
 #' fit config that shares the same estimator -- and, where the denominator
@@ -1155,7 +1113,7 @@ persist_base_rate_table <- function(opt, track, data) {
 #' site is exactly how the `mean_rate_table_path` wiring ended up duplicated
 #' across six files, so it is answered once here.
 #'
-#' A track contributes a path only when BOTH hold:
+#' A track contributes a path only when both hold:
 #'   * an `opt` for it was supplied (i.e. that track is part of the run), and
 #'   * its fit was made with the anchor on (`<track>.offset_baserate: true`).
 #' Everything else yields NULL for that track, and a fully-NULL result is

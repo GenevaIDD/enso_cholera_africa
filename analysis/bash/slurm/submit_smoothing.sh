@@ -10,28 +10,17 @@
 # Submitted by analysis/bash/stages/08_smoothing.sh. Do not invoke directly.
 #
 #SBATCH --output=logs/%x_%A_%a.log
-# Partition: the cluster profile's BIGMEM class (lib/cluster.sh); list every
-# partition that can fit the job: SLURM starts it on the first with free
-# resources. Each must allow the --time below.
+# Partition: the cluster profile's BIGMEM class (lib/cluster.sh); SLURM starts
+# the job on the first listed partition with free resources. Each must allow
+# the --time below.
 #SBATCH --time=08:00:00
-# Memory: dominated by the particle store that spatPomp's bpfilter keeps to
-# build the smoothed trajectory (filter_traj=TRUE, spatpomp_core.R::
-# run_one_bpfilter_replicate(); save_states is NOT set on this path): every
-# resampled particle of every month and block, 11+ states × U × Np × M months
-# × 8 B, plus the ancestry vectors. Sized for country-partitioned runs
-# (partition_by=country) at Np=10000: the largest country (NGA, U=121, M=192)
-# ≈ 17 GB raw, ~28 GB peak once the fits/draws/panel (~6 GB) and extraction
-# copies are included → 35G leaves ~20% margin.
-# NB: full-TU runs (U≤319) or larger Np need much more (the deployed hmmCE unit
-# at Np=10000, ~213 months: ~90 GB peak) — bump --mem accordingly for those.
-# simulator.filter.traj_storage: pruned | pruned_float32 (config_defaults.yml)
-# keeps only the particles that are still ancestors of the current population
-# and cuts this store by an order of magnitude or more; it is the default
-# (deployed hmmCE unit at Np 30000, pruned_float32: 32 GB peak). The figures above
-# are for traj_storage: full.
-# 75G covers the pruned store on registry (transmission-unit) partitions, the
-# largest being the hmmCE unit (16 countries; ~40-45 GB at Np 30000),
-# and fits ~94 GB nodes. A traj_storage: full run needs 120G.
+# Memory is dominated by the particle store bpfilter keeps for the smoothed
+# trajectory (filter_traj, spatpomp_core.R::run_one_bpfilter_replicate()):
+# about states x U x Np x months x 8 B under traj_storage: full.
+# simulator.filter.traj_storage pruned | pruned_float32 (the default) keeps only
+# surviving ancestors and cuts it by an order of magnitude or more.
+# 75G covers the pruned store on registry (transmission-unit) partitions;
+# traj_storage: full needs about 120G. Raise --mem for larger Np.
 #SBATCH --mem=75G
 #SBATCH -c 1
 

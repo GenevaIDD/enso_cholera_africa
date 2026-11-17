@@ -460,30 +460,15 @@ generate_forecast_configs <- function(opt) {
   }
 
   # ---- Pass 1: per FIT GROUP -- deployed lags, firm horizon, anchors ---------
-  # Horizon: ENSO enters the model as enso_lag<L>; the covariate at forecast
-  # month M uses ONI at month (M - L). With ENSO available to month M_cfs, a group
-  # whose best lag is L can forecast out to M_cfs + L. Because the forecast uses
-  # an occurrence, a duration and a monthly case-count fit (each with its own best
-  # lag), the horizon is governed by min(best_lag_occ, best_lag_dur, best_lag_mon)
-  # so every ENSO covariate stays within the observed/forecast ENSO for every
-  # simulated month.
-  #
-  #   last_cfsv2_month   = max(target_range) from the cached CFSv2 metadata
-  #   firm_oni_end       = enso.R::enso_seam_month(last_cfsv2_month, seam): the
-  #                        last CFSv2 month (seam last_cfsv2, default) or the
-  #                        month before it (last_full_oni)
-  #   min_lag_g          = min(best_lag_occ_g, best_lag_dur_g, best_lag_mon_g)
-  #   horizon_end_g      = firm_oni_end %m+% months(min_lag_g) (closed: simulated)
-  #   africa_min_horizon = min_g horizon_end_g  (full-Africa aggregation cutoff)
-  #   projection_cal_end = max_g horizon_end_g  (projection panel must cover this)
-  #
-  # The lags are those of the DEPLOYED best-fit artefacts (--fits_dir, aka
-  # `grouping.fits_dir` in the forecast configs): what the grouped simulator
-  # loads at runtime, so the horizon math reads the `sl<N>` tag of these
-  # filenames (utils/paths.R::read_deployed_lag()), NOT the raw LOO ranking. The
-  # deploy orchestrator's best-lag rule (deploy_core.R::deploy_select_lags())
-  # picks these, so they can differ from `$ranking$single_lag[1]` in the LOO
-  # comparison RDS files.
+  # Horizon: the covariate at month M uses ONI at M - L, so with ENSO known to
+  # firm_oni_end a group forecasts to firm_oni_end + its min lag (occ/dur/mon):
+  #   firm_oni_end       = enso.R::enso_seam_month(last CFSv2 month, seam)
+  #   horizon_end_g      = firm_oni_end %m+% months(min_lag_g)  (closed)
+  #   africa_min_horizon = min_g horizon_end_g  (full-Africa cutoff)
+  #   projection_cal_end = max_g horizon_end_g  (projection panel must cover it)
+  # Lags come from the DEPLOYED fits in --fits_dir
+  # (paths.R::read_deployed_lag()), not the raw LOO ranking: the deploy's
+  # deploy_select_lags() may pick another lag.
   group_info <- list()
   for (g in groups) {
     # Deployed occ/dur/mon fits of this group (utils/paths.R::read_deployed_lag();
@@ -545,7 +530,7 @@ generate_forecast_configs <- function(opt) {
     isos <- reg$iso3[reg$group == g]
 
     # base_rate_table_paths: resolve HERE, at config-generation time, from each
-    # deployed fit's OWN training opt, so a missing sidecar stops this script
+    # deployed fit's own training opt, so a missing sidecar stops this script
     # instead of a SLURM array. resolve_base_rate_paths() does the anchor_enabled()
     # gate and the existence check, and returns NULL when no deployed fit was
     # trained with the anchor.

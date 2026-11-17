@@ -101,40 +101,20 @@ pit_size_nb <- function(fit, dat, response_var = "suspected_cases") {
 #' pit_duration_episode
 #'
 #' Randomized, right-censoring-aware PIT for the duration cessation-hazard
-#' model, collapsed to one value per EPISODE (not per active-month row).
-#'
-#' Math. The panel is Poisson-with-offset; per row i, posterior_epred() gives
-#' the fitted Poisson mean lambda_i on the response scale (offset included).
-#' Via the Holford/Laird-Olivier discrete-hazard identity, the implied
-#' per-month discrete hazard is q_i = 1 - exp(-lambda_i), so
-#'   log(1 - q_i) = -lambda_i                                   ... (*)
-#' exactly, with no need to compute q_i itself. For an episode observed
-#' through active-month row k (k = mso at the episode's LAST row in the
-#' panel), the within-episode survival function evaluated after month j is
-#'   S(j) = prod_{i=1}^{j} (1 - q_i) = exp( sum_{i=1}^{j} -lambda_i )
-#' i.e. a cumulative sum of (*) restricted to this episode's own rows.
-#'
-#' We only need S at the episode's last two months (S_end = S(k), and
-#' S_start = S(k-1) = S_end * exp(lambda_k)), which is exactly what a
-#' *global* cumulative sum over the whole (episode_id, mso)-sorted panel lets
-#' us read off with two lookups per episode (no per-episode R loop, no
-#' per-row within-group re-basing): global cumsum through the row BEFORE the
-#' episode starts is the additive baseline to subtract from the global
-#' cumsum through the episode's last row.
-#'
-#' PIT convention (standard randomized right-censored PIT; "uniform on
-#' [S(d_i), 1]" is read as the CDF-scale form below, which is the
-#' textbook Dunn-Smyth extension to censored data):
-#'   F(j) := 1 - S(j)
-#'   uncensored (event at month k): u ~ Uniform( F(k-1), F(k) )
-#'   censored   (still active after month k, at last observed row): u ~ Uniform( F(k), 1 )
+#' model, one value per episode. With the Poisson mean lambda_i per row, the
+#' discrete hazard gives log(1 - q_i) = -lambda_i, so the survival after month
+#' j is S(j) = exp(-sum_{i<=j} lambda_i). Both S(k) and S(k-1) at the episode's
+#' last row k come from one global cumulative sum over the (episode_id,
+#' mso)-sorted panel. With F = 1 - S:
+#'   event at month k:          u ~ Uniform(F(k-1), F(k))
+#'   censored after month k:    u ~ Uniform(F(k), 1)
 #'
 #' @param fit brms fit (duration / brms backend; Poisson, response `y`).
 #' @param dat the exact panel `fit` was trained on (e.g. `load_duration_data(opt)`
 #'   re-run against the same config). Must carry `episode_id`, `mso`, `ended`.
 #'   If `dat` has a `climate_missing` column, rows flagged TRUE are dropped
 #'   first (mirrors the silent NA-drop brms performs at fit time -- see
-#'   04_fit_dur_brms.R:144-159).
+#'   04_fit_dur_brms.R).
 #' @return list(u = matrix [n_draws x n_episodes], episode_id = chr vector,
 #'   ended = integer vector [1 = uncensored event, 0 = censored], aligned to
 #'   the episode_id vector).
@@ -178,7 +158,7 @@ pit_duration_episode <- function(fit, dat) {
 #' synthetic discrete-time hazard process without constructing a real brms fit
 #' (see analysis/tests/test_duration_dependence.R) -- the generative process
 #' for the test is exactly: draw lambda -> q = 1 - exp(-lambda) -> simulate
-#' Bernoulli(q) per active month -> feed the SAME lambda back in here and check
+#' Bernoulli(q) per active month -> feed the same lambda back in here and check
 #' the resulting PIT is Uniform(0,1).
 #'
 #' @param lambda matrix [n_draws x n_rows], columns in the SAME row order as
@@ -196,7 +176,7 @@ pit_duration_episode <- function(fit, dat) {
 
   n_draws <- nrow(lambda_ord)
 
-  # Global cumsum of -lambda over the WHOLE sorted panel, per draw, with a
+  # Global cumsum of -lambda over the whole sorted panel, per draw, with a
   # leading zero column so G0[, j+1] == cumsum through row j (G0[, 1] == 0 ==
   # "cumsum through row 0"). This lets any group's within-episode cumsum be
   # read off as a difference of two G0 lookups -- no per-episode loop, no

@@ -136,7 +136,7 @@ mon_dat <- load_monthly_data(opt)
 ep_rec <- attr(mon_dat, "episode_stamp")
 
 # Anchor sidecar (utils/anchor.R) -- the monthly analogue of
-# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms.R:89). Gated on
+# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms.R). Gated on
 # monthly.offset_baserate, so it is inert for every config that predates it.
 if (anchor_enabled(opt, "mon")) {
   persist_base_rate_table(opt, "mon", mon_dat)

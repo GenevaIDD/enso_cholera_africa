@@ -312,35 +312,27 @@ enso_year_states <- function(
 
 #' fetch_enso_index
 #'
-#' Download the Oceanic Niño Index (ONI) from NOAA CPC and cache locally.
-#' ONI is the 3-month running mean of ERSSTv6 SST anomalies in the
-#' Niño 3.4 region (5°N-5°S, 120°-170°W) and is the official NOAA ENSO
-#' event definition.
+#' Download an ENSO index from NOAA CPC and cache it locally (RDS + metadata
+#' sidecar). ONI is the 3-month running mean of ERSSTv6 Niño 3.4 SST anomalies
+#' and NOAA's official ENSO event definition.
 #'
 #' @param source    Index to download. One of:
-#'   "oni"    — Oceanic Niño Index (primary; 3-month running mean of ERSSTv6
-#'              SST anomalies in Niño 3.4, fixed 30-yr baseline).
-#'   "roni"   — Relative ONI (official NOAA index as of Feb 2026; same as ONI
-#'              but with tropical-mean SST anomaly subtracted, removing the
-#'              global-warming trend; preferred for projection work).
-#'   "nino34" — Raw monthly Niño 3.4 SST anomaly, ERSSTv6, centered base
-#'              periods (CPC `data/indices/detrend.nino34.ascii.txt`; its
-#'              3-month mean is ONI). Seam/history series of the CFSv2 sampler
-#'              and the "ersst" target of the CFSv2 calibration.
-#'   "nino34_oisst" — Monthly OISST v2.1 Niño 3.4 anomaly (fixed 1991-2020
-#'              base; CPC `sstoi.indices`). The observational reference of
-#'              CPC's PDF-corrected CFSv2 Niño 3.4 forecast, used as one
-#'              target of the hindcast calibration
+#'   "oni"    — ONI (primary; fixed 30-yr baseline).
+#'   "roni"   — Relative ONI: ONI minus the tropical-mean SST anomaly, which
+#'              removes the warming trend; preferred for projection work.
+#'   "nino34" — raw monthly ERSSTv6 Niño 3.4 anomaly (its 3-month mean is
+#'              ONI); the CFSv2 sampler's seam series and the "ersst" target
+#'              of the CFSv2 calibration.
+#'   "nino34_oisst" — monthly OISST v2.1 Niño 3.4 anomaly (fixed 1991-2020
+#'              base); the "oisst" target of the CFSv2 hindcast calibration
 #'              (`03_prepare_enso_cfsv2_calibration.R`).
 #' @param cache_dir Directory to store the cached RDS and metadata sidecar.
 #' @param refresh   If TRUE, re-download even when a cache file exists.
 #' @return tibble with columns: year (int), month (int), enso_index (dbl),
-#'   date (Date, first day of the centre month), enso_phase (chr; one of
-#'   "elnino"/"nina"/"neutral" for \code{source \%in\% c("oni", "roni")} per
-#'   the official NOAA CPC definition -- ONI at or beyond \eqn{\pm}0.5 for at
-#'   least 5 consecutive overlapping 3-month seasons; \code{NA} for
-#'   \code{source = "nino34"}, an unsmoothed sensitivity series the official
-#'   definition does not apply to).
+#'   date (Date, first day of the centre month), enso_phase (chr):
+#'   "elnino" / "nina" / "neutral" for \code{source \%in\% c("oni", "roni")}
+#'   (NOAA CPC rule: ONI at or beyond \eqn{\pm}0.5 for at least 5 consecutive
+#'   overlapping seasons), \code{NA} for the unsmoothed Niño 3.4 series.
 fetch_enso_index <- function(
   source = "oni",
   cache_dir = "generated_data/",
@@ -351,10 +343,9 @@ fetch_enso_index <- function(
   urls <- c(
     oni = "https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt",
     roni = "https://www.cpc.ncep.noaa.gov/data/indices/RONI.ascii.txt",
-    # CPC's current ERSSTv6 file. The former URL
-    # (products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt) is a copy
-    # frozen on 5 Aug 2026: older ERSST version, ends Jun 2026, differs by up to
-    # 0.71 from v6.
+    # CPC's current ERSSTv6 file. Not
+    # products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt: that is
+    # a frozen copy on an older ERSST version.
     nino34 = "https://www.cpc.ncep.noaa.gov/data/indices/detrend.nino34.ascii.txt",
     nino34_oisst = "https://www.cpc.ncep.noaa.gov/data/indices/sstoi.indices"
   )
@@ -750,30 +741,17 @@ fetch_enso_cfsv2_ensemble <- function(
 
 #' fetch_cfsv2_hindcast_nino34
 #'
-#' Fetch NCEP CFSv2 Niño 3.4 hindcast (+ real-time) member trajectories from the
-#' NMME archive and return them as a long tibble -- the training sample for the
-#' hindcast calibration of the real-time CFSv2 forecast
-#' (`03_prepare_enso_cfsv2_calibration.R`). Mirrors `fetch_enso_index()`: cache
-#' RDS + `_download_meta.yml`.
+#' Fetch NCEP CFSv2 Niño 3.4 hindcast + real-time member trajectories (NMME,
+#' from Jan 1982) as a long tibble: the training sample of the CFSv2 hindcast
+#' calibration (`03_prepare_enso_cfsv2_calibration.R`). Values are ABSOLUTE
+#' SST (degC), not anomalies. Caches like `fetch_enso_index()`.
 #'
-#' Source: IRI Data Library `NMME/.NCEP-CFSv2/.HINDCAST/.PENTAD_SAMPLES_FULL/.sst`
-#' (starts Jan 1982 onward, hindcast and real-time appended in one series),
-#' averaged server-side over the Niño 3.4 box so the whole record is ~1.2 MB.
-#' Values are ABSOLUTE SST (degC), not anomalies; dims S (start, "months since
-#' 1960-01-01", 360-day calendar), L (lead 0.5..9.5 months), M (28 member slots,
-#' 24 filled for most starts).
-#'
-#' The IRI Data Library is being retired (announced shutdown by end of Oct
-#' 2026), so the raw NetCDF is kept permanently at `archive_file` and is the
-#' source of truth once present: it is re-downloaded only when `refresh = TRUE`.
-#' Fallback if the IRIDL endpoint is gone: the CCSR OPeNDAP server
-#' `https://forecast.ccsr.columbia.edu/data/NMME/NOAA-NCEP/CFSv2/pentad_samples/{hindcast,forecast}/tos`
-#' (no server-side averaging: subset the Niño 3.4 box per start, ~628 KB each).
-#'
-#' Access order (first hit wins):
-#'   1. `<cache_dir>/enso_cfsv2_hindcast_nino34.rds` -- parsed cache
-#'   2. `archive_file`                               -- archived raw NetCDF
-#'   3. Live download of `url` into `archive_file`   (requires `ncdf4` to parse)
+#' The IRI Data Library is being retired, so the raw NetCDF at `archive_file`
+#' is the source of truth once present (re-downloaded only with
+#' `refresh = TRUE`). Fallback source: the CCSR OPeNDAP server
+#' (NMME/NOAA-NCEP/CFSv2/pentad_samples), subsetting the box per start.
+#' Access order, first hit wins: the parsed cache in `cache_dir`, then
+#' `archive_file`, then a live download of `url` (needs `ncdf4`).
 #'
 #' @param url          IRIDL expression URL returning the box-averaged `data.nc`.
 #' @param cache_dir    Directory for the parsed cache + meta files.
@@ -917,20 +895,14 @@ fetch_cfsv2_hindcast_nino34 <- function(
 
 # CFSv2 hindcast calibration (CPC "PDF + spread correction" replica) ----------
 #
-# CPC's documented method (products/CFSv2/cfsv2fcst/CFSv2SST8210.html): "the
-# forecast value is mapped to its percentile within the 1991-2020 hindcasts and
-# forecasts, and the corresponding percentile value from the 1991-2020
-# observations is used as the corrected forecast", then "rescales the forecast
-# anomalies by a factor chosen such that the ensemble spread matches the RMSE of
-# the ensemble-mean forecast". Replicated here per (start month, lead) on the
-# NMME CFSv2 archive (`fetch_cfsv2_hindcast_nino34()`), each MEMBER percentile-
-# mapped (capped at the reference range, as CPC's output is). One deliberate
-# deviation: the spread factor is applied to the RAW member deviations around
-# the mapped ensemble mean, because a record event pushes every member past the
-# 24-member reference range, the cap maps them all to one value, and a
-# multiplicative factor cannot restore a zero spread (CPC's 120-member pool has
-# a longer tail). Validated against CPC's own PDFC/PDFSPRDC files and plots in
-# `03_prepare_enso_cfsv2_calibration.R`.
+# Replicates CPC's method (products/CFSv2/cfsv2fcst/CFSv2SST8210.html) per
+# (start month, lead) on the NMME CFSv2 archive (fetch_cfsv2_hindcast_nino34()):
+# each member is percentile-mapped onto the 1991-2020 observations (capped at
+# the reference range), then the spread is rescaled so it matches the RMSE of
+# the ensemble mean. One deviation: the factor scales the raw member deviations
+# around the mapped mean, because a record event can map every member to the
+# cap and a factor cannot restore zero spread. Validated in
+# 03_prepare_enso_cfsv2_calibration.R.
 
 #' Percentile-map values through a reference model sample onto an observed
 #' sample (empirical CDFs, linear interpolation, capped at the range ends).
@@ -1044,9 +1016,9 @@ fit_cfsv2_calibration <- function(hindcast, obs, window = c(1991L, 2020L)) {
 #' Forecast rows: each member is percentile-mapped and the ensemble is rebuilt
 #' as `mean(mapped) + g * (member - mean(member))`. Earlier (analysis) rows,
 #' identical across members, are returned unchanged: they are CFSv2's own
-#' analysis of observed months, not forecasts, and a lead-0 map compresses them
-#' (Jun 2026: 1.59 -> 1.23 vs observed ERSST 1.50). The sampler anchors them to
-#' the latest published ONI season instead (`.cfsv2_anchor_analysis_rows()`).
+#' analysis of observed months, not forecasts, and a lead-0 map compresses them.
+#' The sampler anchors them to the latest published ONI season instead
+#' (`.cfsv2_anchor_analysis_rows()`).
 #'
 #' @param cfs_wide    Numeric matrix [target month x member], rownames = dates.
 #' @param calibration Output of `fit_cfsv2_calibration()`.
@@ -1107,8 +1079,8 @@ apply_cfsv2_calibration <- function(cfs_wide, calibration, target = "ersst") {
 #' The CFSv2 file's analysis rows (before the first forecast month) fill the raw
 #' Niño 3.4 series wherever the observed monthly series has no value yet (the
 #' detrended ERSST file lags ONI by ~3 months). They are on CFSv2's analysis
-#' scale, which in a strong event can sit well above ERSST (Jul-Sep 2026: mean
-#' 2.54 vs ONI JAS 2.16). This shifts those unobserved analysis rows by one
+#' scale, which in a strong event can sit well above ERSST. This shifts those
+#' unobserved analysis rows by one
 #' constant so that the 3-month mean of the latest ONI season they fall in
 #' equals published ONI; forecast rows are left alone.
 #'
@@ -1253,7 +1225,7 @@ panel_max_enso_lead <- function(panel) {
 #' add_enso_leads_from_lag0
 #'
 #' Write enso_lead1 ... enso_lead{max_lead} (base.R::enso_lag_col_name()) from the
-#' panel's OWN enso_lag0 series: enso_lead<k> at month t = enso_lag0 at month
+#' panel's own enso_lag0 series: enso_lead<k> at month t = enso_lag0 at month
 #' t + k (the same value for every gid, as ENSO is basin-wide). Used by the
 #' projection panel, whose enso_lag0 is observed ONI up to the last ONI month and
 #' the CFSv2 point estimate (+ continuation) after it, so a lead reads the same
@@ -1691,26 +1663,12 @@ sample_enso_forecast_trajectories <- function(
 
 #' Sample per-replicate ENSO (ONI-equivalent) forecast trajectories from CFSv2.
 #'
-#' CFSv2 analogue of `sample_enso_forecast_trajectories()`.  Instead of inverse-CDF
-#' sampling a C3S quantile plume, each replicate is assigned one CFSv2 ensemble
-#' member (sampled with replacement) whose raw Niño 3.4 anomaly trajectory is
-#' rebased to the historical seam, stitched onto the historical record, and
-#' passed through the 3-month centered rolling mean → ONI-equivalent.  Returns
-#' the identical named-list `[M × n_rep]` per-lag structure so downstream
-#' consumers (utils_simulations loaders, simulate_one_tu) are unchanged.
-#'
-#' Member → replicate: `sample.int(n_members, n_rep, replace=TRUE)` under `seed`;
-#' one member per replicate across all leads (temporally coherent, matching the
-#' one-draw-per-replicate C3S behaviour).  Scales the ~40 members to any n_rep.
-#'
-#' Rebase (`rebase` arg): CFSv2 anomalies use the 1991–2020 base; the historical
-#' raw series (`fetch_enso_index("nino34")`) uses a different base.  "seam" applies
-#' an additive shift so the CFSv2 ensemble mean matches the historical raw value
-#' at the latest overlapping month; "none" leaves values unshifted; a numeric
-#' value (or a numeric string, e.g. the CLI's "0.3") is used as an explicit
-#' offset. `rebase` is IGNORED when `calibration` is set: the calibrated path
-#' anchors the analysis rows to observed ONI itself and forces `rebase` to
-#' "none" (cfsv2_correction_provenance() records the effective value).
+#' Each replicate gets one CFSv2 member, sampled with replacement under `seed`
+#' and kept across all leads. Its raw Niño 3.4 anomaly is rebased to the
+#' historical seam, stitched onto the historical record and turned into ONI by
+#' the centred 3-month mean. Output has the same `[M x n_rep]` per-lag shape as
+#' `sample_enso_forecast_trajectories()`. `sd_correction`, `target_peak` and
+#' `calibration` are mutually exclusive.
 #'
 #' @param cfsv2_data       Tibble from `fetch_enso_cfsv2_ensemble()`:
 #'                         (init_date, target_date, lead, member, nino34_anomaly).
@@ -1720,27 +1678,26 @@ sample_enso_forecast_trajectories <- function(
 #'                         NULL, historical_oni is used as a Niño 3.4 proxy.
 #' @param sim_months       Date vector of simulation months (first day of each).
 #' @param max_lag          Maximum ENSO lag to pre-compute (default 12L).
-#' @param rebase           "seam" (default) | "none" | numeric offset (a
-#'                         numeric string is parsed). Ignored (forced to
-#'                         "none") when `calibration` is set.
-#' @param sd_correction    If TRUE, crudely rescale the raw CFSv2 anomaly by
+#' @param rebase           CFSv2 anomalies use the 1991–2020 base, the
+#'                         historical series another. "seam" (default) shifts
+#'                         the ensemble mean onto the historical value at the
+#'                         latest overlapping month; "none" leaves values
+#'                         unshifted; a number (or numeric string) is an
+#'                         explicit offset. Ignored (forced to "none") when
+#'                         `calibration` is set, which anchors to observed ONI
+#'                         itself (cfsv2_correction_provenance() records it).
+#' @param sd_correction    If TRUE, rescale the raw anomaly by
 #'                         k = sd(observed ONI) / sd(raw CFSv2 members) before
-#'                         the seam rebase. Mutually
-#'                         exclusive with `target_peak`.
-#' @param target_peak      If set (numeric ONI-equivalent, e.g. 2.5), rescale
-#'                         the raw CFSv2 anomaly by k = target_peak / raw_peak,
-#'                         where raw_peak is the max of the 3-month-rolling-mean
-#'                         ONI-equivalent of the ENSEMBLE-MEAN raw forecast over
-#'                         the forecast horizon. Applied at
-#'                         the same point as `sd_correction` (before the seam
-#'                         rebase), and mutually exclusive with it — this is the
-#'                         preferred correction, calibrated to an external
-#'                         outlook rather than an incidental sd-ratio artefact.
+#'                         the seam rebase.
+#' @param target_peak      If set (ONI-equivalent, e.g. 2.5), rescale the raw
+#'                         anomaly by k = target_peak / raw_peak, raw_peak being
+#'                         the peak of the ensemble-mean ONI-equivalent over
+#'                         the horizon, before the seam rebase. Preferred over
+#'                         `sd_correction`.
 #' @param calibration      Optional `fit_cfsv2_calibration()` object (or a path to
 #'                         its RDS, `03_prepare_enso_cfsv2_calibration.R`):
 #'                         applies the CPC-style hindcast PDF + spread correction
 #'                         (`apply_cfsv2_calibration()`) before the seam rebase.
-#'                         Mutually exclusive with `sd_correction` / `target_peak`.
 #' @param calibration_target Observational target of the calibration: "ersst"
 #'                         (ONI-consistent, default) or "oisst" (CPC's own).
 #' @param seed             Optional integer seed for reproducibility.
@@ -2805,23 +2762,12 @@ ENSO_ANALOG_SETS <- c("all", "nina", "neutral", "elnino")
 
 #' Classify Lenssen analog trajectories into ENSO-state sets.
 #'
-#' Labels each row of an analog trajectory matrix as \code{"nina"},
-#' \code{"neutral"} or \code{"elnino"} based on that trajectory's mean ONI over a
-#' target peak season (default DJF).
-#'
-#' \strong{Why not lead-0?} The analog pool is built by matching every trajectory's
-#' lead-0 state to the \emph{same} observed ONI at the handoff month, so the lead-0
-#' spread across the pool is tiny (sd ~0.11) and carries no discriminating signal.
-#' The sets must therefore be defined on how each trajectory \emph{evolves} — the
-#' first boreal-winter peak inside the horizon is when ENSO actually peaks and when
-#' the factual (CFSv2) signal is strongest, making it the natural contrast point.
-#'
-#' \strong{Why CPC thresholds and not empirical terciles?} With the operational CPC
-#' cut-offs (\eqn{\pm}0.5 °C) the labels mean what "La Niña"/"El Niño" mean in the
-#' literature and are directly comparable to the factual arm's ONI values.  Terciles
-#' would be pool-relative and would silently redefine themselves on every rebuild.
-#'
-#' Base R only (no dplyr/lubridate) so it can be sourced and verified standalone.
+#' Labels each row of an analog trajectory matrix \code{"nina"},
+#' \code{"neutral"} or \code{"elnino"} from that trajectory's mean ONI over a
+#' target peak season (default DJF), with the CPC cut-offs. Lead 0 cannot be
+#' used: every analog is matched to the same observed ONI at the handoff, so
+#' the lead-0 spread carries no signal. Base R only, so it can be sourced and
+#' checked standalone.
 #'
 #' @param traj_mat         Numeric matrix [n_analogs x n_months] of monthly ONI
 #'   values; column 1 is \code{horizon_start}.
@@ -3063,34 +3009,25 @@ enso_analog_set_rows <- function(cache, analog_set = "all") {
 
 #' Sample per-replicate ENSO trajectories from the Lenssen piControl analog cache.
 #'
-#' Implements the Scenario B (Lenssen) counterfactual: each simulation replicate
-#' receives an independently sampled monthly ONI trajectory drawn from a pool of
-#' pre-industrial-control (piControl) ENSO series assembled from 11 CMIP models
-#' (Lenssen et al. 2024, \emph{GRL}, doi 10.1029/2023GL106988; data at
-#' zenodo.org/records/10045687).  The piControl runs use 1850 forcing, providing
-#' a physically defensible "no-warming world" counterfactual.
+#' Scenario B (Lenssen) counterfactual: each replicate draws an independent
+#' monthly ONI trajectory from a pool of pre-industrial-control ENSO series from
+#' 11 CMIP models (Lenssen et al. 2024, \emph{GRL}, doi 10.1029/2023GL106988).
+#' Pre-horizon lag dates (\code{sim_month - lag < min(sim_months)}) come from
+#' the historical ONI, as in the factual run; only forecast dates use the
+#' pool.
 #'
-#' Pre-horizon lag dates (i.e. \code{sim_month - lag < min(sim_months)}) are
-#' filled from the historical ONI cache identical to the factual run; only
-#' forecast-period dates draw from the piControl trajectories.
-#'
-#' \strong{Cache format} (\code{generated_data/lenssen_nino34_analogs.rds}):
+#' \strong{Cache format} (the file at \code{cache_path} must exist):
 #' \describe{
-#'   \item{\code{oni_trajectories}}{Numeric matrix [n_analogs × n_months].  Each
-#'     row is one trajectory segment of monthly ONI values (3-month centered
-#'     rolling mean of Niño 3.4 already applied).  The trajectory must be long
-#'     enough to cover all sim months (\code{n_months >= length(sim_months)}).}
+#'   \item{\code{oni_trajectories}}{Numeric matrix [n_analogs × n_months] of
+#'     monthly ONI (3-month mean applied);
+#'     \code{n_months >= length(sim_months)}.}
 #'   \item{\code{n_months}}{Integer: number of columns (months per trajectory).}
 #'   \item{\code{n_analogs}}{Integer: number of available trajectories (rows).}
-#'   \item{\code{set_labels}}{Character vector [n_analogs], row-aligned with
-#'     \code{oni_trajectories}: the ENSO-state set each trajectory belongs to
-#'     (see [classify_enso_analog_sets()]).  Required only when \code{analog_set}
-#'     is not \code{"all"}.}
+#'   \item{\code{set_labels}}{Character vector [n_analogs], row-aligned: each
+#'     trajectory's ENSO-state set ([classify_enso_analog_sets()]). Required
+#'     only when \code{analog_set} is not \code{"all"}.}
 #'   \item{\code{meta}}{List with \code{source}, \code{models}, \code{created}.}
 #' }
-#' The cache is produced by the deferred Lenssen data-processing step
-#' (download + analog matching + per-model variance rescaling); the cache file
-#' must exist before running this scenario.
 #'
 #' @param cache_path      Path to the Lenssen analog cache RDS.  Default:
 #'   \code{"generated_data/lenssen_nino34_analogs.rds"}.
@@ -3101,17 +3038,14 @@ enso_analog_set_rows <- function(cache, analog_set = "all") {
 #'   \code{year}, \code{month}, \code{enso_index}.  Used for pre-horizon lags.
 #' @param max_lag         Maximum ENSO lag to pre-compute (default 12L).
 #' @param mean_offset     Additive shift applied to all trajectory values after
-#'   variance scaling (default 0.0).  Use to correct the ~1°C cooler 1850
-#'   mean state if needed.
+#'   variance scaling (default 0.0), e.g. for the cooler 1850 mean state.
 #' @param log_var_scaling Log-scale variance adjustment: trajectories are
 #'   multiplied by \code{exp(0.5 * log_var_scaling)} before the mean offset is
 #'   added (default 0.0, i.e. no rescaling).
 #' @param seed            Optional integer seed for trajectory sampling.
-#' @param analog_set      One of [ENSO_ANALOG_SETS].  \code{"all"} (default) samples
-#'   the whole pool and is byte-identical to the pre-set behaviour; the other names
-#'   restrict sampling to that ENSO-state subset, yielding a counterfactual arm
-#'   conditioned on an ENSO state rather than marginalised over it.  Appended last
-#'   so existing positional call sites are unaffected.
+#' @param analog_set      One of [ENSO_ANALOG_SETS]. \code{"all"} (default)
+#'   samples the whole pool; any other name restricts sampling to that
+#'   ENSO-state subset (a counterfactual arm conditioned on an ENSO state).
 #' @return Named list of [M \eqn{\times} n_rep] numeric matrices, one per
 #'   lag name ("enso_lag0", …, "enso_lag{max_lag}").
 sample_enso_lenssen_scenarios <- function(
@@ -3586,7 +3520,7 @@ lenssen_extract_rda <- function(
 # ---------------------------------------------------------------------------
 # Library matcher for the counterfactual pool
 #
-# One matcher, two uses: the counterfactual analog pool is drawn from the SAME
+# One matcher, two uses: the counterfactual analog pool is drawn from the same
 # continuation library as the factual arm's analog continuation (per-model
 # series rescaled to the observed ONI sd over the library's window, 1991-2020),
 # with the same features (level v, 3-month tendency, ONI 6 months earlier),

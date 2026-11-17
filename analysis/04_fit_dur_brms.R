@@ -157,23 +157,13 @@ if (file.exists(fit_file) && !isTRUE(opt$overwrite)) {
 
 # 4. Load data -----------------------------------------------------------------
 #
-# The DURATION model is a discrete-time cessation hazard. The panel
-# (analysis/03_prepare_dur.R -> analysis/utils/dur_data.R) carries one row per
-# ACTIVE MONTH per episode; `y = as.integer(ended)` is 1 on an episode's last
-# active month iff that episode is uncensored, and `log_offset` is the log of
-# the days of that month actually covered by [TL, TR].
-#
-# It is fitted as Poisson-with-log-offset for the same reason the occurrence
-# track is (Holford 1980; Laird & Olivier 1981): a discrete-time hazard with a
-# complementary-log-log / Poisson link and a per-interval exposure offset is
-# algebraically the Holford form of the hazard model. That equivalence is what
-# lets this script be a near-copy of 04_fit_occ_brms.R, and what lets the
-# occurrence track's RE postprocessing adapter be reused verbatim below.
-#
-# load_duration_data() applies the same covariate scaling as read_size_data()
-# and rebuilds `mso_band` from duration.mso_breaks, so a band-set sensitivity
-# run needs no re-prep. Country subsetting (including the grouping-mode subset
-# that resolve_group_countries() already wrote into opt$country) happens there.
+# Duration = discrete-time cessation hazard, one row per active month per
+# episode (03_prepare_dur.R -> utils/dur_data.R); y = 1 on an uncensored
+# episode's last active month; log_offset = log(days of the month inside
+# [TL, TR]). Fitted as Poisson with a log offset (the Holford form), like
+# occurrence, so the occurrence RE postprocessing is reused. Scaling, the
+# `mso_band` rebuild from duration.mso_breaks and country subsetting happen in
+# load_duration_data().
 
 dur_dat <- load_duration_data(opt)
 # Episode record of the prep artefact this fit trains on (assert_episode_key()
@@ -182,7 +172,7 @@ dur_dat <- load_duration_data(opt)
 ep_rec <- attr(dur_dat, "episode_stamp")
 
 # Anchor sidecar (utils/anchor.R) -- the duration analogue of
-# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms.R:89). Gated on
+# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms.R). Gated on
 # duration.offset_baserate, so it is inert for every config that predates it.
 if (anchor_enabled(opt, "dur")) {
   persist_base_rate_table(opt, "dur", dur_dat)
@@ -201,7 +191,7 @@ if (nrow(dur_dat) == 0L) {
 }
 
 # guard_missing_climate_data() KEEPS rows outside CHIRPS/ERA5 coverage and flags
-# them (occ_data.R:112-134), leaving the filtering to the fit script. brms will
+# them (occ_data.R), leaving the filtering to the fit script. brms will
 # drop them with a generic "Rows containing NAs were excluded" warning that
 # says nothing about how many CESSATIONS went with them — and a dropped `y = 1`
 # row is a lost event, not just lost exposure. Report it explicitly.
@@ -226,7 +216,7 @@ if ("climate_missing" %in% names(dur_dat)) {
 # 5. M-spline bases as fixed columns -------------------------------------------
 #
 # Same construction as the occurrence track's `ms` basehaz
-# (04_fit_occ_brms.R:129-134), but on each baseline's own clock. The formula
+# (04_fit_occ_brms.R), but on each baseline's own clock. The formula
 # builder only NAMES these columns (^msoms[0-9]+$ / ^seasms[0-9]+$) and errors
 # if they are absent, so the basis must be bound on before it is called.
 
@@ -254,25 +244,15 @@ if (identical(dur_cfg$basehaz_poisson %||% "none", "ms")) {
 
 # 6. Build formula from config -------------------------------------------------
 #
-# One thing is different from occurrence and it matters: the offset here is
-# TIME (days active in the month), not population and not interval length in
-# the seasonal clock. Dropping it does not error — it silently turns a per-day
-# cessation hazard into a per-row count, which fits fine and means nothing.
-# The offset is emitted by build_duration_formula_parts() (utils/config.R),
-# and test_duration_config_merge.R asserts its presence.
-#
-# TWO baseline hazards, on two different clocks, independently configurable:
-#   duration.basehaz_duration = factor | ms | none    on `mso` (months since
-#       onset). PRIMARY. `factor` uses `mso_band`, rebuilt from
-#       duration.mso_breaks at every load; `ms` uses an M-spline basis bound on
-#       below as msoms*; `none` is the constant-hazard null variant.
-#   duration.basehaz_poisson  = none | factor | cyclic | seasonal | ms  on
-#       `t_start_seas`. Default `none`. Enables "outbreaks end when the season
-#       ends" as a testable alternative rather than an assumption.
-#
-# build_duration_formula_parts() is data-aware: it prunes fixed factor levels
-# and RE terms that the subset cannot support (single-country, single mso band),
-# which is what makes a country-scoped smoke run possible at all.
+# The offset is TIME (days active in the month). Dropping it does not error:
+# it silently turns a per-day hazard into a per-row count. It is emitted by
+# build_duration_formula_parts() and checked by test_duration_config_merge.R.
+# Two baseline hazards, configured independently:
+#   duration.basehaz_duration = factor | ms | none on `mso` (primary);
+#   duration.basehaz_poisson = none | factor | cyclic | seasonal | ms on
+#     `t_start_seas` (default none: season-end as a testable alternative).
+# build_duration_formula_parts() prunes levels and RE terms the subset cannot
+# support, which is what makes a single-country smoke run possible.
 
 parts <- build_duration_formula_parts(opt, dur_dat)
 form <- build_duration_formula(opt, dur_dat)

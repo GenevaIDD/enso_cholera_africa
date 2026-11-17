@@ -1,41 +1,34 @@
 #!/bin/bash
-# tools/run_synthetic_pipeline.sh — the whole pipeline on the synthetic world, locally.
+# tools/run_synthetic_pipeline.sh — the whole pipeline on the synthetic world,
+# locally: no restricted data, no cluster.
 #
-# Builds a sandbox (its own data/, generated_data/, figures/ and a fake
-# outbreak-data root), writes the synthetic world's raw inputs
-# (analysis/00_ingest_synthetic.R: fake countries, analysis/groupings/
-# synthetic_countries.csv), builds the panels (the data phase, below), then
-# hands over to the production chain on this machine:
+# Builds a sandbox (own data/, generated_data/, figures/ and a fake
+# outbreak-data root), writes the synthetic raw inputs (00_ingest_synthetic.R,
+# analysis/groupings/synthetic_countries.csv), builds the panels, then runs
 #   tools/run_pipeline.sh --deploy configs/deploy/synth_run1.yml --local --from fits
-# (the same stage drivers and slurm/ payloads as on a cluster, run by
-# lib/local/sbatch; CHOLERA_BACKEND=local). No restricted data, no cluster.
+# (the same drivers and payloads as on a cluster, via lib/local/sbatch).
 #
 # Phases (--from / --until):
-#   data       00 synthetic world -> 00 ingest -> 01 -> 02 population, crosswalk,
-#              climate -> 03 panels, ENSO continuation library, WHO monthly, rainfall
-#   fits .. manuscript   run_pipeline.sh's phases (see its header): fits, postfit,
-#              deploy (smoothing), sim (forecast / attribution / counterfactual arms,
-#              hindcast, past ENSO events), results (09, results config
-#              manuscript_synth.yml), manuscript (10 + 11). The reports phase (12)
-#              is not run.
+#   data       00 synthetic world, 00 ingest, 01, 02 population / crosswalk /
+#              climate, 03 panels, ENSO continuation library, WHO, rainfall
+#   fits .. manuscript   run_pipeline.sh's phases (results config
+#              manuscript_synth.yml); the reports phase (12) is not run
 #
 # Usage (from the repository root):
-#   bash analysis/bash/tools/run_synthetic_pipeline.sh                      # everything
-#   bash analysis/bash/tools/run_synthetic_pipeline.sh --until data         # inputs + panels only (minutes)
+#   bash analysis/bash/tools/run_synthetic_pipeline.sh               # everything
+#   bash analysis/bash/tools/run_synthetic_pipeline.sh --until data  # inputs only
 #   bash analysis/bash/tools/run_synthetic_pipeline.sh --from sim --cores 8
 #
 # Options:
-#   --sandbox DIR   sandbox root [default: synthetic_world]; created, `analysis`
-#                   symlinked into it; every step runs with DIR as working dir
+#   --sandbox DIR   sandbox root [default: synthetic_world]; `analysis` is
+#                   symlinked into it and every step runs there
 #   --from PHASE    first phase [default: data]
-#   --until PHASE   last phase  [default: manuscript]
-#   --cores N       parallel processes (data phase workers; CHOLERA_CORES, the
-#                   array tasks run at once by lib/local/sbatch) [default: 4]
+#   --until PHASE   last phase [default: manuscript]
+#   --cores N       parallel processes (data workers; CHOLERA_CORES for
+#                   lib/local/sbatch) [default: 4]
 #   --seed N        seed of the synthetic world [default: 1]
 #
-# Runtime on a 4-core laptop: data ~2 min, fits ~10 min, the rest ~minutes
-# per arm. Logs: <sandbox>/logs/synthetic/<step>.log (the data steps and
-# run_pipeline.log), one per job in <sandbox>/logs/synthetic/jobs/.
+# Logs: <sandbox>/logs/synthetic/<step>.log, per job in .../synthetic/jobs/.
 
 set -euo pipefail
 
@@ -47,7 +40,7 @@ while [[ $# -gt 0 ]]; do
     --until)   UNTIL="$2"; shift 2 ;;
     --cores)   CORES="$2"; shift 2 ;;
     --seed)    SEED="$2"; shift 2 ;;
-    -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) echo "Error: unknown option $1" >&2; exit 1 ;;
   esac
 done

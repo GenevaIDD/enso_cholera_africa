@@ -147,29 +147,18 @@ who_weekly_to_monthly <- function(wk, duplicates = c("error", "sum")) {
 
 #' who_cumulative_to_monthly
 #'
-#' Calendar-month national counts from the year-to-date cumulative snapshots of
-#' the WHO multi-country cholera epidemiological updates (Table 1: "1 January
-#' to <cut>" cases, plus the "last 28 days" column). Per country, consecutive
-#' cuts bound an interval `(prev_cut, cut]` whose cases are the difference of
-#' the two cumulatives; the first cut of a year (or a country's first cut) runs
-#' from 1 January, since the cumulative restarts there. Interval cases are then
-#' spread over days and summed by calendar month exactly as the weekly series
-#' (.who_intervals_to_monthly()).
+#' Calendar-month national counts from the year-to-date cumulative snapshots
+#' of the WHO multi-country cholera updates (Table 1). Per country,
+#' consecutive cuts bound an interval `(prev_cut, cut]` whose cases are the
+#' difference of the cumulatives; the first cut of a year runs from 1 January.
+#' Interval cases are spread over days and summed by calendar month as the
+#' weekly series (.who_intervals_to_monthly()).
 #'
-#' An unchanged cumulative is ambiguous: WHO's footnote says missing data do
-#' not imply absence, and a country that stopped reporting keeps its last
-#' total. It is read as a reported zero only when the country is in
-#' `zero_iso3` (a stated per-country decision, e.g. TZA after the Ministry
-#' declared the outbreak controlled on 25 Feb 2026) or when the table printed an
-#' explicit 0 in the last-28-days column; otherwise the interval is dropped
-#' (missing, never zero). A negative difference (WHO revises totals
-#' retrospectively) is dropped with a warning.
-#'
-#' An interval longer than `max_interval_days` is dropped too: a country's
-#' first appearance in a mid-year table, or a lone end-of-year cut, carries a
-#' year-to-date total with no monthly information, and spreading it evenly
-#' would invent months. The updates are issued every 4-5 weeks, so 45 days
-#' keeps every consecutive-cut interval and the January cut.
+#' Intervals are dropped (missing, never zero) when: the cumulative is
+#' unchanged, unless the country is in `zero_iso3` or the last-28-days column
+#' printed an explicit 0; the difference is negative (with a warning); or the
+#' interval is longer than `max_interval_days` (a year-to-date total with no
+#' monthly information).
 #'
 #' @param snap data frame with `iso3`, `table_as_of` (Date), `cum_cases`,
 #'   `last28_cases` (NA for "-").

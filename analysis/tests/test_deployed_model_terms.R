@@ -6,7 +6,7 @@
 #
 # Details:
 #   Follows analysis/configs/results/manuscript.yml -> results.deploy_config ->
-#   deploy.fits.{occ,dur,mon}_dir to the three fit batches and resolves EVERY
+#   deploy.fits.{occ,dur,mon}_dir to the three fit batches and resolves every
 #   config in them; rebuilds each formula with the track's own builder on the
 #   synthetic frame of test_formula_builder_golden.R; asserts one term set per
 #   batch (the configs differ only in the ENSO lag and the group) and equality
@@ -114,8 +114,8 @@ AMPLE_DAT <- .make_dat(
 # 04_fit_dur_brms_cb.R and 04_fit_mon_brms_cb.R, not a helper;
 # .integrate_cb_count_track() below mirrors those lines. A change there must be mirrored here (occurrence uses
 # the shared integrate_cb_terms()).
-# Mirror of the inline crossbasis integration of 04_fit_dur_brms_cb.R:192-232
-# (honour_levels = FALSE) and 04_fit_mon_brms_cb.R:165-222 (TRUE: the monthly
+# Mirror of the inline crossbasis integration of 04_fit_dur_brms_cb.R section 6
+# (honour_levels = FALSE) and 04_fit_mon_brms_cb.R section 5 (TRUE: the monthly
 # re_slope_levels knob).
 .integrate_cb_count_track <- function(
   parts,

@@ -708,7 +708,7 @@ deploy_check_convergence <- function(
   list(cfg = cfg, table = tab, failed = failed, allowed = allowed)
 }
 
-# Canonical filenames are built by the SAME paths.R code (make_*_run_file) the
+# Canonical filenames are built by the same paths.R code (make_*_run_file) the
 # fits were written with, so tokens such as the occurrence `_nbr500` are never
 # re-hardcoded in bash printf templates.
 #' Collect the canonical per-group best-lag fit artefacts into dep$fits$dest.
@@ -964,7 +964,7 @@ deploy_collect_fits <- function(
   # episode record and -- under gid_season -- the same episode digest as the
   # four prep artefacts currently on disk for that key (the size frame stays a
   # simulator input -- population / admin_level fill and 03_prepare_dur.R's
-  # source -- although size is no longer fit), i.e. the fits agree with
+  # source -- although size is not fit), i.e. the fits agree with
   # each other AND with the panels the smoothing / forecast / hindcast runs will
   # read. Runs under --dry-run too (sources not produced yet are skipped there;
   # the copy below still stops on them). Silent for an lp_season rollout whose

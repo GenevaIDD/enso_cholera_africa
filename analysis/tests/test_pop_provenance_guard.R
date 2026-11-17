@@ -50,7 +50,7 @@ pop_legacy <- c(1, 1, 1, 209e6, 0, 50000) # the live defects
 pop_crosswalk <- c(120000, 84000, 33000, 5.2e6, 41000, 50000)
 
 # build_mean_rate_table() computes every cell as `suspected_cases / pop`. The
-# resulting table is persisted ONCE and thereafter read as a frozen sidecar --
+# resulting table is persisted once and thereafter read as a frozen sidecar --
 # by the 04_fit_siz_*.R scripts, and by simulator_core.R. Changing `pop`
 # (e.g. wiring the LP x gid crosswalk into 03_prepare_siz.R) invalidates
 # every cell of it. The required order is

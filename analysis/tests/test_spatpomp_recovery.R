@@ -174,27 +174,18 @@ draws_dur$fe[, "mso_band9P"] <- 0.2
 draws_dur$basehaz <- list(kind = "factor", breaks = .SIM_DUR_MSO_BREAKS)
 
 # ===========================================================================
-# Step 1 — simulate ONE ground-truth realization
+# Step 1 — simulate one ground-truth realization
 # ===========================================================================
-# Design (N-independent-runs, C-variant kernel):
-#   1. Build one spatPomp object under known, moderate occurrence + duration
-#      hazard parameters (fixed_draw_idx = 1L) and simulate() ONE ground-truth
-#      realization -> true Yout (onset) / active / mso trajectories.
-#   2. Feed the realized Yout back in as `obs_data` (gid, t_start, obs_Y) and
-#      rebuild under measurement="occurrence_bernoulli_state" (the near-delta
-#      measurement that conditions on the LATENT Yout state, not just the
-#      deterministic hazard `p` -- see .SP_STATE_MEAS in spatpomp_core.R) with
-#      the SAME occurrence/duration parameters.
-#   3. Run bpfilter (Np particles, save_states=TRUE) and read the filtered
-#      particle swarm's mean state at every (time, unit) from
-#      bpf@saved.states.
-#   4. Compare the filtered means against the KNOWN ground truth:
-#        - Yout is directly observed (near-delta) -> recovery should be ~exact.
-#        - active/mso are NOT observed directly (cessation is never signalled
-#          in the data -- only re-onset is) -> recovery is a genuine inference
-#          problem. The bar is "clearly better than the always-predict-
-#          majority-class baseline" and "positive correlation with the true
-#          trajectory", not near-exact recovery.
+# Design (N independent runs, C-variant kernel):
+#   1. Build under known occurrence + duration parameters (fixed_draw_idx = 1)
+#      and simulate() one ground truth (Yout, active, mso).
+#   2. Rebuild under measurement="occurrence_bernoulli_state" (near-delta on
+#      the latent Yout; .SP_STATE_MEAS) with the realised Yout as obs_data.
+#   3. bpfilter (save_states = TRUE); take the filtered mean state per
+#      (time, unit) from bpf@saved.states.
+#   4. Yout is observed, so recovery should be near-exact. active/mso are not
+#      (cessation is never observed), so the bar is beating the majority-class
+#      baseline and a positive correlation with the truth, not exact recovery.
 cat("## Step 1: simulate ground-truth occurrence+duration trajectory\n")
 
 obj_truth <- tryCatch(

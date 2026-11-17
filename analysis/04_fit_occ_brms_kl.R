@@ -199,24 +199,16 @@ if (nrow(pois_dat) == 0L) {
 }
 
 # 5. Model: basis, formula terms, nl formula, priors ---------------------------
-# The kernel over the dlnm `lags:` range (e.g. -11..11, negative = ENSO lead):
+# Kernel over the dlnm `lags:` range (negative = ENSO lead):
 #   ENSO term = sum_l w_l(kmu, ksd) * f(ENSO at lag l),
 # with f one natural-spline onebasis shared by every lag.
-#
-#   kernel.classes <= 1, no prior_grouping  -> one kernel; grouping mode allowed
-#   kernel.classes >= 2 or prior_grouping   -> K latent country classes with
-#                                              their own kernels, marginalised at
-#                                              country level; optional prior
-#                                              partition (kernel.prior_grouping)
-#                                              and ICAR spatial membership
-#                                              (kernel.spatial)
-#
-#   kernel.engine: stan (default) -> brms's program for the non-linear formula,
-#                                    patched into a vectorised one (any K) and
-#                                    sampled with cmdstanr; fit = kl_fit
-#   kernel.engine: brms           -> brms::brm() on the non-linear formula
-#                                    (single kernel; slow cross-check);
-#                                    fit = brmsfit
+# kernel.classes <= 1 and no prior_grouping: one kernel (grouping mode allowed).
+# Otherwise K latent country classes, each with its kernel, marginalised per
+# country; optional prior partition (kernel.prior_grouping) and ICAR membership
+# (kernel.spatial).
+# kernel.engine: stan (default; brms's program patched and vectorised, any K,
+# cmdstanr; fit = kl_fit) or brms (brm() on the nl formula, single kernel, a
+# slow cross-check; fit = brmsfit).
 
 m <- assemble_kl_model(
   opt,

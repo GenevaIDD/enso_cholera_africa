@@ -6,7 +6,7 @@
 #
 # Details:
 #   The centroid collapse (analysis/02_preprocess_climate.R) reduces every
-#   location period to ONE st_centroid(), so a composite LP (a union of K admin
+#   location period to one st_centroid(), so a composite LP (a union of K admin
 #   units) dumps all K units' cases AND population onto one arbitrary gid
 #   while the other K-1 are recorded as never having had an outbreak.
 #   apportion_composite_cases() replaces that with a population-share split
@@ -59,7 +59,7 @@ xwalk <- bind_rows(
   mk_xw("lp_comp7", sprintf("AAA.%d_1", 2:8), rep(10000, 7), 2015),
   mk_xw("lp_comp7", sprintf("AAA.%d_1", 2:8), rep(11000, 7), 2020),
   mk_xw("lp_uneven", sprintf("BBB.%d_1", 1:3), c(1000, 2000, 7000), 2020),
-  # the SAME LPs at ADM2 — a finer tiling of lp_single into two halves
+  # the same LPs at ADM2 — a finer tiling of lp_single into two halves
   mk_xw("lp_single", c("AAA.1.1_1", "AAA.1.2_1"), c(6000, 4000), 2015, "ADM2"),
   mk_xw("lp_single", c("AAA.1.1_1", "AAA.1.2_1"), c(6600, 4400), 2020, "ADM2")
 )
@@ -323,7 +323,7 @@ expect(
 # test_footprint_pop_reconciliation.R tests reconcile_footprint_pop() in
 # isolation. Neither covers the COMPOSITION, which is what
 # analysis/03_prepare_siz.R actually executes: apportion at the ob_ts3 seam,
-# then collapse per (gid, year_seas, admin_level) with sum() over BOTH columns,
+# then collapse per (gid, year_seas, admin_level) with sum() over both columns,
 # then reconcile the population. The interesting claim is a joint one --
 # `pop = sum(pop)` inside that collapse must land on exactly sum_l H[l,g], the
 # quantity reconcile_footprint_pop() expects as H_sum. If apportionment ever

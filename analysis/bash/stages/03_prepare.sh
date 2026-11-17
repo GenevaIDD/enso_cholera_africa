@@ -1,31 +1,22 @@
 #!/bin/bash
-# stages/03_prepare.sh — submit the 03 model-dataset steps as Slurm jobs, after
-# the 00-02 data leg (campaigns/preprocess.sh), so a rollout's inputs are built
-# on the cluster that fits them.
+# stages/03_prepare.sh — submit the 03 model-dataset steps as Slurm jobs after
+# the 00-02 data leg (campaigns/preprocess.sh):
 #
 #   [--after IDS] -> 03_prepare_occ.R            default panel (sim panels read it)
-#                 -> 03_prepare_occ.R            the deploy's panel (national zeros,
-#                                                at-risk start, ADM1 overlap, coverage report)
+#                 -> 03_prepare_occ.R            the deploy's panel
 #                 -> 03_prepare_siz.R -> 03_prepare_dur.R -> 03_prepare_mon.R
 #                 -> 03_prepare_sim_panel.R -> 03_prepare_sim_panel_projection.R
 #                 -> 03_prepare_sim_panel_extended.R (--extended-end)
 #   [--after IDS] -> 03_prepare_who_monthly.R
 #   [--after IDS] -> 03_prepare_rain_adm1.R      (reads climate_stats.sqlite)
 #
-# Both occurrence calls pass --redo TRUE (03_prepare_occ.R defaults to FALSE, 03_prepare_siz.R
-# to TRUE): with FALSE the occurrence prep can reuse a stale matched_ob_gids_seasonality_occ.rds,
-# whose episode digest then differs from the size / duration / monthly preps and deploy_fits
-# refuses the pair (assert_episode_coherence).
-#
-# The model and simulation steps run one after another: they share caches in
-# generated_data/ (seasonality matches, contagion distances) and the sim panels
-# re-download ENSO into the caches the others read. Back up the ENSO caches
-# before submitting (the panels' stamps do not cover ENSO values). Every step
-# runs with --force: the panels of the previous vintage are replaced.
-#
-# The panel spec, the projection's ENSO continuation and its CFSv2 correction
-# come from the deploy YAML (analysis/utils/preprocess_paths.R --deploy), so
-# bash names no artefact and no run.
+# Both occurrence calls pass --redo TRUE: a reused seasonality match would
+# carry a different episode digest and deploy_fits would refuse the pair
+# (assert_episode_coherence). Model and sim steps run in sequence (shared
+# generated_data/ caches; the sim panels re-download ENSO, so back up the
+# ENSO caches first). Every step runs with --force. Panel spec, ENSO
+# continuation and CFSv2 correction come from the deploy YAML
+# (utils/preprocess_paths.R --deploy).
 #
 # Usage:
 #   bash analysis/bash/stages/03_prepare.sh --deploy D.yml [--after JOBID[:JOBID...]]
@@ -33,8 +24,8 @@
 #       [--contagion-partition-source enso_grouping,hmm_clusters] [--who-zero-iso3 TZA]
 #       [--time 04:00:00] [--plan]
 #
-# Prints one *_JOB_ID= line per step and PREPARE_JOB_IDS= (all of them,
-# colon-joined: run_pipeline.sh --after takes it).
+# Prints one *_JOB_ID= line per step and PREPARE_JOB_IDS= (colon-joined, for
+# run_pipeline.sh --after).
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../../.."

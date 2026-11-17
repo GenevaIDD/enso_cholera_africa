@@ -117,7 +117,7 @@ if (length(state_files_all) == 0L) {
     )
     n_ok <- sum(vapply(recs, function(r) !is.null(r$filter_traj), logical(1)))
     # Schema token placed AFTER "_Np=<Np>_" (not between tu and Np) so the
-    # existing tu-extraction regex at 07b_simulator_spatpomp.R:396
+    # existing tu-extraction regex in 07b_simulator_spatpomp.R
     # (`^hist_filter_tu=(.*?)_Np=.*$`, non-greedy up to the first "_Np=")
     # keeps capturing exactly the TU name -- inserting the token earlier
     # would fold it into the captured TU string.
@@ -657,7 +657,7 @@ if (length(state_files_all) == 0L) {
 # The latent ribbons above are what the model believes happened; these are what
 # the surveillance record would have shown under the same delta_fn/delta_fp,
 # and are the like-for-like comparison with the observed series. Built with the
-# SAME aggregation functions on the detected subsets -- onsets: events
+# same aggregation functions on the detected subsets -- onsets: events
 # whose episode was detected; monthly cases: months of detected episodes;
 # ongoing: the detected-activity field. NULL (and has_detected = FALSE) for a
 # latent-feed run, whose event tables carry no `detected` column.
@@ -760,7 +760,7 @@ obs_occ_country <- obs_occ_base %>%
 # `cases_month`, spread across each episode's active months -- the estimand the
 # mon track is fit to reproduce (NOT the whole-episode total lumped onto the
 # onset month: the two conventions' monthly series correlate only ~0.48).
-# Put on the SAME footprint as obs_occ: coverage mask, then restricted to the
+# Put on the same footprint as obs_occ: coverage mask, then restricted to the
 # simulated frame (gid_meta join) using the frame's AFRO_region/country, and
 # to months the simulation produced. Without the frame restriction, a sizeable
 # share of observed case mass sits on gids with no simulated counterpart, so

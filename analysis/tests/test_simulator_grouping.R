@@ -153,7 +153,7 @@ cat(
 
   # evaluate_lp() uses a dual-key lookup: primary keys per
   # drop_region, falling back to the alternate format for misses (grouped
-  # brms_cb fits mix bare-country and AFRO-prefixed keys). So the SAME bundle
+  # brms_cb fits mix bare-country and AFRO-prefixed keys). So the same bundle
   # with drop_region=FALSE still finds the RE via the fallback.
   lp0 <- evaluate_lp(
     draws,
@@ -172,7 +172,7 @@ cat(
     "region-rooted lookup falls back to the region-dropped colnames"
   )
 
-  # Routing still depends on drop_region: when BOTH key formats are present,
+  # Routing still depends on drop_region: when both key formats are present,
   # the primary format for the given drop_region wins.
   rooted_key <- re_level_key(frame_tu, "adm2", drop_region = FALSE)[
     frame_tu$gid == target_gid

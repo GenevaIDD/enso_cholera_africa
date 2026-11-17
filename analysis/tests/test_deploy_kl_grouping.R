@@ -104,7 +104,7 @@ expect(
 # It reproduces make_kl_grouping.R's former inline body byte for byte.
 cat("# [2] same bytes as make_kl_grouping.R's former inline body\n")
 old_body <- function(fit, fill) {
-  # make_kl_grouping.R before the extraction (:60-78)
+  # make_kl_grouping.R before the extraction
   resp <- kl_responsibilities(fit)
   part <- kl_map_partition(fit, "argmax", resp)
   if (nzchar(fill)) {

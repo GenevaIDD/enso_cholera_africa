@@ -197,34 +197,15 @@ if (gid_season) {
 }
 
 # 4. Build ---------------------------------------------------------------------
-# The frame lets outbreak size be modelled WITHIN an outbreak rather than as
-# one whole-episode total, e.g.
-#
-#   suspected_cases_{i,m} ~ NegBin(mu_{i,m}, theta)
-#   mu_{i,m} = exp( admin_level + s(enso_lag<N>_m) + s(mso_m) + s(episode_id, re) )
-#              * pop_i * exposure_days_{i,m}
-#
-# Covariates are inherited from the duration panel: re-deriving them here
-# would mean a second copy of the seasonality/crosswalk match cascade and the
-# ENSO/climate lag joins, and the two copies would drift.
-#
-# Why this is not a simple (uid, location_period_id, month) join.
-# 01b_preprocess_outbreaks_monthly.R emits monthly cases keyed on
-# (uid, location_period_id, month) -- the grain the raw interval series
-# actually has, and it reconciles to outbreak_metadata.rds to 2e-16.
-# But a size/duration EPISODE is not a location period. 03_prepare_siz.R
-# collapses to one row per (gid, year_seas, admin_level) footprint, summing
-# cases across every location period that resolves to the same gid in the
-# same season-year and keeping the rest of the columns with `first()`. The
-# surviving uid / location_period_id is therefore a representative LABEL. On
-# this corpus 314/1581 episodes (29.7% of the case mass) carry cases absorbed
-# from sibling location periods, up to 127x their own label's total.
-# Joining monthly cases on (uid, location_period_id, month) would pass every
-# row-count and duplicate check -- and quietly return only the label LP's
-# series, giving a response on a narrower footprint than its own pop and
-# exposure offset. So the join goes through the footprint membership map that
-# 03_prepare_siz.R persists, on the key that is actually 1:1 with an episode:
-# (gid, year_seas, admin_level). See analysis/utils/footprint.R.
+# Monthly cases within an episode, for a model of the form
+#   cases_{i,m} ~ NegBin(mu_{i,m}, theta),
+#   mu_{i,m} = exp(eta_{i,m}) * pop_i * exposure_days_{i,m}.
+# Covariates come from the duration panel (one copy of the lag joins).
+# Monthly cases (01b, keyed on uid, location_period_id, month) are joined
+# through 03_prepare_siz.R's footprint membership map on (gid, year_seas,
+# admin_level), NOT on the episode's uid / location_period_id: those are a
+# representative label, and that join would silently keep only the label LP's
+# cases (footprint.R).
 
 # Episode-level footprint totals, taken from the panel itself so the
 # conservation gate compares the monthly series against the very numbers the
@@ -463,7 +444,7 @@ cat("=====================================================\n\n")
 
 MON_DAT_PATH <- make_monthly_dat_file(opt = opt)
 
-# Policy sidecar. Mirrors 03_prepare_dur.R:183 -- the artefact name is a
+# Policy sidecar. Mirrors the 03_prepare_dur.R one -- the artefact name is a
 # function of the baseline alone, so the inputs and the two judgement calls
 # (gap months set to 0, out-of-window mass dropped) would otherwise leave no
 # trace. No population denominator is chosen here, hence pop_digest = NA; the

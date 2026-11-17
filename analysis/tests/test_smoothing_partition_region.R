@@ -5,7 +5,7 @@
 #   Rscript analysis/tests/test_smoothing_partition_region.R
 #
 # Details:
-#   No fit, no data, no network. Running the phase-08 smoothing as ONE
+#   No fit, no data, no network. Running the phase-08 smoothing as one
 #   enso_region partition per ENSO group (instead of per country) lets the
 #   distance-weighted neighbour-contagion kernel couple ADM1 units ACROSS
 #   country borders inside the particle filter, not only later in the forward
@@ -149,7 +149,7 @@ expect(
 
 # ---------------------------------------------------------------------------
 # [3] smoothing_tu_list() enumerates ENSO groups, and a two-country one-group
-#     frame yields ONE partition whose per-partition frame holds BOTH
+#     frame yields one partition whose per-partition frame holds both
 #     countries' ADM1 units (so build_partition_nbr_kernel will span them).
 cat("\n[3] partition enumeration + per-partition frame spans both countries\n")
 

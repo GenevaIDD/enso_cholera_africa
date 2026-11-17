@@ -163,7 +163,7 @@ cat("\n## D) zero-mass group\n")
 cat("\n## E) grouping is independent per (lctn_pr, gadm_level, year)\n")
 {
   xw <- bind_rows(
-    # same lctn_pr, two gadm_level tilings of the SAME underlying LP: ADM1
+    # same lctn_pr, two gadm_level tilings of the same underlying LP: ADM1
     # sees it as clean (cover=1), ADM2 sees the finer split (composite).
     tibble(
       lctn_pr = "lp_mixed",
@@ -316,7 +316,7 @@ lvl_for <- function(tbl, lp) tbl[tbl$lctn_pr == lp, , drop = FALSE]
 
 # H2. Population concentration must NOT be read as a finer tiling.
 # A province whose capital district holds 92% of its people clears the
-# dominance threshold at BOTH levels. Refining to ADM2 would be wrong: it is
+# dominance threshold at both levels. Refining to ADM2 would be wrong: it is
 # one province, and 92% is a demographic fact, not a boundary fact. The area
 # tie-break decides — this is the fixture that rejects "finest admissible".
 {
@@ -354,7 +354,7 @@ lvl_for <- function(tbl, lp) tbl[tbl$lctn_pr == lp, , drop = FALSE]
 }
 
 # H3. A genuine sub-ADM1 LP (a city) stays at the finer tiling.
-# Its geometry sits inside ONE unit at both levels, so both acov == 1 and the
+# Its geometry sits inside one unit at both levels, so both acov == 1 and the
 # tie goes to ADM2 — the guard against over-coarsening every city to its
 # province, which is what "coarsest covering level" would have done.
 {
@@ -422,7 +422,7 @@ lvl_for <- function(tbl, lp) tbl[tbl$lctn_pr == lp, , drop = FALSE]
 
 # H5. Year stability. Population is redistributed across the 2015-2030 span, so
 # a per-year rule flips the level for some LPs. Reading one LP at two tilings
-# in two years would double-count its pieces, so the decision is taken ONCE per
+# in two years would double-count its pieces, so the decision is taken once per
 # LP from the MEDIAN cover.
 {
   mk_year <- function(y, cov1) {

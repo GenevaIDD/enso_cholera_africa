@@ -37,26 +37,11 @@ if (sys.nframe() == 0L) {
     library(dlnm)
   })
 
-  # Verified closure (grepped against every function call in the derivation
-  # half): results_core carries the track/group registries, the freshness +
-  # provenance contract, and the manifest/config accessors. gid/sim_io/
-  # simulator_core/figures_cb/loo_lags are each called by the derivers in utils/results_derive.R
-  # (build_location_frame, drop_overlapping_adm1_from_frame, build_coverage_mask,
-  # flatten_gid, build_onebasis_grid/erf_from_draws/get_re_vec/get_re_draws_mat,
-  # select_best_lag). The Phase-11 "key numbers" report adds population.R
-  # (load_gid_population/resolve_gid_population), dur_post.R (duration_ratio_draws/
-  # duration_ratio_summary), and dlnm.R (build_cb_columns_from_Q, for the
-  # construction-faithful duration RMD newdata). plots.R adds get_covar_type(), the
-  # classifier results_core's param_family() wraps for derive_track_params();
-  # plots.R's own closure (clim_compile for get_precip_vars/get_temp_vars, clim_db)
-  # comes with it. Deliberately NOT spatpomp_core.R: nothing here may be able to
-  # invoke a particle filter. deploy_core.R is sourced so that a non-empty
-  # results.deploy_config resolves (make_options_from_config() hard-stops if the
-  # pointer is set but resolve_results_inputs_from_deploy() is absent — the
-  # "dormant branch / missing source" trap); it is inert when deploy_config is "".
-  # obs_sim_compare / sim_metrics / hindcast_skill: the hindcast-skill section
-  # (ensure_hindcast(); scoring in utils/hindcast_skill.R). sim_metrics is pure
-  # at load; 09 calls only load_observed_from_panel() from it.
+  # Module closure of the derivation half (who calls what:
+  # analysis/utils/README.md). Deliberately NOT spatpomp_core.R: nothing here
+  # may run a particle filter. deploy_core.R is sourced so a non-empty
+  # results.deploy_config resolves (else make_options_from_config() hard-stops:
+  # the dormant-branch trap); it is inert when deploy_config is "".
   for (.m in c(
     "results_core",
     "gid",

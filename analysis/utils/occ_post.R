@@ -30,18 +30,10 @@ adm1_lineage_levels <- function(adm1_level) {
 
 # Poisson / brms postprocessing ------------------------------------------
 #
-# Adapter that turns a brms Poisson-GLMM fit (analysis/04b_run_poisson_models.R)
-# into the nested list of RE summaries the figures consume.
-#
-# brms parameter naming (per posterior::as_draws_df):
-#   - Fixed effects:           `b_<term>` and `b_Intercept`
-#   - Group-level deviations:  `r_<group>[<level>,<term>]`
-#   - With nested syntax `(x | A/B/C)` brms expands to three groups:
-#       `A`, `A:B`, `A:B:C` — names joined with ":"
-#
-# We expect the model formula to mirror 04_run_survival_models.R, i.e. groups
-# named `AFRO_region`, `AFRO_region:country`, `AFRO_region:country:ADM1`.
-#
+# Adapter: a brms Poisson-GLMM fit (04_fit_*_brms*.R) -> the nested list of RE
+# summaries the figures consume. brms names: fixed effects `b_<term>`,
+# deviations `r_<group>[<level>,<term>]`; nested `(x | A/B/C)` expands to groups
+# A, A:B, A:B:C. Groups are rooted at country (grouping mode) or AFRO_region.
 # Output: list(re_stats_region, re_stats_country, re_stats_adm1) with columns
 # variable, AFRO_region (+country +adm1_unit), var, var_type, var_type0,
 # var_type1, var_type2, mean, q025, q975, covar_type, covar.

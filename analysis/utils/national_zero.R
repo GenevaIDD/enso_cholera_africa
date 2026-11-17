@@ -19,23 +19,17 @@
 #
 # See: build_national_zero_months() for the rule
 
-# Rule registry: analysis/national_zero_rules.yml holds named parameter sets;
-# `legacy` = the 01 CLI defaults of the earlier panels, `r2` adds the options
-# below. Two rule options beyond the legacy ones, both off in `legacy`:
-#   * head_window (head guard, the mirror of the tail guard): the first
-#     `head_window` months of a below-threshold year are claimed only if the
-#     PREVIOUS year is also below the threshold -- a high year's epidemic that
-#     WHO counted but the database did not record can run into January-April;
-#   * consistency_scope = "all": the database-vs-WHO check (db_who_consistency())
-#     also removes months that rest on a WHO EXACT zero contradicted by the
-#     database (who_zero and no national zero), not only threshold months.
-# Both shape output only when on: at the legacy values every output (and its
-# attributes) is identical to a run without them.
-# One optional rule key (absent = false, so legacy and r2 keep their digests):
-#   * head_missing_quiet (r3): under the head guard a previous year with NO WHO
-#     figure counts as quiet (below the threshold); without it a missing year
-#     blocks the head months. The tail guard is unchanged: a missing next year
-#     still blocks the tail months.
+# Rule registry: analysis/national_zero_rules.yml (named parameter sets;
+# `legacy` = the old 01 CLI defaults). Options beyond legacy, off there:
+#   * head_window: the first `head_window` months of a below-threshold year
+#     count only if the previous year is also below the threshold;
+#   * consistency_scope = "all": db_who_consistency() also drops WHO exact
+#     zeros that the database contradicts;
+#   * head_missing_quiet (r3; absent = false): under the head guard, a
+#     previous year with no WHO figure counts as quiet. The tail guard is
+#     unchanged.
+# At the legacy values every output and attribute is unchanged, so legacy and
+# r2 keep their digests.
 NATIONAL_ZERO_RULES_PATH <- "analysis/national_zero_rules.yml"
 .NATIONAL_ZERO_RULE_KEYS <- c(
   "zero_day_frac",
@@ -347,25 +341,18 @@ parse_national_zero_exclude <- function(x) {
 
 # Rule (one country-month):
 #   ((national 0 AND no WHO > 0) OR (WHO 0 AND no national > 0))
-#     AND no sub-national cases that month
-#     AND no active database outbreak that month
+#     AND no sub-national cases AND no active database outbreak that month
 #     AND not excluded (default ETH 2011-2014, AWD-era WHO zeros)
-# A missing WHO row is "no WHO > 0", a month without national reports is
-# "no national > 0". Neither source alone is trusted: national zeros miss
-# sub-national cases (15% of national-zero months), and some WHO zeros are
-# reporting artefacts.
+# A missing WHO row counts as "no WHO > 0"; a month without national reports
+# as "no national > 0".
 #
-# Threshold variant (zero_threshold > 0; 01 --zero_threshold): an outbreak
-# needs >= 50 suspected cases over its life, so a WHO country-year with fewer
-# than `zero_threshold` cases (max over the WHO sources) cannot hold an onset
-# whose episode accrues its cases inside the year. Its months become
-# national-zero months (source "who_below_threshold") with the same
-# sub-national / active-outbreak / exclusion drops, except the last `window`
-# months, whose episodes can run into the next year: those are claimed only if
-# the next year is also below the threshold. Country-years where the database's
-# own episode cases exceed the WHO total (db_who_consistency()) are excluded
-# from this branch. At zero_threshold = 0 the output is exactly the exact-zero
-# rule.
+# Threshold variant (zero_threshold > 0): a WHO country-year under the
+# threshold (max over WHO sources) cannot hold a >= 50-case onset, so its
+# months become national-zero months (source "who_below_threshold") with the
+# same drops. Its last `window` months count only if the next year is also
+# below the threshold. Country-years whose database cases exceed the WHO
+# total (db_who_consistency()) are excluded. zero_threshold = 0 gives the
+# exact-zero rule.
 #' build_national_zero_months
 #'
 #' Apply the national-zero rule (see above) on a country x month grid.

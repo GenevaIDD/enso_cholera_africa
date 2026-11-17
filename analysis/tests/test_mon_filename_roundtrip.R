@@ -159,7 +159,7 @@ expect(
 # ---------------------------------------------------------------------------
 # 3. Load-bearing fields separate
 # ---------------------------------------------------------------------------
-# Each entry is a config that differs from the default in exactly ONE field.
+# Each entry is a config that differs from the default in exactly one field.
 # None may collide with the default, or with each other.
 # The fields that MUST separate: baseline, country/group scope, backend,
 # kind, family, seasonal_term, admin_level, the re_adm2_intercept flag,

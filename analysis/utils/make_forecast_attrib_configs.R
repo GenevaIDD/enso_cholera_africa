@@ -176,23 +176,15 @@ attrib_combined_dir <- function(combined_factual) {
 # Entry point (deploy_prod_run.R --stage gen_attrib, or the CLI below)
 # ---------------------------------------------------------------------------
 
-# Why: with the factual launched later than the counterfactual, the
-# attribution window would mix months where the factual is the data-conditioned
-# smoothing with a free counterfactual, and the two arms would start from
-# different information. A factual launched at the counterfactual handoff, from
-# the same smoothing replicate, with the same seed, replicates and
-# posterior-draw design, is paired with the counterfactual replicate by
-# replicate (smoothing replicate + posterior draw; the random streams diverge
-# after the first month), so factual - counterfactual isolates the ENSO
-# trajectory. The difference between the two factuals is the information
-# component (09's report_attrib_information).
-#
-# Overwrite policy (as gen_templates): absent -> written; equal on every leaf
-# but simulator.run_id -> left as is; different -> refused with a leaf diff
-# unless --force. `_attrib` configs of units no longer in the manifest are
-# pruned. A rollout whose factual already launches at the counterfactual
-# handoff needs no extra arm: no config is written and the attribution
-# manifest names the forecast manifest's own factual runs.
+# The attribution factual launches at the counterfactual handoff, from the
+# same smoothing replicate, seed, replicates and posterior-draw design, so
+# factual - counterfactual isolates the ENSO trajectory replicate by replicate.
+# The gap between the two factuals is the information component (09's
+# report_attrib_information).
+# Overwrite policy (as gen_templates): absent -> written; equal but for
+# simulator.run_id -> kept; different -> refused unless --force. Configs of
+# units no longer in the manifest are pruned. If the factual already launches
+# at the counterfactual handoff, no config is written.
 #' generate_forecast_attrib_configs
 #'
 #' @param o list(manifest, attrib_manifest, dry_run, force).

@@ -366,42 +366,8 @@ if (length(erf_rows) > 0) {
     message(sprintf("Lag %2d: done.", sl))
   }
 
-  # region_colours <- tryCatch(taxdat::colors_afro_regions(), error = function(e) NULL)
-
-  # Figure 1b: region ERF by lag --------------------------------------------
-  #
-  # if (length(region_rows_g) > 0) {
-  #   reg_df <- dplyr::bind_rows(region_rows_g) %>%
-  #     dplyr::mutate(lag_f = factor(lag, levels = sort(unique(lag))))
-  #
-  #   p_erf_region <- ggplot(reg_df,
-  #                          aes(x = exposure, y = logRR,
-  #                              colour = AFRO_region, fill = AFRO_region,
-  #                              group = AFRO_region)) +
-  #     geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
-  #     geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15, colour = NA) +
-  #     geom_line(linewidth = 0.7) +
-  #     facet_grid(rows = vars(AFRO_region), cols = vars(lag_f)) +
-  #     labs(
-  #       title    = sprintf("ENSO exposure-response by region and lag (%s)", model %||% "?"),
-  #       subtitle = "Pop. CB draws + region RE; ribbon = 95% CI; centered at ENSO = 0",
-  #       x = "ENSO index", y = "log-RR",
-  #       colour = "AFRO region", fill = "AFRO region"
-  #     ) +
-  #     theme_bw(base_size = 9) +
-  #     theme(legend.position = "none",
-  #           strip.text.x    = element_text(size = 7),
-  #           strip.text.y    = element_text(size = 8, angle = 0, hjust = 0))
-  #   if (!is.null(region_colours))
-  #     p_erf_region <- p_erf_region +
-  #     scale_colour_manual(values = region_colours) +
-  #     scale_fill_manual(values  = region_colours)
-  #   n_lags_reg <- dplyr::n_distinct(reg_df$lag)
-  #   save_fig(p_erf_region, paste0("lag_compare_erf_region", grp_sfx),
-  #            width = n_lags_reg * 1.6 + 2, height = 4 * 2.2 + 1.5)
-  # } else {
-  #   message("No region ERF rows — skipping lag_compare_erf_region.")
-  # }
+  # Figure 1b (ERF by AFRO region and lag) is disabled: grouping mode drops
+  # AFRO_region.
 
   # Figure 1c: country ERF by lag -------------------------------------------
 
@@ -473,7 +439,7 @@ if (length(erf_rows) > 0) {
 
 # 8. Figure 2: elpd by lag (from 05b ranking) ----------------------------------
 
-# Under --group the ranking must be the SAME group's ranking, otherwise the
+# Under --group the ranking must be the same group's ranking, otherwise the
 # elpd panel silently describes a different subregion than the ERF panels.
 # utils/loo_lags.R: <outdir>/loo_compare/<batch>/ first, legacy in-config-dir
 # fallback; latest by filename date, then mtime. group = NULL takes the

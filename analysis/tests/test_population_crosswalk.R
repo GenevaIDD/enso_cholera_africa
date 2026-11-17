@@ -97,8 +97,9 @@ lp_sf <- sf::st_sf(
 # estimate_pop_for_geometries() that the kernel is written around:
 #   * the raster is COUNTRY-CLIPPED — mass outside the task's country is 0, which
 #     is what makes summing P_direct across tasks correct for a cross-border LP;
-#   * `extracted[extracted <= 0] <- NA_real_` (R/add_population.R:508-510) — so
-#     the NA-coalescing path for zero-mass pieces is genuinely exercised.
+#   * `extracted[extracted <= 0] <- NA_real_` (OutbreakExtractR
+#     add_population.R) — so the NA-coalescing path for zero-mass pieces is
+#     genuinely exercised.
 #
 # --- the stub ----------------------------------------------------------------
 country_geom <- lapply(c("AAA", "BBB"), function(k) {
@@ -494,7 +495,7 @@ cat("\n[11] duplicate-geometry LPs (detect_geom_dup_lps)\n")
 mk_xw_dup <- function() {
   tibble::tribble(
     ~lctn_pr , ~gadm_level , ~year , ~gid      , ~H   ,
-    # lp_a and lp_b: byte-identical H at BOTH gids, BOTH years -> a genuine
+    # lp_a and lp_b: byte-identical H at both gids, both years -> a genuine
     # duplicate cluster (mirrors the Conakry case: same polygon, two ids).
     "lp_a"   , "ADM1"      , 2020L , "X.1_1"   , 1000 ,
     "lp_a"   , "ADM1"      , 2021L , "X.1_1"   , 1010 ,

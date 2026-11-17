@@ -171,7 +171,7 @@ expect(
 # ---------------------------------------------------------------------------
 # The invariant that makes `fixed` and `free` NESTED rather than merely
 # similar: log_pop_c is centred WITHIN admin_level, so a coefficient of 0
-# reproduces the offset-only model EXACTLY.
+# reproduces the offset-only model exactly.
 cat("\n[3] P4: log_pop_c centring\n")
 
 d_p4 <- data.frame(

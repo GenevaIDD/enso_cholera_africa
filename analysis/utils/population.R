@@ -21,21 +21,14 @@
 # LP x gid population crosswalk -- accessors
 # ===========================================================================
 #
-# Globally-keyed sidecars that fit time and simulate time must read through
-# the SAME function so the two sides cannot drift.
-#
-#   P_l = sum_g H[l,g]   population of a LOCATION PERIOD -- the denominator of
-#                        an OBSERVATION (size fits)
-#   Q_g                  population of a GADM UNIT -- the denominator of a
-#                        FORECAST UNIT (simulator, smoothing)
-#   c[g<-l] = H[l,g]/Q_g share of gid g covered by LP l -- the observation
-#                        operator that maps simulated gid cases into LP space
-#
-# Composite detection is NOT re-implemented here: `gid_cover`, `n_gid_eff` and
-# `is_composite` are materialised onto the crosswalk by
-# derive_crosswalk_shares() at compile time, so consumers join rather than
-# recompute. compute_gid_cover() lives in analysis/utils/population_core.R for the
-# rare consumer that needs it from raw H.
+# Fit and simulate time read these sidecars through the same functions.
+#   P_l = sum_g H[l,g]    LP population, denominator of an observation
+#   Q_g                   gid population, denominator of a forecast unit
+#   c[g<-l] = H[l,g]/Q_g  share of gid g covered by LP l (the observation
+#                         operator from gid cases to LP space)
+# Composite flags (`gid_cover`, `n_gid_eff`, `is_composite`) are written by
+# derive_crosswalk_shares() at compile time: join them, do not recompute.
+# compute_gid_cover() (population_core.R) works from raw H.
 
 if (!exists(".POP_XWALK_CACHE", envir = globalenv(), inherits = FALSE)) {
   .POP_XWALK_CACHE <- new.env(parent = emptyenv())
@@ -478,21 +471,13 @@ expected_lp_from_gid_rates <- function(
 # ---------------------------------------------------------------------------
 # Composite apportionment and footprint population reconciliation
 #
-# These two functions exist to delete two silent defects that live between the
-# LP-keyed epi corpus and the gid-keyed model frame:
-#
-#   * the CENTROID COLLAPSE (analysis/02_preprocess_climate.R:72-106) reduces every
-#     LP to one st_centroid(), so a composite LP -- a union of K admin units --
-#     dumps all K units' cases AND all K units' population onto one arbitrary
-#     gid, while the other K-1 are recorded as never having had an outbreak;
-#   * `pop = sum(pop)` (analysis/03_prepare_siz.R:190) aggregates a STOCK with a
-#     flow rule, so two location periods reaching the same (gid, season) bucket
-#     have their populations ADDED, and an empty group makes sum() return 0.
-#
-# Both are pure functions of the crosswalk built by 02c_preprocess_population_compile.R, so
-# both are unit-testable without a raster, a database, or data/ access -- see
-# analysis/tests/test_case_apportionment.R and
-# analysis/tests/test_footprint_pop_reconciliation.R.
+# Two fixes between the LP-keyed corpus and the gid-keyed frame:
+#   * apportionment: a composite LP's cases and population are spread over
+#     its member gids instead of landing on one centroid gid;
+#   * footprint population: pop is a stock, never summed across location
+#     periods that share a (gid, season).
+# Pure functions of the 02c crosswalk. Gates: tests/test_case_apportionment.R,
+# tests/test_footprint_pop_reconciliation.R.
 # ---------------------------------------------------------------------------
 
 #' .nearest_crosswalk_year
@@ -528,23 +513,12 @@ expected_lp_from_gid_rates <- function(
 #' apportion_composite_cases
 #'
 #' Expand each location-period row into one row per member GADM gid, splitting
-#' the case count by the crosswalk population share w[l->g] = H[l,g] / P_l and
-#' giving each member row `pop = H[l,g]`.
-#'
-#' WHY BOTH SCALE BY THE SAME w. Cases and population are divided by the same
-#' factor, so the implied attack rate `cases / pop` is INVARIANT per member and
-#' identical to the LP's. read_size_data()'s max_attack_rate guard therefore sees
-#' exactly what it saw before, and the apportionment cannot manufacture an
-#' implausible incidence. `min_pop` is different: it is an absolute floor, so
-#' small-w members legitimately fall below it -- callers should count those.
-#'
-#' WHAT THIS DOES NOT CLAIM. Splitting one aggregate observation into K rows
-#' fabricates K pseudo-observations that a likelihood will treat as K
-#' independent data points, overstating precision. That is the known price of
-#' the S-ii route (the alternative, S-iv, relocates the same assumption to the
-#' smoothing handoff). The `apportioned` / `n_apportion_members` columns are the
-#' hook for the mitigation: a sensitivity run can NA the response on those rows,
-#' or widen the measurement dispersion in proportion to the member count.
+#' the case count by the population share w[l->g] = H[l,g] / P_l and giving each
+#' member row `pop = H[l,g]`. Cases and population share the same w, so the
+#' attack rate per member equals the LP's. `min_pop` is an absolute floor, so
+#' small-w members can fall below it; callers should count those. The K member
+#' rows are pseudo-observations that overstate precision; `apportioned` and
+#' `n_apportion_members` mark them for sensitivity runs.
 #'
 #' @param dat        tibble; one row per (location period, event).
 #' @param xwalk      crosswalk from load_population_crosswalk().
@@ -560,8 +534,8 @@ expected_lp_from_gid_rates <- function(
 #'                   (the centroid match) is preserved as `gid_centroid`.
 #' @param level_col  optional column of `dat` giving the row's admin level; any
 #'                   value other than "ADM1" selects the ADM2 tiling, mirroring
-#'                   `admin_level_simple` at 02_preprocess_climate.R:77-78. When
-#'                   NULL or absent, `gadm_level` is used for every row.
+#'                   `admin_level_simple` in 02_preprocess_climate.R section 4.
+#'                   When NULL or absent, `gadm_level` is used for every row.
 #' @param gadm_level scalar tiling used when `level_col` is unavailable.
 #' @param keep_unmatched if TRUE (default) LPs absent from the crosswalk pass
 #'                   through unchanged, tagged pop_tier = "unmatched_lp"; if
@@ -678,13 +652,13 @@ apportion_composite_cases <- function(
 #'
 #' The denominator for a (gid, season, admin_level) bucket after the footprint
 #' collapse. Replaces `pop = sum(pop, na.rm = TRUE)`
-#' (analysis/03_prepare_siz.R:190), which is a flow rule applied to a stock.
+#' (analysis/03_prepare_siz.R), which is a flow rule applied to a stock.
 #'
 #'   pop = min( sum_l H[l,g] , Q_g )
 #'
 #' Two location periods that tile the gid (ADM3 children relabelled to their
 #' ADM2 parent) sum correctly, because their H pieces are disjoint. Two location
-#' periods that BOTH report the whole gid saturate at Q_g instead of doubling
+#' periods that both report the whole gid saturate at Q_g instead of doubling
 #' it. The cap is the entire point: no set of location periods can contain more
 #' people than the gid does.
 #'
@@ -777,32 +751,15 @@ reconcile_footprint_pop <- function(
 # One source of truth for a gid's admin level
 # ===========================================================================
 #
-# `admin_level` arrives from the outbreak corpus as a LABEL, and it is wrong
-# often enough to matter: measured against the canonical `gadm_level` in
-# `gid_population_<Y0>-<Y1>.qs`, 157 of 616 simulator-frame gids (25.5%) and
-# 468 of 1582 size rows disagree. That matters because `admin_level` is not
-# cosmetic -- it is the POOLING KEY for `build_mean_rate_table()` and the
-# stratifying key for the population elasticity, so a mis-keyed row is pooled
-# with the wrong cell and gets the wrong elasticity.
-#
-# The sharpest symptom: the canonical table contains NO ADM3 UNITS AT ALL,
-# while the frame labels 77 gids "ADM3" (canonically 7 ADM1 + 70 ADM2). Every
-# ADM3 quantity downstream -- the ADM3 `mean_rate` cells, the ADM3
-# `level_factor`, the "at ADM3 size is independent of population" elasticity
-# reading -- is therefore computed on a PHANTOM level. Re-keying moves the
-# aggregate simulated mass by a factor of 0.708.
-#
-# WHY NOT parse the gid string. The obvious fix -- count separators, since
-# "AGO_10_1" looks like it encodes depth -- DOES NOT WORK. Gids carry a
-# trailing GADM version component, so `ADM(depth - 1)` assigns ADM1 to nothing
-# and mislabels everything else.
-#
-# WHY NOT fix it in place at the source. The corpus label is what the outbreak
-# database asserts, and it is also what `filter_overlapping_adm1()` and
-# `drop_overlapping_adm1_from_frame()` currently key off. Overwriting it silently
-# would change which rows those filters drop, with no record. So this function
-# writes a NEW column, keeps the original as `admin_level_corpus`, and reports
-# the disagreement count -- the correction is opt-in and auditable.
+# `admin_level` from the corpus is a label and often disagrees with the
+# canonical `gadm_level` (the gid population table has no ADM3 at all). It is
+# the pooling key of build_mean_rate_table() and the population-elasticity
+# strata, so a mis-keyed row is pooled in the wrong cell.
+# Depth cannot be parsed from the gid string: gids carry a trailing GADM
+# version component.
+# The corpus label stays (filter_overlapping_adm1() and
+# drop_overlapping_adm1_from_frame() key off it): this writes a new column,
+# keeps the original as `admin_level_corpus` and reports the disagreements.
 
 #' canonical_admin_level_table
 #'

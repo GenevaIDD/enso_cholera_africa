@@ -1,44 +1,30 @@
 #!/bin/bash
 # stages/06_fit_figures_lag_compare.sh — submit the cross-lag comparison
-# figures step (06_fit_figures_lag_compare.R) as a SLURM ARRAY job.
+# figures (06_fit_figures_lag_compare.R) as a SLURM array, one task per
+# (track, group).
 #
-# Companion to stages/05_loo_compare.sh / stages/05_postprocess_cb.sh:
-# fans out one array task per (track, group) instead of looping serially:
-#
-#   for G in enso_east enso_horn enso_south enso_west; do
-#     Rscript analysis/06_fit_figures_lag_compare.R -d <occ_batch> --group $G
-#     Rscript analysis/06_fit_figures_lag_compare.R -d <size_batch> --group $G
-#   done
-#
-# Requires, per lag config in the batch: cb_surfaces (05_fit_postprocess_cb.R)
-# and the group's loo_compare_lags ranking (05_fit_postprocess_loo_lags.R, under
-# generated_data/loo_compare/<batch>/) to already exist — run stages/05_postprocess_cb.sh and
-# stages/05_loo_compare.sh first (or chain via --dependency=afterok).
+# Needs, per lag config: cb_surfaces (05_fit_postprocess_cb.R) and the group's
+# loo_compare_lags ranking (generated_data/loo_compare/<batch>/): run
+# stages/05_postprocess_cb.sh and stages/05_loo_compare.sh first, or chain with
+# --dependency afterok:<ids>.
 #
 # Usage:
 #   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --occ-dir <dir>
-#   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --occ-dir <dir> --groups enso_east,enso_west
-#   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --track both --occ-dir <d1> --size-dir <d2>
 #   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --track dur --dur-dir <dir>
-#   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --track mon --mon-dir <dir>
 #   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --occ-dir <dir> --format pdf --dpi 300
 #   bash analysis/bash/stages/06_fit_figures_lag_compare.sh --occ-dir <dir> --dependency afterok:12345 --list
 #
 # Options:
-#   --track {occ|size|dur|mon|both}  Which track(s) to draw  [default: occ] (both = occ+size)
-#   --groups G1,G2,...        Comma list of ENSO groups      [default: enso_east,enso_horn,enso_south,enso_west]
-#   --occ-dir DIR             Occurrence batch config dir
-#   --size-dir DIR            Size batch config dir
-#   --dur-dir DIR             Duration batch config dir
-#   --mon-dir DIR             Monthly batch config dir
-#   --concurrency K           Cap simultaneous array slots   [default: all]
-#   --format {png|pdf}        Forwarded to 06_fit_figures_lag_compare.R [default: png]
-#   --dpi N                   Forwarded to 06_fit_figures_lag_compare.R [default: 150]
-#   --dependency SPEC         Forwarded verbatim to sbatch --dependency (e.g. afterok:12345)
-#   --list                    Print the (track, group) job list and exit (no submit)
-#
-# Prints the submitted array job id on stdout as "FIG_JOB_ID=<id>" (last line)
-# so callers can chain further steps.
+#   --track T          occ | size | dur | mon | both (occ+size) [default: occ]
+#   --groups G1,...    ENSO groups [default: enso_east,enso_horn,enso_south,
+#                      enso_west]
+#   --occ-dir / --size-dir / --dur-dir / --mon-dir DIR   Batch config dirs
+#   --concurrency K    Cap simultaneous array slots [default: all]
+#   --format {png|pdf} Figure format [default: png]
+#   --dpi N            Figure resolution [default: 150]
+#   --dependency SPEC  Forwarded to sbatch --dependency
+#   --list             Print the (track, group) jobs and exit
+# Last stdout line: FIG_JOB_ID=<id>.
 
 set -euo pipefail
 

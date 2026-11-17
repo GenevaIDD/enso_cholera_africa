@@ -402,34 +402,15 @@ message(sprintf("   observed ONI sd (%s): %.4f", opt$sd_window, sd_obs))
 # Extract: utils/enso.R::lenssen_extract_rda() (shared with 03_prepare_lenssen_analogs.R)
 # into <zenodo_dir>/extracted/<model>/.
 
-# Past the last CFSv2 target month, each replicate's ENSO is continued by a
-# k-nearest-neighbour analog drawn from this library, matched on the
-# replicate's own seam state (calendar month, ONI, 3-month tendency
+# Past the last CFSv2 month, each replicate's ENSO continues with a k-NN
+# analog from this library, matched on its seam state (calendar month, ONI,
 # ONI(m) - ONI(m-3), ONI(m-6)) and joined with a fading offset
-# (enso.R::continue_enso_analog()). Validated on 468 observed seams
-# (1982-2020: best fair CRPS at every lead window vs neutral / ar1 /
-# climatology).
-#
-# Unlike generated_data/lenssen_nino34_analogs.rds
-# (03_prepare_lenssen_analogs.R, pre-matched to ONE start month and ONE ONI
-# value for the counterfactual), this library stores whole series and
-# per-month features, so any seam can be matched at run time. Rebuild: never
-# needed for piControl (fixed archive); only when the rescale window or the
-# horizon changes.
-#
-# Inputs:
-#   <zenodo_dir>/extracted/<model>/step01_InitVerifInfo.Rda  (extracted by
-#     03_prepare_lenssen_analogs.R, or here from <zenodo_dir>/<model>.zip);
-#     `nino34` is the detrended 3-month-mean ONI-equivalent, `timeMap[, 2]`
-#     the calendar month.
-#   Observed ONI cache (fetch_enso_index("oni")): only for the rescale sd.
-# Each model's series is rescaled to the observed ONI sd over --sd_window
-# (03_prepare_lenssen_analogs.R uses the full record).
-#
-# Outputs:
-#   generated_data/enso_continuation_library.qs
-#     (paths.R::make_enso_continuation_library_file())
-#   generated_data/enso_continuation_library_meta.yml
+# (enso.R::continue_enso_analog()). Unlike lenssen_nino34_analogs.rds, it
+# stores whole series and per-month features, so any seam matches at run time.
+# Rebuild only when the rescale window or the horizon changes.
+# Inputs: <zenodo_dir>/extracted/<model>/step01_InitVerifInfo.Rda (nino34,
+# timeMap[, 2] = month); the observed ONI cache (rescale sd over --sd_window).
+# Outputs: make_enso_continuation_library_file() .qs + _meta.yml.
 
 series <- list()
 feats <- list()

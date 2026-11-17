@@ -20,30 +20,19 @@
 #
 # See: analysis/utils/README.md
 
-# Stage 1 (single kernel): the single-lag ENSO onebasis of brms_cb is
-# replaced by a normalised Gaussian kernel over the dlnm `lags:` range,
+# Stage 1 (single kernel): the single-lag ENSO onebasis of brms_cb becomes a
+# normalised Gaussian kernel over the dlnm `lags:` range, as a brms non-linear
+# formula (nlpars kmu, ksd, kb1..kbJ; `mu`/`sigma` are reserved dpar names):
 #
 #   kl_i = sum_l w_l(kmu, ksd) * sum_j kb_j * B_j(ENSO at lag l, row i),
-#   w_l  = exp(-(l - kmu)^2 / (2 ksd^2)) / sum_l' exp(-(l' - kmu)^2 / (2 ksd^2)),
+#   w_l  = softmax_l(-(l - kmu)^2 / (2 ksd^2)).
 #
-# written as a brms non-linear formula (`lin` = the usual occurrence linear
-# predictor; nlpars kmu, ksd, kb1..kbJ -- `mu`/`sigma` are reserved brms dpar
-# names). B is ONE onebasis shared by every lag (build_cb_block() `lags:` mode,
-# utils/dlnm.R), so kb_j means the same exposure function at every lag and
+# B is one onebasis shared by every lag (build_cb_block() `lags:` mode), so
 # ksd -> 0 recovers the single-lag model at lag kmu.
-#
 # Stage 2 (kernel.classes >= 2): K latent country classes, each with its own
-# (kmu_k, ksd_k, kb_k), marginalised at country level. The Stan program is the
-# stage-1 brms program (brms::stancode()) patched at fixed landmarks
-# (patch_kl_latent_class_stancode()); membership logits can carry a prior
-# partition (kernel.prior_grouping) and an ICAR spatial term
-# (kernel.spatial). See the stage-2 section below.
-#
-# Forms (kernel.form): "gaussian" (above; kmu, ksd sampled), "dlnm" (class
-# B-spline lag basis, group horseshoe) and "discrete": Gaussian kernels whose
-# centres sit on the lag grid and whose widths come from a short list
-# (kernel.discrete), the class centres ordered (ties allowed) and summed out
-# exactly -- see "Form discrete" in the stage-2 section.
+# kernel, in a patched brms Stan program (section below).
+# Forms (kernel.form): "gaussian", "dlnm" (B-spline lag basis, horseshoe),
+# "discrete" (centres on the lag grid, widths from kernel.discrete).
 .KL_NLPAR <- list(mu = "kmu", sigma = "ksd", beta = "kb")
 
 # ---------------------------------------------------------------------------
@@ -179,38 +168,32 @@ kl_spatial_prior <- function(kcfg) {
 
 #' kl_identify
 #'
-#' How the latent classes are identified (label switching broken):
-#'   "kmu"    ordered lag centres (classes = lag rank);
-#'   "anchor" prior-partition pull kappa * A + class kmu priors at the groups'
-#'            deployed lags (class k = registry group k); needs prior_grouping;
-#'   "erf"    ordered exposure-response contrast: log RR at kernel.erf_at vs
-#'            cen (classes = rank of the El Nino response). With a prior
-#'            partition, the registry sets K and names classes after sampling
-#'            (majority of member countries), but adds no anchoring term.
-#'   "relabel" (form dlnm) exchangeable classes, each draw relabelled after
-#'            sampling by sorting on kcon (log RR at erf_at vs cen); the
-#'            registry, if any, names classes (see kl_relabel_draws()).
-#'   "lagorder" (form discrete) class centres ordered by lag, ties allowed;
-#'            classes tied on a lag are relabelled after sampling by kcon
-#'            (kl_relabel_draws(lag = "klag")); the registry, if any, names
-#'            classes.
-#'   "seed"   (forms gaussian / dlnm) class k holds the seed country (or
-#'            countries) of prior group k (kernel.seeds; fixed membership,
-#'            kl_fix) -- labels fixed by the seeds, centres unordered, one run;
-#'            every other country is free. Needs prior_grouping. With
-#'            prior_grouping.membership: yes the other countries also get the
-#'            kappa * A pull towards their registry group (kmu priors unchanged).
-#'   "repel"  (form gaussian) exchangeable classes, no seeds, kept apart by a
-#'            pairwise repulsive prior on their distance in (lag centre,
-#'            exposure-response) space (kernel.repel; kl_repel_cfg()), so two
-#'            classes may share a lag when their ENSO responses differ. With a
-#'            prior partition and prior_grouping.membership: yes, the registry
-#'            pull is label-free (kappa * group-level class logits, any K);
-#'            each draw is relabelled after sampling and the classes are named
-#'            after the registry (kl_repel_relabel()).
-#'   "auto"   = "lagorder" for form discrete, "relabel" for form dlnm;
-#'            otherwise "anchor" with a prior partition, else "kmu" (the
-#'            original rule).
+#' How the latent classes are identified (breaks label switching):
+#'   "kmu"      classes ordered by lag centre (classes = lag rank).
+#'   "anchor"   prior-partition pull kappa * A plus class kmu priors at the
+#'              groups' deployed lags (class k = registry group k); needs
+#'              prior_grouping.
+#'   "erf"      classes ordered by the El Nino log RR at kernel.erf_at vs cen;
+#'              a prior partition sets K and names the classes after sampling
+#'              but adds no anchoring term.
+#'   "relabel"  (form dlnm) exchangeable classes, each draw relabelled by kcon
+#'              (kl_relabel_draws()); a registry, if any, names the classes.
+#'   "lagorder" (form discrete) centres ordered by lag, ties relabelled by kcon
+#'              (kl_relabel_draws(lag = "klag")); a registry, if any, names
+#'              the classes.
+#'   "seed"     (forms gaussian / dlnm) class k holds prior group k's seed
+#'              countries (kernel.seeds, kl_fix): labels fixed by the seeds,
+#'              centres unordered. Other countries are free, with the
+#'              kappa * A pull under prior_grouping.membership: yes. Needs
+#'              prior_grouping.
+#'   "repel"    (form gaussian) exchangeable classes kept apart by a pairwise
+#'              repulsive prior in (lag centre, response) space
+#'              (kernel.repel, kl_repel_cfg()); under
+#'              prior_grouping.membership: yes a label-free registry pull.
+#'              Draws are relabelled and named after the registry
+#'              (kl_repel_relabel()).
+#'   "auto"     "lagorder" for form discrete, "relabel" for form dlnm, else
+#'              "anchor" with a prior partition, else "kmu".
 kl_identify <- function(kcfg) {
   id <- kcfg$identify %||% "auto"
   if (
@@ -836,55 +819,22 @@ summarise_kl_fit <- function(fit, meta, cen = 0) {
 # Stage 2: latent country classes (patched brms Stan program, cmdstanr)
 # ---------------------------------------------------------------------------
 #
-# Model. Country c has a latent class z_c in 1..K; class k owns its kernel
-# (kmu[k], ksd[k], kbeta[, k]). The linear part `lin` (baseline, covariates,
-# random effects, offset) is shared and kept verbatim from brms. Per country,
+# Country c has latent class z_c in 1..K; class k owns (kmu[k], ksd[k],
+# kbeta[, k]); `lin` (baseline, covariates, REs, offset) is shared from brms.
 #
 #   log p(y_c) = log_sum_exp_k( log_softmax(klogit[c])[k]
-#                               + sum_{i in c} poisson_log_lpmf(y_i | lin_i + kl_i(k)) )
+#                               + sum_{i in c} poisson_log_lpmf(y_i | lin_i
+#                                                               + kl_i(k)) )
 #   klogit[c, k] = log kpi[k] + kkappa * A[c, k] + kfield[c, k]
 #
-# A = one-hot prior partition, or its contiguity-softened version (kernel.prior_grouping; kkappa estimated or
-# fixed), kfield = spatial field on the country adjacency (kernel.spatial;
-# one column per class, the last class is the reference with field 0):
-# ICAR (soft sum-to-zero per connected component, island singletons near 0)
-# or DAGAR (proper, non-centred; ported from archive/cholera_regime_sim).
-# Without a prior partition kmu is `ordered` (labels fixed by lag order);
-# with one, class k is anchored to prior group k and kmu is free in the lag
-# range. The label-invariant co-membership matrix is reported either way.
-#
-# Form discrete. Each class's kernel centre is one of the candidate centres
-# (the lag grid, every kernel.discrete.centre_step-th lag) and the kernel
-# width one of kernel.discrete.widths, shared by the classes (0 = single
-# lag). Centres are summed out exactly: the class centres are ORDERED with
-# ties allowed (l_1 <= ... <= l_K), so the sum runs over the
-# choose(NC + K - 1, K) multisets of centres instead of the NC^K labelled
-# tuples, and class k is the k-th shortest lag (labels fixed by
-# construction). The countries couple the classes (each country is a mixture
-# over all of them), so the sum does not factorise further:
-#
-#   log p(y | beta, pi) = log_sum_exp_{s, m} ( log p(s) + log p(m)
-#        + sum_c log_sum_exp_k( log_softmax(klogit[c])[k] + LL[k][c, q(s, m_k)] ) )
-#
-# with LL[k][c, q] the country log-likelihood of class k under kernel q
-# (width s, centre m_k), precomputed once per gradient (kernel-weighted
-# exposure bases are data). log p(m) = log(K! / prod_i n_i!) under
-# combo_prior "exchangeable" (n_i = classes at centre i: the prior the
-# exchangeable model with iid uniform centres induces on the ordered
-# representation, so ties are not favoured) or 0 under "uniform"; plus, when
-# kmu priors are set (prior_mu or the prior partition's deployed lags, sorted
-# ascending), a discretised normal per position. Generated quantities draw
-# (s, m) given the parameters (klag, kwidth) and report the conditional
-# P(centre of class k = i) (kl_lag_prob); responsibilities and the country
-# log-likelihood are conditional on the drawn (s, m). Two classes tied on a
-# centre are exchangeable, so draws are relabelled within ties by kcon.
-#
-# Program. brms::stancode() of the stage-1 model is patched at landmarks
-# that are each asserted to occur exactly once (a brms upgrade that moves
-# one fails loudly, naming it). brms's data block and linear predictor are
-# untouched; the kernel nlpar parameters, their priors, the scalar non-linear
-# predictor and the single likelihood statement are replaced. Threading
-# (reduce_sum) is not supported on this path.
+# A = prior partition (kernel.prior_grouping); kfield = ICAR or DAGAR field on
+# the country adjacency (kernel.spatial; last class is the reference). Without
+# a prior partition kmu is `ordered`; with one, class k is anchored to group k.
+# Form discrete: class centres are ORDERED with ties, summed out exactly over
+# the choose(NC + K - 1, K) multisets; log p(m) per combo_prior; draws are
+# relabelled within ties by kcon.
+# Program: brms::stancode() patched at landmarks each asserted to occur exactly
+# once (a brms upgrade that moves one fails loudly). No reduce_sum threading.
 
 # Stan fragments ------------------------------------------------------------
 
@@ -3970,36 +3920,18 @@ kl_name_classes <- function(draws, A, groups, K) {
 # Pinned arrangements (kernel.pin; form discrete)
 # ---------------------------------------------------------------------------
 #
-# Under form discrete a class is a position in lag order, but which class (its
-# curve and member countries) fills which position is left to the sampler: a
-# class can settle in a position whose lag range excludes its true lag and stay
-# there (synthetic case H: the lag-8 class in position 1, fitted at lag -8 with
-# the opposite sign). kernel.pin fixes the class -> position correspondence by
-# seed anchoring and tests the possible correspondences against each other:
-#   1. pilots        each group's lag distribution, from one of
-#                    order_source "pilot": a single-class discrete fit per
-#                      prior group (registry kernel.prior_grouping.source, that
-#                      group's countries only) -> its lag posterior;
-#                    order_source "sweep": an existing single-lag sweep's LOO
-#                      ranking per group (05_fit_postprocess_loo_lags.R caches,
-#                      read with loo_lags.R::read_latest_ranking()) -> weights
-#                      exp(elpd_loo - max) over its lags (no extra fits; the
-#                      sweep's own model, not this one);
-#   2. arrangements  orders of the groups along the lag positions, with their
-#                    probability when the pilot lags are drawn independently
-#                    (ties broken at random); "pilot" keeps the most probable
-#                    (up to `cover` probability, at most `max_runs`), "all" every
-#                    permutation;
-#   3. runs          one latent-class fit per arrangement sigma: the seed
-#                    countries of group sigma[k] are fixed to position k
-#                    (kl_fix), every other country's class is inferred; runs in
-#                    parallel;
-#   4. combine       stacking weights on each run's country-level PSIS-LOO
-#                    (kl_log_lik_ctry). Runs differ only in their seeds, so a
-#                    wrong order shows up as seeds forced into a lag position
-#                    that fits them badly.
-# Seeds default to each group's `seeds_n` countries with the most events
-# (kernel.pin.seeds: explicit iso3 per group overrides).
+# kernel.pin (form discrete) fixes which group fills which lag position by seed
+# anchoring, then compares the possible orders:
+#   1. pilots        per-group lag distribution: order_source "pilot" (a
+#                    single-class fit per prior group) or "sweep" (an existing
+#                    single-lag LOO ranking, read_latest_ranking());
+#   2. arrangements  group orders along the positions ("pilot": most probable up
+#                    to `cover` / `max_runs`; "all": every permutation);
+#   3. runs          one latent-class fit per order, seeds fixed (kl_fix);
+#   4. combine       stacking weights on country-level PSIS-LOO
+#                    (kl_log_lik_ctry).
+# Seeds: each group's `seeds_n` countries with most events (kernel.pin.seeds
+# overrides).
 
 #' kl_pin_cfg -- validated kernel.pin block (enable FALSE -> other fields unused).
 kl_pin_cfg <- function(kcfg) {

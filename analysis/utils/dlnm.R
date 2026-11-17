@@ -154,12 +154,11 @@ make_lag_matrix <- function(df, var, max_lag) {
 
 #' extract_cb_surface
 #'
-#' Compute predicted exposure-response / lag-response surfaces from a brms fit
-#' that contains dlnm::crossbasis() predictors.  Uses dlnm::crosspred() on a
-#' per-draw loop over posterior coefficient vectors, returning per-variable
-#' surfaces summarised as posterior median + credible intervals.
+#' Exposure-response / lag-response surfaces from a brms fit with
+#' dlnm::crossbasis() predictors: dlnm::crosspred() per posterior draw,
+#' summarised as posterior median + credible intervals per variable.
 #'
-#' @param fit    brms fit object from 04b_run_occ_brms_cb.R.
+#' @param fit    brms fit object from a `04_fit_*_brms_cb.R` script.
 #' @param meta   Named list of crossbasis metadata (from _cb_meta.rds sidecar).
 #'               Each entry must contain: argvar, arglag, lag, df, range,
 #'               cb_col_names (column names in the brms fit).
@@ -362,16 +361,11 @@ extract_cb_surface <- function(
 
 #' extract_cb_country_surface
 #'
-#' Country-level exposure-response surfaces for a single-lag (onebasis) DLNM
-#' crossbasis variable: population CB coefficient draws + per-country random
-#' effect draws (the "country" ranef group), combined and evaluated at `at`
-#' via the variable's stored onebasis attributes (Z_cen, centered at
-#' ENSO/exposure = 0, mirroring extract_cb_surface()'s `cen = 0` convention).
-#' Companion to extract_cb_surface() (population-level only, crosspred-based);
-#' this one is draw-based (no vcov, so no crosspred) because ranef draws have
-#' no crosspred entry point. Shared by 06_fit_figures_lag_compare.R's
-#' country-ERF-by-lag figure and 05_fit_postprocess_lag_compare_surface.R
-#' (best-lag surface extraction).
+#' Country-level exposure-response curves for a single-lag (onebasis)
+#' crossbasis variable: population CB draws plus the "country" random-effect
+#' draws, evaluated at `at` through the stored onebasis attributes (centred at
+#' exposure 0, as in extract_cb_surface()). Draw-based, because ranef draws
+#' have no crosspred entry point.
 #'
 #' @param fit brms fit object (single-lag CB fit; ranef() must contain a
 #'   "country" group).
@@ -393,8 +387,7 @@ extract_cb_surface <- function(
 #' @return named list, one entry per country ISO3 present (after `countries`
 #'   filtering), each entry: list(at=, matfit=, matlo=, mathi=, matlo50=,
 #'   mathi50=) — numeric vectors of length(at), log-RR scale, posterior median
-#'   + 95% and 50% credible intervals (draw-based, not crosspred-based like
-#'   extract_cb_surface()).
+#'   + 95% and 50% credible intervals.
 extract_cb_country_surface <- function(
   fit,
   meta,
@@ -885,33 +878,17 @@ build_cb_columns_from_Q <- function(Q, meta) {
 
 #' build_mso_basis
 #'
-#' Build the months-since-onset cross-basis LOOKUP TABLE consumed by the
-#' monthly-size (`mon`) kernels.
+#' Build the months-since-onset cross-basis lookup table for the monthly
+#' (`mon`) kernels. `mso` is latent (created per particle in the month loop),
+#' so its basis is a `(mso_max + 1) x K` table indexed at run time by the
+#' clamped value. Built with `build_cb_columns_from_Q()` from
+#' `meta$onebasis_attrs`, so it is bit-identical to fit time.
 #'
-#' `mso` is the one cross-basis variable that is latent (`.LATENT_CB_VARS`): it
-#' is created inside the kernel's month loop and differs per particle, so unlike
-#' every climate/ENSO cross-basis it cannot be precomputed as an N x M panel
-#' matrix. It is, however, a small non-negative integer, so the whole basis
-#' collapses to a `(mso_max + 1) x K` table evaluated once per TU and indexed at
-#' runtime by the clamped latent value.
-#'
-#' Built with `build_cb_columns_from_Q()` -- the same primitive
-#' `build_cb_mats()` uses -- so it replays `meta$onebasis_attrs` (the resolved
-#' fit-time knots) verbatim and is bit-identical to fit time.
-#'
-#' **Clamping to the training range is mandatory, not defensive.** The shipped
-#' basis is `bs(degree = 3)` (config_defaults.yml:515), which extrapolates as an
-#' unbounded cubic past its boundary knots. The repo already documents this exact
-#' failure mode for CFSv2 ENSO (config_defaults.yml:640-644: 0.8-1.0 units past
-#' the right knot inflated mu 26x) and already clamps for it
-#' (utils/smoothing_core.R). Capping the table at `ceiling(max(meta$range))` and
-#' indexing with `pmin(mso, mso_max) + 1L` makes a long-running episode's mu
-#' flatten at the last trained value instead of diverging.
-#'
-#' The table is deliberately NOT capped by the simulated horizon length: a
-#' warm-started replicate can enter the horizon with `mso` already large, so a
-#' horizon-sized cap would clamp earlier than the fitted boundary and silently
-#' change mu. The table is a few dozen doubles, so there is nothing to save.
+#' Clamping is required: the `mso` basis is bs(degree = 3), an unbounded cubic
+#' past its boundary knots. The table stops at `ceiling(max(meta$range))` and
+#' is indexed by `pmin(mso, mso_max) + 1L`, so mu flattens at the last trained
+#' value. Do not cap it at the horizon length: a warm-started replicate can
+#' enter the horizon with a large `mso`.
 #'
 #' @param cb_meta_mon the monthly track's cb_meta sidecar (artefact kind
 #'   `mon_cb_meta`); must carry an `mso` entry, else NULL is returned.
@@ -984,9 +961,9 @@ build_cb_design <- function(df, cb_meta, vars = NULL) {
       )
     } else if (!is.null(meta$single_lag)) {
       # Single-lag (onebasis) fit: the lag dimension was collapsed at fit time
-      # onto a single exposure column (04_fit_occ_brms_cb.R:163-168). Reconstruct
+      # onto a single exposure column (04_fit_occ_brms_cb.R). Reconstruct
       # from that exact column — NOT lag0 — mirroring build_cb_mats()
-      # (simulator_core.R:1539-1543). build_cb_columns_from_Q() then reads
+      # (simulator_core.R). build_cb_columns_from_Q() then reads
       # Q[,1L], so a one-column Q carrying the correct lag is required.
       Q <- matrix(
         .cb_lag_exposure(df, v, meta$single_lag, who = "build_cb_design"),

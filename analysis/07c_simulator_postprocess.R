@@ -268,41 +268,34 @@ write_validation_summary <- function(metrics, path) {
 
 #' Run all validation metrics and write outputs to `valid_dir/`.
 #'
-#' @param merged_dir directory containing merged_dir/monthly_summary.rds (and
-#'   event_table.rds when obs_metadata_path is supplied).
+#' @param merged_dir directory with monthly_summary.rds (and event_table.rds
+#'   when obs_metadata_path is supplied).
 #' @param obs_panel_path path to the observed survival panel RDS.
 #' @param frame tibble from build_location_frame().
 #' @param valid_dir target directory for metrics.rds + validation_report.txt.
-#' @param horizon optional list(start, end) passed to load_observed_from_panel().
+#' @param horizon optional list(start, end) for load_observed_from_panel().
 #' @param max_reps integer; max replicates used for contagion reconstruction.
 #' @param aggregated_ts_path path to `aggregated_ts_preoutbreak_extraction.rds`
-#'   for building the incidence-coverage mask. When NULL the mask is skipped and
-#'   metrics #2 and #3 run unmasked.
+#'   for the incidence-coverage mask; NULL skips the mask (metrics 2 and 3
+#'   run unmasked).
 #' @param aggregated_adm_ts_path path to
-#'   `aggregated_admin_level_ts_preoutbreak_extraction.rds` (fallback for mask).
-#' @param obs_metadata_path path to `outbreak_metadata.rds`; required for the
-#'   total-case CRPS (metric 2b). When NULL that metric is skipped. Metric 2b
-#'   also needs a monthly-enabled run (monthly_summary carrying `active` and
-#'   `cases_month`); it is skipped otherwise.
-#' @param case_admin_level admin level the case (monthly) model was fitted at;
-#'   forwarded to compute_crps_total_cases() so observed cases are filtered to
-#'   match. Default "ADM1-ADM2".
-#' @param obs_dur_panel_path optional path to the observed duration
-#'   panel RDS (`analysis/03_prepare_dur.R` output / `make_duration_dat_file()`);
-#'   enables the observed side of `compute_duration_dist()` /
-#'   `compute_active_fraction()`. NULL skips the observed side (simulated-side
-#'   duration metrics still run whenever the merged run is duration-aware).
-#' @param dependence_path optional path to a `dependence_<date>.rds` artefact
-#'   from `05_fit_postprocess_dependence.R` (Phase 5); supplies the observed
-#'   PIT-residual size<->duration Kendall's tau reported alongside the
-#'   simulated raw tau. NULL skips the observed-tau comparison.
-#' @param metric_set "full" (default) computes every metric. "hindcast" computes
-#'   only what 09's hindcast scoring reads (utils/hindcast_skill.R
-#'   hindcast_load_run()): pit, monthly_freq, crps and, when it runs at all,
-#'   crps_total_cases; crps_count_by_geo, ar_metrics, contagion,
-#'   active_fraction, duration_dist and the Kendall's taus stay NULL, and the
-#'   event table is read only for the total-case CRPS. The kept metrics are
-#'   identical to "full" (tests/test_sim_metrics_golden.R).
+#'   `aggregated_admin_level_ts_preoutbreak_extraction.rds` (mask fallback).
+#' @param obs_metadata_path path to `outbreak_metadata.rds` for the total-case
+#'   CRPS (metric 2b); NULL skips it. 2b also needs a monthly-enabled run
+#'   (monthly_summary carrying `active` and `cases_month`).
+#' @param case_admin_level admin level of the monthly fit, forwarded to
+#'   compute_crps_total_cases(). Default "ADM1-ADM2".
+#' @param obs_dur_panel_path optional observed duration panel RDS
+#'   (make_duration_dat_file()); enables the observed side of
+#'   compute_duration_dist() / compute_active_fraction(). NULL skips it.
+#' @param dependence_path optional `dependence_<date>.rds` from
+#'   05_fit_postprocess_dependence.R: the observed PIT-residual Kendall's tau
+#'   shown beside the simulated raw tau. NULL skips the comparison.
+#' @param metric_set "full" (default) computes every metric. "hindcast"
+#'   computes only what 09's hindcast scoring reads
+#'   (hindcast_skill.R::hindcast_load_run()): pit, monthly_freq, crps and,
+#'   when it runs, crps_total_cases; the others stay NULL. The kept metrics
+#'   equal "full" (tests/test_sim_metrics_golden.R).
 #' @return invisible(metrics).
 run_validation <- function(
   merged_dir,
@@ -574,23 +567,11 @@ run_validation <- function(
       file.exists(obs_metadata_path)
   ) {
     message("[run_validation] computing total-case CRPS (metric 2b) ...")
-    # region_key totals need an LP-KEYED OBSERVED coverage mask, NOT the default
-    # ADM2/ADM3 surveillance-window mask:
-    #   * The default mask gives coarse-reporting countries (NGA/LBR/…, who file
-    #     only at ADM0/ADM1) ZERO covered cells, so the footprint-reconciled
-    #     scorer drops them entirely.
-    #   * build_coverage_mask(include_adm1 = TRUE) DOES recover them, but its
-    #     pre-outbreak (TL–TR) windows mark a region's ENTIRE at-risk span as
-    #     covered — including months with no actual report — which inflates the
-    #     ensemble against a ~empty observed record and manufactures spurious
-    #     "over" outliers (even inverting genuine under-predictions). This is the
-    #     failure notebooks/hindcast_skill.qmd §4d explicitly documents and avoids.
-    # Instead cover a cell iff `month <= that cell's own series_end` (from the
-    # monthly model frame — derive_series_end(), analysis/utils/dur_data.R:131-190),
-    # the LP-keyed basis that retains ~100% of observed case mass. Built as a
-    # SEPARATE mask so the global `mask` used by the occurrence-basis metrics
-    # (PIT, monthly_freq, CRPS, count_by_geo, active_fraction) keeps its legacy
-    # ADM2/ADM3 definition. Mirrors the deployed §4d cov_region_month.
+    # region_key totals use an LP-keyed observed mask: a cell is covered iff
+    # month <= its own series_end (dur_data.R::derive_series_end()). The default
+    # ADM2/ADM3 mask drops coarse-reporting countries, and the include_adm1 mask
+    # counts whole at-risk spans and inflates "over" outliers. Kept separate so
+    # `mask` (occurrence-basis metrics) is unchanged.
     tc_mask <- mask
     if (identical(total_case_basis, "region_key")) {
       if (!is.null(monthly_data_path) && file.exists(monthly_data_path)) {

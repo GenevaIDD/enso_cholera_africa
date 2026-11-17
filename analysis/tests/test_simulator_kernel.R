@@ -1290,8 +1290,8 @@ cat(
   "\n## 27) .parse_brms_re_draws: mon-shaped (NB count) ADM2 nesting maps to the adm2 bucket\n"
 )
 {
-  # The NB count models (monthly `mon`; formerly also the retired size track)
-  # nest by AFRO_region/country/ADM1/ADM2 (ADM2 == gid), so their deepest r_*
+  # The NB count model (monthly `mon`) nests by
+  # AFRO_region/country/ADM1/ADM2 (ADM2 == gid), so its deepest r_*
   # group is `...:ADM1:ADM2`, unlike the occurrence track's `...:ADM1:gid`. The
   # composite level labels are identical to re_level_key() output. Regression
   # for the dropped-RE bug: the count extractor once hard-coded

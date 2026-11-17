@@ -11,7 +11,7 @@
 #   Sources nothing. Call-time: dplyr / tibble / lubridate via ::, `%>%`,
 #   paths.R (occ_panel_lp_members_path()) for coverage_lp_bridge(surv_path =).
 
-# Why the bridge: under gid_season the survival panel carries ONE
+# Why the bridge: under gid_season the survival panel carries one
 # representative location_period_id per gid, so its bridge misses the other
 # member LPs' reporting windows (under-coverage). 03_prepare_occ.R writes the
 # full member bridge as the sidecar <panel>.lp_members.csv
@@ -78,14 +78,10 @@ coverage_lp_bridge <- function(obs_panel, surv_path = NULL) {
 #' @param aggregated_ts_path path to `aggregated_ts_preoutbreak_extraction.rds`.
 #' @param aggregated_adm_ts_path path to
 #'   `aggregated_admin_level_ts_preoutbreak_extraction.rds` (fallback).
-#' @param include_adm1 logical (default `FALSE`, preserving legacy behaviour).
-#'   When `TRUE`, ADM1-level extraction windows are also honoured, so a gid whose
-#'   only pre-outbreak series is ADM1 uses **its own ADM1 TL–TR window** instead
-#'   of being pushed to the coarse country×ADM2 fallback. This eliminates the
-#'   dominant coverage-mask leaker: ~112 ADM1 gids (concentrated in
-#'   coarse-reporting countries — UGA/NGA/SOM/COD/CMR) that otherwise receive a
-#'   whole-country union of ADM2 windows. Kept as a flag so the effect on the
-#'   total-case calibration can be measured against the legacy mask.
+#' @param include_adm1 logical (default `FALSE`, legacy behaviour). When
+#'   `TRUE`, a gid whose only pre-outbreak series is ADM1 uses its own ADM1
+#'   TL–TR window instead of the coarse country×ADM2 fallback, the main source
+#'   of over-covered cells.
 #' @param national_zero logical (default `TRUE`): also cover every gid of a
 #'   country in that country's national-zero months -- months in which national
 #'   and WHO reporting put the whole country at 0 suspected cases and no

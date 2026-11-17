@@ -36,30 +36,16 @@ get_default_config <- function() {
 
 #' apply_anchored_defaults
 #'
-#' Opt newly generated batches IN to the empirical baseline-rate anchor
-#' (utils/anchor.R), so they inherit the residual-scale Intercept prior
-#' .PRIOR_DEFAULTS[[track]]$intercept_anchored instead of the offset-scale
-#' default that miscalibrates occurrence/duration/monthly by 2-3 orders of
-#' magnitude (see utils/anchor.R's header for the prior-predictive numbers).
-#'
-#' Applied here, once, on the already-RESOLVED config, rather than by adding
-#' `offset_baserate = TRUE` to each of the ~30 BATCH_REGISTRY entries. Two
-#' reasons that is not a style preference:
-#'   1. The backend is only known AFTER the grid row is merged, and only the
-#'      brms backends build priors at all, so a registry-level flag would either
-#'      be wrong for some rows of a batch or have to be duplicated per row.
-#'   2. A new registry entry inherits the fix automatically, instead of needing
-#'      someone to remember the flag.
-#'
-#' The stale `prior_intercept` pin inherited from config_defaults.yml is dropped
-#' at the same time, but ONLY when it equals the track's un-anchored default --
-#' i.e. when it is inherited rather than chosen. A pin that differs is a
-#' deliberate choice, so it is left in place and .intercept_prior_string()
-#' (utils/config.R) raises its hard double-counting error at fit time, naming the
-#' value. Silently discarding it here would defeat that guard.
-#'
-#' Existing YAMLs on disk are untouched; this changes what a REGENERATED batch
-#' means, which is the documented cost of the opt-in gate.
+#' Opt newly generated batches in to the empirical baseline-rate anchor
+#' (utils/anchor.R), so they take the residual-scale Intercept prior
+#' .PRIOR_DEFAULTS[[track]]$intercept_anchored. Applied once on the resolved
+#' config rather than per BATCH_REGISTRY entry because:
+#'   1. the backend is known only after the grid row is merged;
+#'   2. a new registry entry inherits it without a flag.
+#' The inherited `prior_intercept` pin is dropped only when it equals the
+#' track's un-anchored default. A different pin is a deliberate choice: it is
+#' kept, and .intercept_prior_string() raises its double-counting error at fit
+#' time. Existing YAMLs on disk are untouched.
 #'
 #' @param config resolved per-row config list
 #' @param batch_model "occurrence" | "size" | "duration" | "monthly" | NULL
@@ -183,24 +169,17 @@ DIM_ABBREV <- c(
 # BATCH_REGISTRY
 #
 # Each entry:
-#   description  — human-readable label (shown by --list)
-#   grid         — list of vectors; expanded with expand.grid to one row per config.
-#                  Keys are dot-path config fields (e.g. "occurrence.backend").
-#   overrides    — named list of non-default values applied to every config.
-#                  Use 2-level dot paths (e.g. "occurrence.covariates") to set a
-#                  whole sub-block without replacing the entire occurrence: block.
-#                  Use 3-level dot paths (e.g. "occurrence.brms.init") for
-#                  atomic scalar overrides deep in the tree.
-#                  For the size block, nest everything inside size = list(...).
-#   frozen       — if TRUE, generate_batch() skips regeneration (archived runs).
-#   grouping_exclude — character vector of group names dropped from the
-#                  spec$grouping expansion (e.g. "enso_central"). Unknown names
-#                  are an error, so a typo cannot silently keep a group in.
-#
-# Naming convention inside a batch:
-#   occurrence.backend is the primary dimension; basehaz and country are secondary.
-#   All other varying dims get the DIM_ABBREV treatment.
-#   When only one backend is in the grid, the backend token is omitted.
+#   description      label shown by --list
+#   grid             list of vectors, expand.grid -> one config per row; keys
+#                    are dot-path config fields ("occurrence.backend")
+#   overrides        values applied to every config: 2-level dot paths
+#                    ("occurrence.covariates") set a sub-block, 3-level paths
+#                    ("occurrence.brms.init") a scalar; size nests in
+#                    size = list(...)
+#   frozen           TRUE: generate_batch() skips regeneration
+#   grouping_exclude groups dropped from spec$grouping (unknown names error)
+# Names: occurrence.backend first, then basehaz and country; other varying
+# dims via DIM_ABBREV; the backend token is omitted when the grid has one.
 # ---------------------------------------------------------------------------
 
 # Shared DLNM argvar (exposure-response basis) definitions. Defined once so the

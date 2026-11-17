@@ -18,56 +18,27 @@
 
 # Lag-rule note (the roxygen below refers to it).
 #
-# Selection rule:
-#   occurrence — the MAXIMUM single_lag among fits within `se_mult` SEs of
-#     elpd_diff from the rank-1 (best-elpd) fit. Prefers the longest
-#     mechanistically-interpretable lag the data cannot statistically
-#     distinguish from the best fit, rather than the raw elpd-maximising lag.
-#   size / duration / monthly — the SAME max-lag-within-SE rule, applied as a
-#     hybrid with the occurrence lag for the same group (`occ_lag`):
-#       1. Compute the track's own unconstrained selection (as if it were
-#          "occurrence" — select_best_lag_occurrence() on its own ranking).
-#       2. If that lag is already >= occ_lag ("not constrained by
-#          occurrence"), use it as-is.
-#       3. Otherwise ("constrained by occurrence"), restrict to fits with
-#          single_lag >= occ_lag and take the MAX single_lag within
-#          `se_mult` SEs of the best-ranked fit *within that eligible
-#          subset* (select_best_lag_within_eligible()) — same "prefer the
-#          longest indistinguishable-from-best lag" logic, just re-anchored
-#          to the best fit the occurrence floor still allows.
-#     `enforce_occ_floor = FALSE` skips all of this and returns the track's
-#     plain unconstrained selection (step 1 only), regardless of occ_lag.
-#   leads — a negative single_lag is an ENSO LEAD (ONI after the
-#     outcome month): ranked and plotted like any lag, never selected. Every
-#     rule above takes `min_lag` (default 0): only single_lag >= min_lag is
-#     eligible. The SE window stays anchored on the rank-1 fit, whatever its
-#     lag, with the exact cached paired SEs (elpd_diff/se_diff), and is then
-#     filtered to eligible lags: the selection is the MAX eligible single_lag
-#     within `se_mult` SEs of the rank-1 fit. If no eligible lag is in that
-#     window (a lead clearly beats every lag >= min_lag), the best-ranked
-#     eligible lag is taken. Deliberately NOT select_best_lag_within_eligible():
-#     its quadrature of each fit's total se_elpd (tens to hundreds of elpd
-#     units) admits nearly every lag, so it collapsed onto the maximum lag (11).
-#     On a ranking with no lead, min_lag = 0 is a no-op.
-#
-#   best_elpd (side by side; select by `rule = "best_elpd"`) --
-#     occurrence takes its BEST-RANKED single_lag over the eligible grid
-#     (single_lag >= min_lag; min_lag defaults to -Inf for this rule, so leads
-#     are selectable); size / duration / monthly take their best-ranked
-#     single_lag with single_lag >= occ_lag - occ_floor_offset (no floor when
-#     occ_floor_offset is NULL). No SE window. See select_best_lag_best_elpd()
-#     and lag_selection_cfg() (deploy.lag_selection).
-#
-# `ranking` throughout is the tibble/data.frame shape written by
-# 05_fit_postprocess_loo_lags.R and cached in loo_compare_lags_*.rds as
-# `$ranking`: one row per single_lag, columns rank, single_lag, elpd_loo,
-# se_elpd, elpd_diff, se_diff, p_loo. elpd_diff/se_diff are relative to the
-# rank-1 fit (loo::loo_compare()'s convention), so rank 1 always has
-# elpd_diff == se_diff == 0 — this makes step 1 above exact. Step 3's
-# "within eligible subset" comparison is NOT relative to the cached rank-1
-# (which the floor may exclude), so elpd_diff/se_diff can't be reused
-# directly there; see select_best_lag_within_eligible() for how it's
-# approximated instead.
+# Selection rule (`ranking`: one row per single_lag, from loo_compare_lags_*.rds
+# `$ranking`; elpd_diff / se_diff relative to the rank-1 fit):
+#   occurrence: the MAXIMUM single_lag within `se_mult` SEs (se_diff) of the
+#     rank-1 fit.
+#   size / duration / monthly: hybrid with the group's occurrence lag occ_lag:
+#     1. the track's own occurrence-style selection;
+#     2. if that lag >= occ_lag, keep it;
+#     3. else the MAX single_lag >= occ_lag within `se_mult` SEs of the best fit
+#        in that subset (select_best_lag_within_eligible(), approximated since
+#        the cached diffs are relative to the possibly excluded rank-1).
+#     `enforce_occ_floor = FALSE` returns step 1 only.
+#   leads: a negative single_lag is an ENSO LEAD. Every rule takes `min_lag`
+#     (default 0). The SE window stays anchored on the rank-1 fit (cached paired
+#     SEs), then is filtered to eligible lags; if none is in the window, the
+#     best-ranked eligible lag is taken. Do NOT use
+#     select_best_lag_within_eligible() here: its total-se quadrature admits
+#     nearly every lag.
+#   best_elpd (`rule = "best_elpd"`): occurrence takes its best-ranked lag
+#     (min_lag defaults to -Inf); the other tracks the best-ranked lag
+#     >= occ_lag - occ_floor_offset (no floor when NULL). No SE window. See
+#     select_best_lag_best_elpd() and lag_selection_cfg().
 
 #' Select the maximum `single_lag` among fits within `se_mult` SEs of
 #' `elpd_diff` from the rank-1 fit — the self-contained "occurrence" rule,
@@ -423,18 +394,12 @@ select_best_lag <- function(
 # ---------------------------------------------------------------------------
 # Ranking-file location
 #
-# Where 05_fit_postprocess_loo_lags.R writes its loo_compare_lags_*.rds
-# ranking caches and how every reader finds the latest one. ONE location
-# rule -- make_loo_compare_run_file() (utils/paths.R): <outdir>/loo_compare/<batch>/,
-# with the legacy in-config-dir location (analysis/configs/<batch>/)
-# as a read-only fallback -- and ONE "latest" rule (YYYYMMDD in the filename
-# descending, mtime descending as the tiebreak). The filename date is the primary key because a
-# git checkout or a cp without -p resets mtime, so an mtime-only pick could
-# change without any ranking changing.
-#
-# Call-time dependency: these functions call make_loo_compare_run_file() and
-# derive_config_run_tag() from utils/paths.R (and `%||%` from utils/base.R),
-# which callers must have sourced first -- modules never source each other.
+# Where 05_fit_postprocess_loo_lags.R writes loo_compare_lags_*.rds: one
+# location (make_loo_compare_run_file(): <outdir>/loo_compare/<batch>/, legacy
+# analysis/configs/<batch>/ read-only fallback) and one "latest" rule (filename
+# YYYYMMDD descending, then mtime; mtime alone resets on checkout or cp).
+# Callers must source paths.R and base.R first (modules never source each
+# other).
 # ---------------------------------------------------------------------------
 
 #' Filename shape of a ranking cache: `loo_compare_lags[_<group>]_<YYYYMMDD>.rds`.
@@ -833,25 +798,14 @@ ranking_pareto <- function(ranking, loo_files = NULL) {
 # ---------------------------------------------------------------------------
 # Per-(batch, group) lag sidecar (05_fit_postprocess_loo_lags.R --lag_sidecar)
 #
-# One file per batch x group, lag_loo_sidecar[_<group>]_<YYYYMMDD>.rds under
-# <outdir>/loo_compare/<batch>/ (make_loo_compare_run_file(kind =
-# "loo_compare_lag_sidecar")). Its name never matches LOO_COMPARE_RANKING_RE,
-# so writing one changes no ranking reader's inputs (nor 09's freshness
-# inputs, lag_loo_input_files()). It holds what lag averaging / stacking and
-# the per-lag ERFs need without reloading a fit:
-#   elpd_pointwise, pareto_k  N x L matrices (rows = the fits' data rows,
-#                             columns = lags, labelled as 05 labels them)
-#   pareto, estimates         per-lag pareto_k_summary() rows / elpd_loo, se, p_loo
-#   cb                        per lag: b_draws (S x K population ENSO crossbasis
-#                             coefficients b_enso_cb*), cb_meta (the fit's
-#                             cb_meta "enso" entry: onebasis_attrs, range,
-#                             cb_col_names, single_lag) and the source files
-#   row_digest                per-lag digest of the fit's row key (every model
-#                             data column but the crossbasis columns); one
-#                             value, checked on write and on read
-#   track, group, batch       explicit, so the 09 lag-averaging step and the
-#                             per-group ERF at the deployed lag pick a
-#                             (track, group) without parsing file names.
+# lag_loo_sidecar[_<group>]_<YYYYMMDD>.rds under <outdir>/loo_compare/<batch>/;
+# its name never matches LOO_COMPARE_RANKING_RE, so no ranking reader sees it.
+# Holds what lag averaging / stacking and per-lag ERFs need without a fit:
+#   elpd_pointwise, pareto_k  N x L matrices (rows = data rows, cols = lags)
+#   pareto, estimates         per-lag pareto_k_summary() / elpd_loo, se, p_loo
+#   cb                        per lag: b_draws (b_enso_cb*), cb_meta, sources
+#   row_digest                digest of the row key, checked on write and read
+#   track, group, batch       explicit, so readers never parse file names
 # ---------------------------------------------------------------------------
 
 #' Population-coefficient pattern of an exposure's crossbasis columns:

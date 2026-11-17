@@ -13,44 +13,24 @@
 
 #' load_monthly_data
 #'
-#' Read + filter the monthly-size panel for 04_fit_mon_brms(_cb).R.
-#'
-#' Order of operations is load-bearing:
-#'   1. read the FULL, unfiltered panel;
-#'   2. derive `cases_prev` / `log_cases_prev` from THAT full panel (a
-#'      calendar-month join within episode, not a row-order lag) -- so the
-#'      lookup is immune to any row this function later drops for a country or
-#'      admin_level not in the current run;
-#'   3. THEN filter by country and admin_level;
-#'   4. derive `month_num` and, when `seasonal_term == "harmonic2"`, the four
-#'      harmonic columns -- named at config.R's `.seasonal_terms()` but built
-#'      nowhere upstream (the size track's non-"none" seasonal terms have the
-#'      same gap; this loader is the first place they are actually constructed);
-#'   5. `cases_gap` rows are NEVER filtered out -- they are real reporting
-#'      gaps within an episode's window (03_prepare_mon.R), already coalesced
-#'      to `cases_month = 0`, and dropping them would silently delete the rows
-#'      documented there;
-#'   5b. P1/P3/P4, the estimand-coherence apparatus ported from read_size_data()
-#'      (siz_data.R) and interleaved at the SAME positions, because the ordering
-#'      is what makes it correct: `pop` is repointed at the declared denominator
-#'      and `admin_level` re-keyed to the canonical GADM level BEFORE
-#'      apply_admin_level_filter() (so the row filter, the anchor's pooling key and
-#'      the elasticity's centring key are one keying, not three), while the
-#'      `log_pop_c` deviation column is built AFTER every row filter (so its
-#'      centres are the means of the rows actually fitted, which is what the
-#'      simulator re-centres frame units on);
-#'   6. round `cases_month` to the nearest integer just before returning --
-#'      `03_prepare_mon.R`'s footprint-collapse apportionment (`utils/footprint.R`)
-#'      leaves it fractional, and `family = negbinomial()` requires an integer
-#'      response (`brms:::data_response.brmsframe()` errors otherwise). Same
-#'      rationale as the reference GAM's `cases = round(cases_month)` and
-#'      as this same function's own `cases_prev_raw = round(cases_month)` above --
-#'      applied last so it never perturbs the cases_prev calendar-lag lookup,
-#'      which already rounds independently off the full unfiltered panel.
+#' Read + filter the monthly-size panel for 04_fit_mon_brms(_cb).R. The order
+#' of operations is load-bearing:
+#'   1. read the full, unfiltered panel;
+#'   2. derive `cases_prev` / `log_cases_prev` from that full panel (a
+#'      calendar-month join within episode, immune to later row drops);
+#'   3. filter by country and admin_level;
+#'   4. derive `month_num` and, for `seasonal_term == "harmonic2"`, the four
+#'      harmonic columns (built here, nowhere upstream);
+#'   5. never drop `cases_gap` rows: they are real reporting gaps, already 0;
+#'   5b. the estimand-coherence steps from read_size_data() at the same
+#'      positions: repoint `pop` and re-key `admin_level` before
+#'      apply_admin_level_filter(); build `log_pop_c` after every row filter;
+#'   6. round `cases_month` last (the footprint apportionment leaves it
+#'      fractional; negbinomial needs integers).
 #'
 #' @param opt config list (post make_options_from_config(); `opt$country` is
 #'   already the group-resolved subset when grouping.enable is TRUE -- see
-#'   resolve_group_countries(), config.R:963).
+#'   config.R::resolve_group_countries()).
 #' @param path monthly panel RDS; defaults to the configured baseline's file.
 #' @return the filtered monthly panel, with month_num / cases_prev / harmonic
 #'   columns attached as configured.
@@ -70,7 +50,7 @@ load_monthly_data <- function(opt, path = NULL) {
   panel <- readRDS(path)
   ep_rec <- assert_episode_key(opt, path, "monthly")
 
-  # P0: resolve and validate the estimand ONCE, up front, so a mis-declared
+  # P0: resolve and validate the estimand once, up front, so a mis-declared
   # config fails before any data work rather than producing a plausible-looking
   # fit on mixed units (read_size_data()'s rule, same reason).
   estimand <- resolve_monthly_estimand(opt)

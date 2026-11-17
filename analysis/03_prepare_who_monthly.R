@@ -68,32 +68,16 @@ zero_iso3 <- toupper(trimws(strsplit(opt$zero_iso3, ",")[[1]]))
 zero_iso3 <- zero_iso3[nzchar(zero_iso3)]
 
 # 3. Build the monthly table ---------------------------------------------------
-# Used by simulator.filter.who_obs (measurement
-# occurrence_duration_mon_NB_state_detect_act_who). Two sources:
-#   (1) the WHO Global Cholera & AWD dashboard weekly series, each week's cases
-#       split across calendar months by day overlap
-#       (utils/who_dashboard.R::who_weekly_to_monthly());
-#   (2) the year-to-date cumulative snapshots transcribed from the WHO
-#       multi-country cholera epidemiological updates (Table 1), differenced
-#       between report cuts and split the same way
-#       (who_cumulative_to_monthly()). They fill only the (country, month)
-#       pairs the weekly feed lacks (who_merge_monthly()); a weekly row always
-#       wins.
-# Unreported weeks / cuts are gaps, never zeros; a month is complete when
-# every day is covered. An unchanged cumulative is read as a reported zero
-# only for the countries in --zero_iso3 (or when the table printed an
-# explicit 0 in its last-28-days column); a year-to-date span longer than
-# --max_interval_days (a country's first mid-year table, a lone December
-# cut) has no monthly information and is dropped.
-# Inputs:  data/who_annual_report_africa/who_dashboard_weekly_africa.rds
-#          data/who_annual_report_africa/who_sitrep_cumulative_africa.csv
-#            (iso3, table_as_of, cum_cases, last28_cases, report_id,
-#             source_url; seeded from parsed WHO situation-report tables)
-# Outputs: generated_data/who_dashboard_monthly_africa.rds
-#            (make_who_monthly_file()), columns iso3, t_start, cases, n_days,
-#            partial, source
-#          generated_data/who_dashboard_monthly_africa_meta.yml (inputs, zero
-#            allowlist, row counts by source)
+# Monthly WHO cases for simulator.filter.who_obs, from (1) the WHO dashboard
+# weekly series and (2) differenced year-to-date sitrep snapshots, both split
+# across calendar months by day overlap (who_dashboard.R); weekly rows win.
+# Unreported spans are gaps, never zeros: an unchanged cumulative counts as
+# zero only for --zero_iso3 countries or an explicit 0; spans longer than
+# --max_interval_days are dropped.
+# Inputs:  data/who_annual_report_africa/who_dashboard_weekly_africa.rds,
+#          .../who_sitrep_cumulative_africa.csv
+# Outputs: make_who_monthly_file() .rds (iso3, t_start, cases, n_days,
+#          partial, source) + _meta.yml
 if (!file.exists(opt$input)) {
   stop("[who_monthly] input not found: ", opt$input)
 }

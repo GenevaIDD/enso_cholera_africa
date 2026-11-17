@@ -1,40 +1,32 @@
 #!/bin/bash
-# campaigns/preprocess.sh — the 00 -> 02 data leg on a SLURM cluster, one command.
-#
-# Rebuilds every outbreak-vintage-dependent artefact of phases 00-02 as chained
-# Slurm jobs (afterok):
+# campaigns/preprocess.sh — the 00 -> 02 data leg as chained Slurm jobs
+# (afterok), in the order of analysis/pipeline_steps.yml:
 #
 #   00 ingest                    stages/00_ingest.sh
 #    ├─ 01 outbreaks             stages/01_preprocess.sh
 #    │   ├─ 01b monthly
-#    │   └─ 01 national zero     (the --deploy's deploy.episodes rule)
-#    └─ 02 population            stages/02_population.sh (per-country array -> 02c)
-#   02 crosswalk                 stages/02_crosswalk.sh  (after 01 outbreaks + 02c)
+#    │   └─ 01 national zero     (the deploy's deploy.episodes rule)
+#    └─ 02 population            stages/02_population.sh (array -> 02c)
+#   02 crosswalk                 stages/02_crosswalk.sh  (after 01 + 02c)
 #   02 climate                   stages/02_climate.sh    (after 02 crosswalk)
 #
-# Population reads 00's LP shapefiles (not 01's gpkg), so it runs beside 01.
-# The order follows analysis/pipeline_steps.yml.
+# Population reads 00's LP shapefiles, so it runs beside 01. Run-agnostic:
+# --deploy is read for the national-zero rule only (or --nz-rule /
+# --nz-threshold).
 #
-# Run-agnostic: it takes no run. --deploy is read for the national-zero rule
-# only (or pass --nz-rule / --nz-threshold).
-#
-# Before the first run on a vintage (login node, from the repo root):
-#   git pull                                     # the outbreak vintage and climate caches copied over
-#   bash analysis/bash/campaigns/preprocess.sh --check-packages
-#   bash analysis/bash/campaigns/preprocess.sh --config C --deploy D --plan
-# After it finishes, copy the outputs back to the local checkout
-# (utils/preprocess_paths.R --outputs lists them).
+# First run on a vintage (login node, repo root): git pull, then
+# --check-packages and --plan. Afterwards copy the outputs back to the local
+# checkout (utils/preprocess_paths.R --outputs lists them).
 #
 # Usage:
 #   bash analysis/bash/campaigns/preprocess.sh --config <population config.yml> --deploy <deploy.yml>
 #       [--from 00|01|02pop|02xw|02clim] [--until 00|01|02pop|02xw|02clim]
 #       [--indir DIR] [--task-unit country|country_year] [--plan] [--check-packages]
 #
-# --from / --until  run a contiguous slice of 00 01 02pop 02xw 02clim; steps
-#                   outside it are assumed done (no dependency on them)
-# --indir           outbreak vintage folder [default: paths.R::default_outbreak_data_dir()]
+# --from / --until  a contiguous slice; steps outside it are assumed done
+# --indir           outbreak vintage [default: paths.R::default_outbreak_data_dir()]
 # --plan            every stage prints its sbatch lines; nothing is submitted
-# --check-packages  check the R packages of the 00-02 steps (and stages/03_prepare.sh) on this node; exit
+# --check-packages  check the R packages of 00-02 (and 03) on this node; exit
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../../.."

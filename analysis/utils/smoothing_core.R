@@ -116,9 +116,9 @@ smoothing_default_config <- function() {
     GRP_SOURCE = NULL,
     GRP_FITS_DIR = NULL,
     # Duration track (optional, mirrors simulator.duration_fit on the forecast
-    # side -- utils/simulations.R:188-204). NULL keeps the pre-duration smoothing
-    # behaviour byte-for-byte: draws_dur stays NULL and extract_smoothing_one_tu()
-    # takes its legacy onset-only path.
+    # side -- utils/simulations.R::load_artefacts()). NULL keeps the
+    # pre-duration smoothing behaviour byte-for-byte: draws_dur stays NULL and
+    # extract_smoothing_one_tu() takes its legacy onset-only path.
     DUR_FIT_PATH = NULL,
     GRP_DUR_ENABLE = FALSE,
     # Monthly case-count track (optional, mirrors simulator.monthly_fit on
@@ -250,12 +250,11 @@ smoothing_make_config <- function(args = list()) {
 
     # Resolve through make_options_from_config() -- the same entry point
     # 07b_simulator_v1.R / 07b_simulator_spatpomp.R use -- rather than a bare
-    # yaml::read_yaml(). Previously this read the raw file only, so any key
-    # get_default_options()$simulator (utils/config.R) defaults (e.g.
-    # location_frame.*, grouping.*, filter.delta_fn/delta_fp) silently never
-    # reached the smoothing pipeline unless the config happened to spell it
-    # out -- a config_defaults.yml addition would apply to every 07 forecast
-    # run but not to 08 smoothing runs of the exact same config file.
+    # yaml::read_yaml(), so the get_default_options()$simulator defaults
+    # (utils/config.R; e.g. location_frame.*, grouping.*,
+    # filter.delta_fn/delta_fp) reach 08 smoothing exactly as they reach the
+    # 07 forecast for the same config file. A raw read would silently miss
+    # every key the config does not spell out.
     cfg <- yaml::read_yaml(args$config)
     opt <- make_options_from_config(
       option_list = list(),
@@ -442,8 +441,8 @@ smoothing_make_config <- function(args = list()) {
         )
       }
       # Opt-in per-group duration fits, same key and same rationale as the
-      # forecast loader (utils/simulations.R:938): batches with no per-group
-      # duration fits deployed yet keep loading.
+      # forecast loader (utils/simulations.R::load_artefacts()): batches with no
+      # per-group duration fits deployed yet keep loading.
       S$GRP_DUR_ENABLE <- isTRUE(grp$duration_enable)
       S$GRP_MON_ENABLE <- isTRUE(grp$monthly_enable)
       message(sprintf(
@@ -550,7 +549,7 @@ smoothing_load_artefacts <- function(S) {
     opt_dur <- NULL
     opt_mon <- NULL
 
-    # Duration fit (optional). Mirrors utils/simulations.R:188-204 verbatim,
+    # Duration fit (optional). Mirrors utils/simulations.R::load_artefacts(),
     # including the opt$duration backfill for fits whose attached opt predates
     # the key. NULL DUR_FIT_PATH => draws_dur stays NULL and the Phase-B
     # extractor keeps its legacy onset-only behaviour.
@@ -1254,13 +1253,13 @@ smoothing_build_precomp <- function(S, art, tus) {
         draws_occ_by_group = art$draws_occ_by_group[grp_present],
         cb_meta_occ_by_group = art$cb_meta_occ_by_group[grp_present],
         # NULL unless simulator.grouping.duration_enable; build_spatpomp_tu_c()
-        # keys use_dur off this being non-NULL (spatpomp_core_c.R:1535).
+        # keys use_dur off this being non-NULL (spatpomp_core_c.R).
         draws_dur_by_group = if (is.null(art$draws_dur_by_group)) {
           NULL
         } else {
           art$draws_dur_by_group[grp_present]
         },
-        # The duration track's OWN cross-basis. Same role as the occ/mon
+        # The duration track's own cross-basis. Same role as the occ/mon
         # entries above: each track's best ENSO lag is selected independently,
         # so without this the duration LP reads the occurrence basis.
         cb_meta_dur_by_group = if (is.null(art$cb_meta_dur_by_group)) {
@@ -1562,11 +1561,11 @@ smoothing_filter_chunk <- function(
 #' Pull a U-row block of per-unit state rows out of a filter_traj slice,
 #' falling back to a zero matrix when the slot is absent.
 #'
-#' The `active`/`mso` slots have existed since the state vector grew to 11
-#' (spatpomp_core.R:62), and `check_smoothing_cache_schema()` rejects caches
-#' written before that. This fallback therefore only fires for hand-built test
-#' fixtures; it exists so a missing slot degrades to "duration never fired"
-#' rather than a subscript error deep inside the month loop.
+#' The `active`/`mso` slots are part of the state vector
+#' (spatpomp_core.R .SP_UNIT_STATENAMES), and `check_smoothing_cache_schema()`
+#' rejects caches without them. This fallback therefore only fires for
+#' hand-built test fixtures; it exists so a missing slot degrades to "duration
+#' never fired" rather than a subscript error deep inside the month loop.
 .ft_rows_or_zero <- function(ft_slice, stem, U) {
   rn <- paste0(stem, seq_len(U))
   if (!all(rn %in% rownames(ft_slice))) {
@@ -1585,7 +1584,7 @@ smoothing_filter_chunk <- function(
 #' Mirrors the act_prev_mat/act_m reconstruction inside
 #' extract_smoothing_one_tu() (same "entering month m" offset-by-one
 #' rationale documented there: the cessation hazard can fire and zero `active`
-#' in the SAME rprocess step that writes month m's state, so a genuinely
+#' in the same rprocess step that writes month m's state, so a genuinely
 #' active final month reads as inactive unless combined with that month's
 #' Yout). Operates on a raw states.qs record because 08c never rebuilds the
 #' full per-TU smoothing object extract_smoothing_one_tu() returns -- states.qs
@@ -1599,7 +1598,7 @@ smoothing_filter_chunk <- function(
 #'   `active` state slot is pinned at 0 -- see .ft_rows_or_zero()), so the
 #'   ongoing-outbreak ribbon degrades gracefully to an all-zero band rather
 #'   than erroring.
-#' The per-month slice (U x M) of ONE state stem from a states.qs record, or
+#' The per-month slice (U x M) of one state stem from a states.qs record, or
 #' NULL when the record has no trajectory or the stem is absent (e.g. `det` in
 #' a latent-feed run). Column m is the state WRITTEN at filter month m.
 .smoothing_state_matrix <- function(rec, stem) {
@@ -1813,27 +1812,13 @@ extract_smoothing_one_tu <- function(
   }
 
   # ── Mon DLNM cross-basis (brms_cb fits) ───────────────────────────────────
-  # For brms_cb mon fits ENSO enters the LP ONLY as enso_cb1..K design columns
-  # (no plain enso_lag* FE), so `mon_enso_cols` above is empty and the raw lag
-  # matrices alone never reach evaluate_lp. Rebuild each group's cross-basis from
-  # its cb_meta sidecar — exactly the fit-time path (build_cb_design →
-  # make_lag_matrix → build_cb_columns_from_Q) the forward simulator uses — and
-  # inject it into xrow below. The mon fit picks its ENSO single-lag
-  # independently of the other tracks (the deployed best-lag selection differs
-  # per track and per group), so the basis is the mon fit's OWN. ENSO is
-  # location-invariant, so one month-representative vector per lag column (the
-  # non-NA value, matching the which.max(abs) reduction above) is broadcast
-  # across units; the basis differs per group (each carries its own cb_meta),
-  # so columns are kept group-keyed. `mso` is latent and is handled by the
-  # build_mso_basis() lookup table instead (it has no panel lag columns).
-  # Clamp to training boundary before cross-basis evaluation to prevent
-  # polynomial extrapolation by bs() outside the fitted range: groups with few
-  # outbreaks during the 2015-16 El Niño have a narrow right boundary while the
-  # historical panel reaches ONI ≈ 2.75, and a cubic B-spline extrapolated
-  # 0.8-1.0 units beyond its right knot can inflate mu by 26x or more.
-  # Clamping to cbm$enso$range is the standard out-of-sample remedy for
-  # polynomial splines; effects above/below the training extremes are treated
-  # as equal to the training-data maximum response.
+  # brms_cb mon fits take ENSO only as enso_cb1..K columns, so rebuild each
+  # group's cross-basis from its own cb_meta sidecar (build_cb_design ->
+  # make_lag_matrix -> build_cb_columns_from_Q, as the forward simulator does)
+  # and inject it into xrow. ENSO is location-invariant: one value per lag
+  # column, broadcast across units, keyed by group. `mso` uses build_mso_basis()
+  # instead. ONI is clamped to cbm$enso$range before evaluation, so the spline
+  # is never extrapolated past the training range.
   enso_month_vec <- function(col, bk = NULL) {
     mat <- build_mat(col)
     vals <- apply(mat, 2L, function(cv) cv[which.max(abs(cv))])
@@ -1957,22 +1942,13 @@ extract_smoothing_one_tu <- function(
     o_mat <- ft_slice[paste0("o", seq_len(U)), , drop = FALSE]
     oct_mat <- ft_slice[paste0("o_ct", seq_len(U)), , drop = FALSE]
     otu_mat <- ft_slice[paste0("o_tu", seq_len(U)), , drop = FALSE]
-    # Duration latent states. Present in every filter_traj since the state
-    # vector grew to 11 slots (spatpomp_core.R:62), but pinned at 0 unless the
-    # filter ran with draws_dur -- so reading them unconditionally is safe and
-    # the legacy (no-duration) path sees all-zero matrices.
-    #
-    # "Entering month m" active/mso -- one column WIDER than ft_slice, spanning
-    # ft's raw columns toff..dim(ft)[3] (i.e. the t0 state prepended). Needed
-    # because the RECORDED active/mso for month m reflect status heading into
-    # month m+1: if an episode's cessation hazard fires during month m, the
-    # kernel resets active/mso to 0 in that SAME rprocess step, before writing
-    # them into the state vector for time m (mon_mu_block runs before
-    # dur_cessation_block's writeback in spatpomp_core_c.R). So a genuinely
-    # active FINAL month of an episode reads as inactive if read directly.
-    # act_prev_mat[,m] (state entering month m) combined with Yout_mat[,m]
-    # (onset flag) reconstructs "active DURING month m" exactly -- this is the
-    # same av_new predicate mon_mu_block itself gates mu on.
+    # Duration latent states: always in filter_traj, all-zero unless the filter
+    # ran with draws_dur, so reading them is safe.
+    # The recorded active/mso for month m are the state heading into m+1 (the
+    # kernel resets them in the same step a cessation fires). So take the state
+    # ENTERING month m (ft_wide: one column wider, t0 prepended) and combine it
+    # with the onset flag Yout_mat[, m] to recover "active during month m", the
+    # same av_new predicate mon_mu_block gates mu on.
     ft_wide <- ft[, 1L, toff:dim(ft)[3]]
     if (!is.matrix(ft_wide)) {
       ft_wide <- matrix(
@@ -2389,26 +2365,15 @@ agg_and_ribbon_mon <- function(
 
 
 # WHO dashboard comparison: national-scale smoothed monthly cases per country
-# vs the WHO dashboard monthly counts. Shared by
-# 08c_smoothing_compile.R and run-to-run comparisons.
+# vs the WHO dashboard counts (08c_smoothing_compile.R, run comparisons).
+# `long_mon` is the UNMASKED mon event table (every simulated gid counts
+# toward the national total). The ribbon spans the full [start, end) month
+# grid, zero-filled, and each band is divided by the covered-population share
+# `who_f` (1 where unknown). `who_scale`: NULL = count / who_f; else
+# who_multiplier(who_f, scale) applies (scalar or per-country) and the outputs
+# gain a `who_scale` column.
 #
-# `long_mon` is the UNMASKED mon event table (one row per rep x gid x active
-# month, `cases_month`, `country`): the WHO count is a national total, so every
-# simulated gid of the country counts, not only covered cells. The ribbon is
-# built on the FULL month grid of [start, end) (no month is dropped for lack of
-# a simulated onset), every rep enters every month (zero-filled), and countries
-# that simulate no case at all still get an all-zero band. Each band is divided
-# by the country's covered-population share `who_f` (a named vector; 1 where
-# unknown) so it is on the same national scale as the WHO count.
-#
-# `who_scale`: NULL = the bands are the simulated count / who_f
-# (ignoring who_obs.scale); else the filter's
-# own multiplier who_multiplier(who_f, scale) is applied, with `who_scale` a
-# scalar (fixed who_obs.scale) or a named per-country vector (estimated), and
-# the ribbon / summary gain a `who_scale` column.
-#
-# @return list(ribbon = per (country, t_start) n_cases_* quantiles on the
-#   national scale, obs = WHO complete-month counts, summary = per-country
+# @return list(ribbon, obs = WHO complete-month counts, summary = per-country
 #   months / totals / months inside, above or below the 95% band).
 who_vs_smoothing <- function(
   long_mon,
@@ -2571,25 +2536,18 @@ agg_and_ribbon_active <- function(
   )
 }
 
-# Observed monthly cases (mon track) per month x {Africa, AFRO_region, country}:
-# the observed side of 08c_smoothing_compile.R's cases ribbons. Each (gid, month)
-# keeps only the rows of ONE admin level -- the one with the largest total, ties
-# to the finer level -- which is the filter's own footprint rule
-# (spatpomp_core.R::.aggregate_footprint_counts(): sum within an admin level,
-# max across levels), so the observed series is the one the filter scored. An
-# lp_season monthly frame splits a gid-month across its reporting levels, and
-# summing every row double-counted nested ADM1 + ADM2 (+ ADM3) reports of the
-# same gid (+8.5% of the 1990_2019 lp_season frame's cases). Rows are dropped,
-# not pre-summed, so under gid_season (one level per gid) the group sums run
-# over the same rows in the same order and stay bitwise unchanged.
+# Observed monthly cases (mon track) per month x {Africa, AFRO_region,
+# country}, the observed side of 08c's cases ribbons. Each (gid, month) keeps
+# only its admin level with the largest total (ties to the finer), the
+# filter's own footprint rule (spatpomp_core.R::.aggregate_footprint_counts()),
+# so nested reports are not double-counted.
 #
-# @param mon_dat  03_prepare_mon.R's monthly frame (gid, month, cases_month,
-#   [admin_level]).
-# @param gid_meta the simulated frame's gid -> AFRO_region / country map.
+# @param mon_dat  03_prepare_mon.R's monthly frame.
+# @param gid_meta gid -> AFRO_region / country map.
 # @param start,end filter window, [start, end).
 # @param months   months the simulation produced.
-# @param mask     function(df, label) restricting (gid, t_start) rows to the
-#   coverage footprint (08c's .mask_to_coverage()); identity by default.
+# @param mask     function(df, label) restricting rows to the coverage
+#   footprint; identity by default.
 # @return list(africa, region, country) of tibbles with column n_cases.
 smoothing_obs_cases_mon <- function(
   mon_dat,
@@ -2644,7 +2602,7 @@ smoothing_obs_cases_mon <- function(
 # two-colour scheme identifying coverage-mask status, independent of which
 # sub-panel (occurrence/cases/mon-cases/active) is being drawn. `fill_col` is
 # kept as a formal parameter (existing panel_pair() call sites still pass a
-# per-panel colour) but is no longer used for ribbon/line colour.
+# per-panel colour) but is not used for ribbon/line colour.
 .RIBBON_MASKED_COL <- "grey45"
 .RIBBON_UNMASKED_COL <- "#2ca02c"
 

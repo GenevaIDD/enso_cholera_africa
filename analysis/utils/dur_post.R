@@ -9,61 +9,23 @@
 # Details:
 #   RE stats reuse the occurrence adapter (compute_nested_surv_re_stats_brms;
 #   same Poisson cessation hazard), so only the PPC lives here.
-#   The caller passes the duration panel filtered to the SAME rows the fit saw
+#   The caller passes the duration panel filtered to the same rows the fit saw
 #   (under grouping mode: resolve the group's countries into opt$country first).
 
-# Why the size pp_check does not transfer. make_size_pp_check_tbl()
-# (siz_post.R) is a predicted-vs-observed scatter of `suspected_cases` --
-# meaningful because the size response IS the endpoint of interest. The
-# duration response is `y = as.integer(ended)`, a 0/1 cessation indicator on
-# one row per ACTIVE MONTH (dur_data.R). Scattering predicted against observed
-# 0/1 per month answers nothing: the endpoint -- how long an outbreak lasts --
-# is DERIVED by pushing the per-month hazards through to a duration. So this
-# PPC checks two things, both on the scale the model is used at:
-#
-#   1. HAZARD CALIBRATION -- observed monthly cessation hazard (events /
-#      at-risk) against the posterior-predictive hazard, by months-since-onset.
-#      This is the direct check on the `mso_band` baseline hazard, which spans
-#      a ~492x range across bands and is therefore the part of the model most
-#      able to be wrong in a visible way.
-#
-#   2. IMPLIED DURATION DISTRIBUTION -- the endpoint. For every posterior
-#      draw, each episode's implied duration is the first month its replicated
-#      cessation indicator fires; the resulting distribution is compared to the
-#      observed duration distribution. A model can match the marginal hazard
-#      per band and still get the duration distribution wrong (that is exactly
-#      what unmodelled episode-level frailty does), so panel 2 is not implied
-#      by panel 1.
-#
-# How to read panel 2 (do not over-read the totals). The panel is a FIXED
-# at-risk window: an episode observed to last 4 months contributes exactly 4
-# rows, and for an uncensored episode the last of those rows carries y = 1 BY
-# CONSTRUCTION. The replicate gets no such conditioning -- it simply asks
-# whether the indicator fires somewhere in those 4 months, which at a hazard
-# of ~0.2 happens only 1 - 0.8^4 ~= 59% of the time. So replicated cessation
-# TOTALS are expected to fall short of observed totals even for a
-# well-calibrated hazard, and the shortfall is reported explicitly as
-# meta$rep_nofire_median rather than hidden. The informative comparison is the
-# SHAPE of the duration distribution and the per-month hazard calibration in
-# panel 1 -- not the ratio of replicated to observed cessation counts.
-# Simulating past the observed window would need covariates (climate, ENSO) at
-# months the panel does not contain, so it is deliberately not attempted here.
-#
-# Row alignment (load-bearing). `fit$data` carries only formula variables --
-# y, the crossbasis columns, mso_band, country, ADM1, log_offset -- and NOT
-# episode_id / mso, so durations cannot be derived from the fit alone. The
-# panel must be re-loaded and matched positionally, and because brms drops any
-# row with an NA in a model variable, the panel is first screened by complete
-# cases over those same variables (real: rows with a missing ADM1 label are
-# removed by the (1 | country/ADM1) term). brms preserves row ORDER, so the
-# survivors align positionally. Both the row count AND the response vector are
-# still asserted after that screen, so a formula change which breaks the
-# correspondence becomes a hard error here instead of a mislabelled figure.
-#
-# The caller passes a panel filtered to the SAME rows the fit saw. Under
-# grouping mode that means resolving the group's countries into opt$country
-# first (config.R::resolve_group_countries()) -- the raw config leaves
-# opt$country = "all", which would hand over the full panel.
+# Posterior predictive check on the scale the model is used at (the response
+# is a 0/1 cessation indicator per active month, so a size-style scatter means
+# nothing):
+#   1. hazard calibration: observed vs replicated monthly cessation hazard by
+#      months-since-onset (checks the mso_band baseline);
+#   2. implied durations: per draw, each episode ends at the first month its
+#      replicated indicator fires, compared with observed durations.
+# Panel 2 uses the observed at-risk window, so replicated cessation totals fall
+# short of observed even when calibrated (meta$rep_nofire_median); read the
+# shape, not the totals.
+# Row alignment: fit$data lacks episode_id / mso, so the panel is re-screened by
+# complete cases over the model variables and matched by position; row count and
+# response are asserted. Under grouping mode the caller must resolve the group's
+# countries into opt$country first (config.R::resolve_group_countries()).
 #' Posterior-predictive check table for the duration cessation hazard.
 #'
 #' @param fit      brmsfit from 04_fit_dur_brms.R / 04_fit_dur_brms_cb.R.
@@ -93,24 +55,11 @@ make_duration_pp_check_tbl <- function(
   }
 
   # --- align the panel to the rows brms actually fitted -------------------
-  #
-  # brms drops any row with NA in ANY model variable, so the group panel is not
-  # in general the same height as fit$data. The enso_west panel is the live
-  # example: 41 of its 2710 rows carry a missing ADM1 label, so the
-  # (1 | country/ADM1) grouping term removes them and the raw panel is 41 rows
-  # too long. Excluding precip/temp lags does not protect against a missing RE
-  # grouping label.
-  #
-  # Rather than assume alignment, reproduce brms's own filter: complete cases
-  # over the model variables the panel carries. Row ORDER is untouched by
-  # brms, so the surviving rows line up positionally. Intersecting with
-  # names(dur_dat) is what makes this safe for the crossbasis backend, whose
-  # enso_cb* columns are built inside the fitter and are absent from the panel
-  # (they are NA-free functions of enso_lag<N>, which is itself a model
-  # variable and so already screened).
-  #
-  # The two assertions below VERIFY this filter -- if a future formula change breaks the
-  # correspondence, this still fails loudly rather than mislabelling a figure.
+  # brms drops rows with NA in any model variable (e.g. a missing ADM1
+  # label), so reproduce that filter: complete cases over the model variables
+  # the panel carries (enso_cb* are built in the fitter, absent here, and
+  # NA-free). Order is kept, so rows align by position; the assertions below
+  # verify it.
   model_vars <- intersect(all.vars(fit$formula$formula), names(dur_dat))
   keep <- stats::complete.cases(dur_dat[, model_vars, drop = FALSE])
   if (any(!keep)) {
@@ -262,30 +211,14 @@ make_duration_pp_check_tbl <- function(
 # Duration RATIO (restricted-mean-duration) -- the estimand behind
 # "outbreaks last XX times longer"
 # ===========================================================================
-#
-# WHY THIS EXISTS. The duration track is a discrete-time cessation hazard
-# (Poisson-with-log-offset, Holford form), so exp(beta) is a hazard ratio for
-# *ending*, and 1/HR is a MONOTONE reorientation of it -- nothing more. 1/HR
-# equals a ratio of expected durations ONLY under a constant baseline hazard
-# (basehaz_duration: none): constant hazard => T ~ Exponential(h) =>
-# E[T|x] = 1/h(x) => E[T|x1]/E[T|x0] = 1/HR exactly. Under the default factor/ms
-# baseline the survival curve is S(t|x) = S0(t)^HR, whose mean-duration ratio
-# depends on the SHAPE of S0(t) -- and the mso_band hazards span a ~492x range,
-# so that shape carries the statistic. The damage concentrates in months 1-3,
-# where almost nothing ends and which dominate the mean. So the sentence
-# "outbreaks last XX times longer" CANNOT be sourced from 1/HR.
-#
-# The honest estimand is the ratio of RESTRICTED mean durations (RMD) over an
-# explicit horizon K, computed per posterior draw and then summarised. This is
-# the closed-form cousin of the simulation-based implied-duration machinery in
-# make_duration_pp_check_tbl() above.
-#
-# CONTRAST SEMANTICS. For an ENSO contrast this is a *scenario* statement: the
-# covariate is held at one value for the whole episode (which no real episode
-# does), so any reported number must be worded "if ONI stayed at +X.X
-# throughout". The caller builds newdata_hi / newdata_lo as one row per mso in
-# 1..horizon, identical in every column EXCEPT the contrasted covariate, using
-# the SAME basis columns the fit's formula names (mso_band, enso_cb*, etc.).
+# 1/HR from the cessation hazard equals a ratio of mean durations only under
+# a constant baseline hazard; with the mso_band baseline it depends on S0(t).
+# So "outbreaks last XX times longer" is the ratio of RESTRICTED mean durations
+# (RMD) over a horizon K, per posterior draw.
+# For an ENSO contrast this is a scenario ("if ONI stayed at +X.X
+# throughout"). The caller builds newdata_hi / newdata_lo as one row per mso in
+# 1..horizon, identical except the contrasted covariate, with the basis columns
+# the fit's formula names.
 
 #' Posterior duration ratio for a covariate contrast, duration track.
 #'
@@ -297,7 +230,7 @@ make_duration_pp_check_tbl <- function(
 #' @param newdata_hi,newdata_lo  one row per mso in 1..horizon, identical in
 #'   every column EXCEPT the contrasted covariate; must already carry whatever
 #'   basis columns the formula names (mso_band, msoms*, seasms*, enso_cb*),
-#'   built with the SAME basis as the fit -- never re-fit.
+#'   built with the same basis as the fit -- never re-fit.
 #' @param horizon    K months; truncation is explicit, not incidental.
 #' @param days_ref   exposure offset per month, held FIXED (default 30.4375).
 #'   Letting it vary would mix exposure differences into the contrast.

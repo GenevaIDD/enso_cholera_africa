@@ -1,4 +1,4 @@
-# test_single_country_re.R — HARD: grouped fits of ONE country keep their
+# test_single_country_re.R — HARD: grouped fits of one country keep their
 #   country-level random effects under a tight sd prior.
 #
 # Usage:

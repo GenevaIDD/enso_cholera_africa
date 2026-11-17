@@ -89,7 +89,7 @@ suppressPackageStartupMessages({
   )
 }
 
-#' Resolve ONE empirical baseline-rate table onto the location frame.
+#' Resolve one empirical baseline-rate table onto the location frame.
 #'
 #' The three anchors (`base_rate_occ` / `base_rate_dur` / `base_rate_mon`,
 #' `utils/anchor.R`) are the same object: a country x admin_level table,
@@ -319,64 +319,46 @@ suppressPackageStartupMessages({
 
 #' Derive a per-location frame from the prepared survival data.
 #'
-#' Returns one row per (gid, location_period_id) carrying the metadata the
-#' kernel needs to set up an ADM2 location: country, AFRO_region, TU
-#' membership, `min_seas`, population, admin_level, and any opt-in per-track
-#' baseline-rate anchors.
+#' One row per (gid, location_period_id) with what the kernel needs: country,
+#' AFRO_region, TU, `min_seas`, population, admin_level and any opt-in
+#' per-track baseline-rate anchors. Columns missing from the survival panel
+#' are backfilled from their upstream sources, logged in one summary line.
 #'
-#' Step 3 rehydration: when columns are absent from the survival panel,
-#' we backfill them from the canonical upstream sources. Each rehydrated
-#' column is logged in a single summary line.
-#'
-#' @param hmm_clusters_path path to `data/hmm_country_clusters.csv` (S6 TU
-#'   spillover lag — same file `03_prepare_occ.R:269` reads). When NULL the
-#'   `tu` column defaults to NA and the TU spillover lag is inactive.
-#' @param outbreak_metadata_path unused in v1 — kept for forward compatibility
-#'   with a WorldPop × UN-WPP population scaling path.
+#' @param hmm_clusters_path path to `data/hmm_country_clusters.csv` (the file
+#'   `03_prepare_occ.R` reads). NULL: `tu` is NA and the TU spillover lag is
+#'   inactive.
+#' @param outbreak_metadata_path unused; kept for a future WorldPop × UN-WPP
+#'   population scaling path.
 #' @param size_data_path path to `generated_data/outbreak_size_analysis_data.rds`
-#'   (the same file `read_size_data()` consumes). Used to read per-gid `pop`
-#'   (mean over training rows) when `gid_pop_path` is NULL, and per-gid
-#'   `admin_level` as a gap-fill. The size DATA file is still a simulator
-#'   input even though the size track is no longer fit or simulated.
-#' @param base_rate_table_paths optional NAMED list of sidecar paths for the
-#'   three per-track anchors, e.g.
-#'   `list(occ = ..., dur = ..., mon = ...)` — the files written by
-#'   `persist_base_rate_table(opt, track, data)` /
-#'   `make<Track>RunFile(opt, "<track>_base_rate")` (`analysis/utils/anchor.R`,
-#'   `analysis/utils/paths.R`). Each entry is resolved through the same
-#'   country x admin-level ladder and lands in its OWN column
-#'   (`base_rate_occ` / `base_rate_dur` / `base_rate_mon`, plus the matching
-#'   `_tier` column) because all four tracks share ONE location frame and their
-#'   denominators differ. NULL (the default) is fully inert: no columns are
-#'   added and every existing caller behaves exactly as before. Entries are
-#'   opt-in individually — an absent or empty name is skipped, a named but
-#'   missing file is a hard error (no silent default).
-#' @param admin_level_data optional tibble/data.frame with `gid` and
-#'   `admin_level` columns (e.g. the occurrence survival panel, which several
-#'   callers already load for `drop_overlapping_adm1_from_frame()` — pass that
-#'   same object here rather than reading it twice). Used to backfill
-#'   `admin_level` when `survival_data` itself is a bare climate panel (no
-#'   `admin_level` column), which is the common case for `07b_simulator_v1.R` /
-#'   `utils/simulations.R` / `smoothing_core.R` callers. Falls through to
-#'   `size_data_path` (mode per gid over training rows — a weaker source,
-#'   since it only covers gids with observed outbreaks) when NULL or when a
-#'   given gid isn't present in it.
-#' @param gid_pop_path path to `gid_population_<Y0>-<Y1>.qs` (the canonical Q_g
-#'   table from 02c_preprocess_population_compile.R), resolved by
-#'   `make_pop_run_file(opt, "pop_gid")`. When supplied, `pop` is resolved per gid
-#'   through `resolve_gid_population()` (no silent `pop <- 1.0` default). NULL
-#'   keeps the legacy size-training join.
+#'   (as read by `read_size_data()`). Gives per-gid `pop` (mean over training
+#'   rows) when `gid_pop_path` is NULL and fills gaps in `admin_level`. Still a
+#'   simulator input although the size track is retired.
+#' @param base_rate_table_paths optional NAMED list of anchor sidecars,
+#'   `list(occ = ..., dur = ..., mon = ...)`, as written by
+#'   `persist_base_rate_table(opt, track, data)`. Each goes through the
+#'   country x admin-level ladder into its own `base_rate_<track>` + `_tier`
+#'   columns (the tracks share one frame, their denominators differ). NULL adds
+#'   nothing. An absent or empty name is skipped; a named but missing file is a
+#'   hard error.
+#' @param admin_level_data optional data frame with `gid` and `admin_level`
+#'   (e.g. the occurrence survival panel a caller already loaded for
+#'   `drop_overlapping_adm1_from_frame()`). Backfills `admin_level` when
+#'   `survival_data` is a bare climate panel; falls through to
+#'   `size_data_path` (mode per gid) when NULL or a gid is missing.
+#' @param gid_pop_path path to the canonical Q_g table
+#'   `gid_population_<Y0>-<Y1>.qs` (`make_pop_run_file(opt, "pop_gid")`). When
+#'   set, `pop` is resolved per gid by `resolve_gid_population()` (no silent
+#'   default). NULL keeps the legacy size-training join.
 #' @param wpp_path path to `wpp2024_national_totals.csv`; enables the T2
 #'   nearest-year rescale for forecast years outside WorldPop's 2015-2030
-#'   constrained coverage. NULL disables T2 (T1/T3 still apply).
+#'   coverage. NULL disables T2 (T1/T3 still apply).
 #' @param pop_year integer year at which to resolve the gid population, or a
-#'   mode (sim_pop_year_spec(): `season_year` / `calendar_year`).
-#'   In a mode the static `pop` is resolved at year(pop_window[1]) and the
-#'   frame gains `pop_y<YYYY>` columns for every year from year(pop_window[1])
-#'   - 1 to year(pop_window[2]) plus `pop_shift_m` (min_seas - 1 under
-#'   season_year, 0 under calendar_year), read per month by frame_pop_at() /
-#'   frame_pop_matrix(). A mode needs `gid_pop_path` and a panel without `pop`.
-#'   An integer adds no column.
+#'   mode (sim_pop_year_spec(): `season_year` / `calendar_year`). A mode
+#'   resolves the static `pop` at year(pop_window[1]) and adds `pop_y<YYYY>`
+#'   columns for year(pop_window[1]) - 1 to year(pop_window[2]) plus
+#'   `pop_shift_m` (min_seas - 1 under season_year, 0 under calendar_year),
+#'   read per month by frame_pop_at() / frame_pop_matrix(). A mode needs
+#'   `gid_pop_path` and a panel without `pop`. An integer adds no column.
 #' @param pop_window length-2 Date (first, last month the run reads;
 #'   sim_pop_window()); required in a mode, ignored otherwise.
 build_location_frame <- function(
@@ -481,10 +463,10 @@ build_location_frame <- function(
     dplyr::distinct(dplyr::across(dplyr::all_of(base_cols))) %>%
     dplyr::mutate(
       # Flatten dots to underscores before extracting, so the ADM1 key is
-      # derived correctly under BOTH gid conventions seen in this repo
+      # derived correctly under both gid conventions seen in this repo
       # (flat "ISO3_N" and GADM-dotted "ISO3.ADM1[.ADM2]_N") and is always
       # emitted in the canonical underscore form "ISO3_N" that the brms RE
-      # level-name keys (occ_post.R:478) and the test fixtures expect.
+      # level-name keys (occ_post.R) and the test fixtures expect.
       # Matching the flatten-first idiom of 03_prepare_occ.R,
       # but inlined rather than calling flatten_gid() because gid.R is not in
       # the source closure of every build_location_frame() caller
@@ -611,23 +593,12 @@ build_location_frame <- function(
   }
 
   # --- pop --------------------------------------------------------------
-  # No silent default population: a fallback `pop <- 1.0` would enter a unit
-  # with a population of ONE PERSON. Against an imposed population elasticity
-  # of 1.0 that is not a small bias; it is the unit's entire scale.
-  #
-  # WHY THE SIMULATOR MUST NOT REUSE THE SIZE TRAINING `pop`. The two
-  # denominators are different quantities and only coincide when coverage is
-  # complete. A size training row's denominator is H[l,g] -- the population of
-  # the REPORTING footprint inside the gid. The simulator's forecast unit is the
-  # WHOLE gid, so its denominator is Q_g. They differ by exactly the coverage
-  # factor c = H/Q, and c < 1 wherever a gid was only partially reported. So the
-  # canonical Q_g table is read directly, NOT `pop` out of
-  # outbreak_size_analysis_data.rds.
-  #
-  # load_population_per_location() is still called below, but only on the
-  # legacy route (no gid_pop_path).
-  # Hoisted so the canonical-admin_level block below can reuse the table this
-  # branch already read rather than paying a second load_gid_population().
+  # No silent default population (a fallback pop = 1 is one person). The
+  # simulator reads the canonical whole-gid population Q_g, NOT the size
+  # training `pop`, which is the reporting-footprint population H (H = c * Q,
+  # c < 1 under partial coverage). load_population_per_location() below is the
+  # legacy route only (no gid_pop_path). gid_pop is hoisted so the
+  # canonical-admin_level block reuses it.
   gid_pop <- NULL
   if (!has_pop) {
     if (!is.null(gid_pop_path) && nzchar(gid_pop_path)) {
@@ -816,27 +787,13 @@ build_location_frame <- function(
   }
 
   # --- admin_level_canonical (P3, replay side) -----------------------------
-  # The block above resolves the CORPUS admin_level -- whatever the outbreak
-  # database asserts for a location period. On the FIT side, the size and
-  # monthly tracks re-key that label to the GADM depth of the gid before any
-  # level-dependent quantity is computed (`apply_canonical_admin_level()`,
-  # utils/population.R; called from build_base_rate_table()/mon and /siz, from
-  # read_size_data(), and ahead of `.add_log_pop_centred()`). Nothing did the same on
-  # the replay side, so the frame carried the corpus label into three different
-  # level-keyed lookups: the anchor cell, the P4 `log_pop_c` centre,
-  # and the `admin_levelADM2` dummy. Measured on an earlier country frame,
-  # 203/712 units (28.5%) disagree with GADM depth -- including 83 units labelled
-  # "ADM3" that are canonically ADM1 or ADM2, a level the estimand-coherent
-  # tables do not even carry a stratum for.
-  #
-  # A NEW COLUMN, not an overwrite. `admin_level` stays the corpus label because
-  # the occurrence and duration anchors are corpus-keyed by construction
-  # (`.occ_anchor_view()`/`.dur_anchor_view()`, utils/anchor.R, do not canonicalise)
-  # and `drop_overlapping_adm1_from_frame()` keys off it too -- one shared column
-  # cannot serve both conventions, so the choice is made per consumer below.
-  #
-  # Inert without `gid_pop_path`: no canonical table, no column, and every
-  # consumer falls back to `admin_level` exactly as before.
+  # The fit side re-keys admin_level to the gid's GADM depth
+  # (apply_canonical_admin_level(), utils/population.R); this does the same on
+  # the replay side for the level-keyed lookups (anchor cell, log_pop_c centre,
+  # admin_levelADM2 dummy). A NEW column, not an overwrite: the occ / dur
+  # anchors and drop_overlapping_adm1_from_frame() key off the corpus
+  # `admin_level`, so each consumer picks its column. Inert without
+  # gid_pop_path.
   if (
     !("admin_level_canonical" %in% names(frame)) &&
       !is.null(gid_pop_path) &&
@@ -884,7 +841,7 @@ build_location_frame <- function(
   # fit made without the anchor, so an un-anchored run is untouched.
   #
   # They are DISTINCT columns rather than one shared `base_rate`, because the
-  # tracks share ONE location frame and their denominators differ
+  # tracks share one location frame and their denominators differ
   # (exposure days for occ/dur, pop x exposure days for mon). One
   # column would silently hand the occurrence rate to the monthly kernel.
   if (!is.null(base_rate_table_paths)) {
@@ -973,7 +930,7 @@ build_location_frame <- function(
 
 #' Recover per-gid `min_seas` from the panel by inverting the seasonal offset.
 #'
-#' make_surv_data() (utils.R:880-919) computes `t_start_seas = yday(days_seas)-1`
+#' make_surv_data() (occ_data.R) computes `t_start_seas = yday(days_seas)-1`
 #' with `days_seas = t_start %m+% months(-(min_seas-1))`. So `t_start_seas == 0`
 #' occurs at the calendar month equal to `min_seas`. We pick, per gid, the row
 #' with the smallest `abs(t_start_seas)` and shift its calendar month back by
@@ -1007,7 +964,7 @@ derive_min_seas_from_panel <- function(panel) {
 
 #' Read the HMM transmission-unit (TU) cluster CSV.
 #'
-#' Mirrors `03_prepare_occ.R:269` — same file, same `iso3 → cluster` mapping,
+#' Mirrors `03_prepare_occ.R` — same file, same `iso3 → cluster` mapping,
 #' renamed `cluster → tu` here to match the simulator's naming.
 load_hmm_tu_mapping <- function(path) {
   if (!file.exists(path)) {
@@ -1440,29 +1397,17 @@ frame_first_onset <- function(surv_dat, gids) {
 # Draws bundle — internal representation used by both extractors and the kernel
 # ---------------------------------------------------------------------------
 #
-# Shape:
-#   list(
-#     S            = integer scalar, number of posterior draws available
-#     fe           = named numeric matrix (S x p): population-level coefs
-#                    columns = canonical FE term names
-#     re_intercept = list(
-#       region  = named matrix S x n_region   (column names = region levels)
-#       country = named matrix S x n_country  (column names = country codes)
-#       adm1    = named matrix S x n_adm1     (column names = adm1 gids)
-#       adm2    = named matrix S x n_adm2 or NULL
-#     )
-#     re_slope     = list of S x n_level matrices, keyed by term name
-#                    e.g. re_slope$mean_precip$adm1  -> S x n_adm1
-#                         re_slope$ongoing_outbreak_lag1$country -> S x n_country
-#     basehaz      = list with `kind` in c("factor", "cyclic", "seasonal", "ms")
-#                    and draws of the corresponding params
-#     phi          = numeric vector length S (monthly NegBin dispersion); NULL for occ
-#     active_terms = character vector of FE term names actually evaluated
-#                    (matches `colnames(fe)` modulo TTLO factor unpacking)
-#   )
-#
-# The kernel never touches a fit object directly — only the draws bundle —
-# which makes synthetic fixtures trivial.
+# Shape: list(
+#   S            number of posterior draws
+#   fe           S x p matrix of population-level coefs (canonical term names)
+#   re_intercept list(region, country, adm1, adm2 or NULL) of S x n_level
+#                matrices, columns = level ids
+#   re_slope     per term, a list of S x n_level matrices
+#                (e.g. re_slope$ongoing_outbreak_lag1$country)
+#   basehaz      list(kind = factor | cyclic | seasonal | ms, + its draws)
+#   phi          length-S monthly NegBin dispersion; NULL for occ
+#   active_terms FE terms evaluated (colnames(fe) modulo TTLO unpacking))
+# The kernel reads only this bundle, never a fit object.
 
 #' Construct a deterministic synthetic draws bundle for testing.
 #'
@@ -1661,80 +1606,22 @@ extract_occurrence_draws <- function(fit, opt, max_draws = 200) {
 # Onset-month exposure correction
 # ---------------------------------------------------------------------------
 #
-# THE DEFECT. The mon and dur tracks are fitted on the duration panel, whose
-# exposure column is the calendar month intersected with the episode window
-# (.expand_active_months(), utils/dur_data.R:257):
-#
-#   exposure   = (min(TR, month_end) - max(TL, month_start)) + 1
-#   log_offset = log(pmax(exposure, 1))                    dur_data.R:350
-#
-# so an episode's FIRST and LAST month are partial. Every replay kernel
-# synthesises the offset as log(days_in_month(t)) instead, because the day of
-# the month an episode starts on is not a quantity the kernel simulates. That
-# is exact for interior months and wrong for the two boundary months.
-#
-# Measured on outbreaks_monthly_data_base-1990_2019.rds (9,055 rows /
-# 1,581 episodes), median episode length 5 months:
-#
-#   role                 rows    share   mean true exp   mean days_in_month
-#   onset (mso == 1)     1,580   17.4%       16.7 d           30.5 d
-#   interior             5,894   65.1%       30.5 d           30.5 d
-#   cessation            1,580   17.4%       15.4 d           30.5 d
-#
-# i.e. 35% of panel rows carry a ~2x median (3.7-4.0x mean) offset error,
-# inflating replayed person-days by 1.198x and case-weighted mu by 1.216x.
-#
-# WHY NO REFIT IS NEEDED. The offset is coefficient-1, so the fit estimates a
-# PER-DAY rate having already divided exposure out; the fitted per-day rate at
-# mso = 1 is correctly ~2x the naive full-month value. The replay then
-# multiplies that correctly-high rate by a wrong (full-month) exposure. The
-# error is entirely on the replay side.
-#
-# WHAT THIS FIXES, AND WHAT IT DOES NOT. Onset only. `mso == 1` is known at
-# mu-computation time in every kernel (the active/mso promotion block always
-# runs before the mu blocks). Cessation is NOT: the cessation hazard is drawn
-# AFTER mu in both forward kernels (simulate_one_tu();
-# dur_cessation_block, spatpomp_core_c.R), so "is this
-# the last month" is not available where it would be needed. Correcting onset
-# alone takes the case-weighted inflation 1.216 -> 1.064 and person-days
-# 1.198 -> 1.104; the residual is the cessation month.
-#
-# THE CESSATION MONTH (simulator.cessation_exposure). Under
-# `full` (the default, the behaviour above) the cessation month keeps a full
-# month. Under `half` every kernel draws the cessation BEFORE the monthly mean
-# and gives a unit that ceases this step .CESSATION_EXPOSURE_FRAC of a month
-# on top of the onset correction (an episode that starts and ends in the same
-# month gets 1/4; the fit panel holds almost none). The cessation draw itself
-# is unchanged: it still follows the lag update and reads the post-update
-# lags, and the monthly mean still reads the pre-update ones (saved before the
-# update). In the C kernel the monthly block draws nothing, so `half` leaves
-# the RNG stream, and every latent state but `mu`, as under `full`; in the v1
-# kernel the case draw moves after the cessation draw. The recorded state
-# convention smoothing_core.R decodes (active / mso written after cessation,
-# mu > 0 iff active during the month) is the same under both. Recomputed with
-# replay_exposure_ratios() on outbreaks_monthly_data_base-1990_2019.rds:
-# case-weighted mu ratio 1.216 (none) -> 1.048 (onset) -> 1.018
-# (onset + cessation), person-days 1.198 -> 1.094 -> 0.996. (1.048 rather than
-# the 1.064 quoted above: the earlier measurement's weighting is not recorded.)
-# On the gid_season panel (_ep-gs, the deployed fits): case-weighted 1.109 ->
-# 0.990 -> 0.988 (cessation months carry few cases), person-days 1.171 ->
-# 1.081 -> 0.997.
-#
-# THE CONSTANT. Under a uniform day-of-month onset the expected active
-# fraction is (D+1)/(2D) ~ 0.5. The panel agrees: mean exposure/days_in_month
-# is 0.547 at onset and 0.505 at cessation, against 0.516 predicted by
-# uniform. A flat 0.5 is used rather than a panel-fitted constant -- it is
-# theory-derived, needs no calibration baked into a kernel, and measured
-# marginally better on the case-weighted metric (1.018 vs 1.034 when both
-# boundary months are corrected). Because mu is LINEAR in exposure, using the
-# expectation is unbiased for the mean; no Jensen correction applies.
-#
-# SCOPE. mon and dur ONLY. The occurrence kernel shares the same
-# `log_offset_mat`/`log_offset` object but a different exposure semantics --
-# pmax(t_end_seas - t_start_seas, 1) on the SURVIVAL panel (occ_data.R:80),
-# which is a genuine at-risk month. Applying this correction there would
-# halve the occurrence hazard at every onset month. Hence a per-call-site
-# additive adjustment rather than an edit to the shared offset object.
+# The mon and dur fits use a partial-month exposure offset in an episode's
+# first and last month (dur_data.R .expand_active_months()); the replay
+# kernels use log(days_in_month). The fitted per-day rate is right, so only
+# the replay is corrected:
+#   * onset month (mso == 1): exposure x .ONSET_EXPOSURE_FRAC, the expected
+#     active fraction under a uniform onset day ((D+1)/(2D) ~ 0.5; mu is
+#     linear in exposure, so no Jensen term);
+#   * cessation month: only under simulator.cessation_exposure = "half", where
+#     every kernel draws cessation BEFORE the monthly mean (otherwise after
+#     mu) and gives a ceasing unit .CESSATION_EXPOSURE_FRAC of a month (1/4
+#     if it also started that month). The cessation draw still reads the
+#     post-update lags, the monthly mean the pre-update ones; the C kernel's
+#     RNG stream and the state convention smoothing_core.R decodes are as
+#     under "full".
+# mon and dur ONLY: occurrence shares the offset object but its exposure is a
+# genuine at-risk month, so the correction is a per-call-site adjustment.
 .ONSET_EXPOSURE_FRAC <- 0.5
 
 #' Additive log-offset correction for an episode's onset month.
@@ -1883,24 +1770,12 @@ replay_exposure_ratios <- function(panel) {
   # So k_knots = K + 2.  For K=6 (draws), k_knots=8 matches the original fit k=8.
   k_knots <- K + 2L
 
-  # Build BOTH raw and absorbed smooth objects.
-  # mgcv::Predict.matrix always returns the RAW (pre-absorption) basis even after
-  # smoothCon(..., absorb.cons=TRUE) has reparameterised sm$X.  We need a combined
-  # transformation T_full (K_raw × K) such that X_raw %*% T_full = Zs_1_1_new, where
-  # Zs_1_1 is the design matrix that brms actually passes to Stan.
-  #
-  # brms applies two successive reparameterisations to the raw smooth basis:
-  #   (1) Constraint absorption:
-  #       T_abs = qr.Q(qr(t(C)), complete=TRUE)[, -(1:nrow(C))]   (K_raw × K)
-  #       → sm$X = X_raw %*% T_abs
-  #   (2) Demmler-Reinsch (penalty-based) rotation:
-  #       eig = eigen(sm$S[[1]], symmetric=TRUE)
-  #       T_DR = eig$vectors %*% diag(1/sqrt(eig$values))
-  #       brms reverses the column order of T_DR before applying it
-  #       → Zs_1_1 = sm$X %*% T_DR_rev   (columns reversed)
-  #
-  # Combined: T_full = T_abs %*% T_DR_rev   (K_raw × K)
-  # Prediction: X_raw %*% T_full = Zs_1_1_new
+  # Build both raw and absorbed smooth objects: mgcv::Predict.matrix returns
+  # the RAW basis, while brms passes Stan Zs_1_1 = X_raw %*% T_full, with
+  #   T_abs  = qr.Q(qr(t(C)), complete = TRUE)[, -(1:nrow(C))]  (absorption)
+  #   T_DR   = eigen(sm$S[[1]])$vectors %*% diag(1 / sqrt(values)), columns
+  #            reversed (Demmler-Reinsch rotation)
+  #   T_full = T_abs %*% T_DR_rev
   mk_sm <- function(absorb) {
     tryCatch(
       mgcv::smoothCon(
@@ -2033,7 +1908,7 @@ replay_exposure_ratios <- function(panel) {
 
   # Lookup table: group prefix -> simulator-bucket name. The occurrence track
   # nests by `gid` at the deepest level; the size track nests by `ADM2`
-  # (= gid; see utils.R:3448). Both map to the "adm2" bucket — the matching
+  # (= gid). Both map to the "adm2" bucket — the matching
   # composite level keys are reconstructed identically by re_level_key().
   # Bare-country entries handle grouped fits (drop_region=TRUE) whose intercept
   # and spillover REs use `country/ADM1/gid` nesting without an `AFRO_region`
@@ -2148,7 +2023,7 @@ replay_exposure_ratios <- function(panel) {
     "AFRO_region:country" = "country",
     "AFRO_region:country:ADM1" = "adm1",
     # Grouped (drop_region) fits: build_size_formula re-roots the shape RE chain
-    # at country (`shape ~ 1 + (1 | country/ADM1)`, utils/config.R:1594-1599), so brms
+    # at country (`shape ~ 1 + (1 | country/ADM1)`, utils/formula.R), so brms
     # names the shape ranef groups `country` / `country:ADM1` with NO AFRO prefix.
     # Without these entries the phi RE matrices were silently dropped and every
     # location collapsed to exp(b_shape_Intercept) — mirrors the bare-country
@@ -2468,7 +2343,7 @@ replay_exposure_ratios <- function(panel) {
 #' `CMR_5_1` -> `"ADM1"`, `CMR_5_1_1` -> `"ADM2"`. GADM gid depth IS the
 #' canonical admin level -- that is exactly what `apply_canonical_admin_level()`
 #' (P3, utils/provenance.R) re-keys `admin_level` to before
-#' `.add_log_pop_centred()` runs. Used on BOTH sides of the P4 re-centring (the
+#' `.add_log_pop_centred()` runs. Used on both sides of the P4 re-centring (the
 #' training-side centre recovery in `.recover_log_pop_centres()` and the
 #' frame-side lookup in `evaluate_lp()`) so the two cannot disagree: a frame
 #' unit and the training rows for the same gid must resolve to the same centre
@@ -2505,7 +2380,7 @@ replay_exposure_ratios <- function(panel) {
 #' Recover the P4 `log_pop_c` centring constants from a fitted model.
 #'
 #' `log_pop_c = log(pop) - centre[admin_level]` (`.add_log_pop_centred()`,
-#' utils/siz_data.R:75-87) is the deviation term `pop_elasticity: free` fits in
+#' utils/siz_data.R) is the deviation term `pop_elasticity: free` fits in
 #' place of the hard-coded-1 population offset. The simulator MUST re-centre its
 #' own frame units on the TRAINING centres -- centring on the frame's own mean
 #' would move the pivot and silently rescale every prediction by
@@ -2519,7 +2394,7 @@ replay_exposure_ratios <- function(panel) {
 #'      utils/provenance.R): a mon stamp and a size stamp describe different
 #'      denominators on different panels, so one shared name would let a mon
 #'      artefact satisfy a size assertion.
-#'   2. Recovered EXACTLY from `fit$data`: the training frame carries both
+#'   2. Recovered exactly from `fit$data`: the training frame carries both
 #'      `log_pop_c` and (because `offset(log(pop))` makes `pop` a model
 #'      variable) `pop`, and `log(pop) - log_pop_c == centre[admin_level]` by
 #'      construction. This is what makes the fix apply to fits already on disk,
@@ -2707,13 +2582,15 @@ replay_exposure_ratios <- function(panel) {
 #' extract_duration_draws().
 #'
 #' Two deliberate `stop()`s rather than silent approximations, following the
-#' duration extractor's `basehaz_duration == "ms"` precedent (:1374-1377):
+#' duration extractor's `basehaz_duration == "ms"` precedent in
+#' extract_duration_draws():
 #'
 #'   * `prev_cases: true` adds a `log_cases_prev` covariate whose value is the
 #'     previous month's *drawn* case count. Carrying it would need a 12th
 #'     spatPomp state slot, which would bump `.SM_CACHE_SCHEMA_VERSION`
-#'     (spatpomp_core.R:76) and invalidate every existing smoothing handoff cache. It
-#'     is `false` by default (config_defaults.yml) and no shipped config sets it.
+#'     (spatpomp_core.R) and invalidate every existing smoothing handoff cache.
+#'     It is `false` by default (config_defaults.yml) and no shipped config sets
+#'     it.
 #'   * a non-brms monthly backend has no extractor at all.
 #'
 #' @param fit       fitted brms monthly model (artefact kind "mon_fit").
@@ -2753,7 +2630,7 @@ extract_monthly_draws <- function(fit, opt, max_draws = 200L) {
   )
 
   # The monthly offset set is a property of the FORMULA
-  # (build_monthly_formula_parts(), utils/config.R:2523-2526), not a tunable, so
+  # (formula.R::build_monthly_formula_parts()), not a tunable, so
   # it is pinned here rather than read from the config:
   #   offset(log(pop))       -- toggled by monthly.offset_pop (already handled)
   #   offset(log_offset)     -- UNCONDITIONAL
@@ -2968,23 +2845,12 @@ re_level_key <- function(frame, bucket, drop_region = FALSE) {
 # ---------------------------------------------------------------------------
 # Linear-predictor lookup plan
 # ---------------------------------------------------------------------------
-# evaluate_lp() spent about half of every forward run rebuilding the same
-# random-effect lookups: re_level_key() pastes a key per location and bucket,
-# match_keys() matches it against the bundle's column names, for every term,
-# every step, every replicate -- all of it invariant over steps and replicates.
-# lp_plan() resolves those integer indices ONCE per (bundle, frame rows,
-# drop_region); .lp_coefs() turns them into per-location coefficient vectors
-# ONCE per posterior draw (a one-slot cache: a forward replicate keeps its draw
-# for every month). evaluate_lp() then only does the per-step arithmetic.
-#
-# Bit-identity contract: every coefficient vector is built with exactly the
-# arithmetic of the previous per-call code (same operands, same order), and the
-# per-step accumulation into `lp` keeps the previous term order, so the LP is
-# identical to the last bit (tests/test_simulator_kernel_golden.R, HARD).
-#
-# A plan is bound to the bundle and the frame ROWS it was built for; callers
-# pass it only alongside that bundle and those rows (simulate_one_tu() keeps one
-# per context and track). evaluate_lp() without a plan builds a throwaway one.
+# lp_plan() resolves evaluate_lp()'s random-effect lookups (step- and
+# replicate-invariant) once per (bundle, frame rows, drop_region); .lp_coefs()
+# builds per-location coefficient vectors once per draw (one-slot cache).
+# Bit-identity contract: same arithmetic and term order as the per-call code
+# (tests/test_simulator_kernel_golden.R, HARD). A plan is bound to its bundle
+# and frame ROWS; evaluate_lp() without one builds a throwaway plan.
 
 #' Build the replicate- and step-invariant lookup plan of evaluate_lp().
 #'
@@ -3246,29 +3112,27 @@ lp_plan <- function(draws, frame_tu, drop_region = FALSE) {
 #'   s           — posterior draw index
 #'   xrow        — named list of covariate vectors length N (mean_precip, ...)
 #'   o, o_ct, o_tu — integer vectors length N; NA for NA-TU locations in o_tu
-#'   u_days      — numeric vector length N; days elapsed since last outbreak.
-#'     Binned into the factor levels from the fit and evaluated if
-#'     `time_to_last_outbreak*` columns are present in the draws bundle.
-#'     NA → reference-level silence (0 contribution).
+#'   u_days      — numeric vector length N; days since the last outbreak,
+#'     binned into the fit's `time_to_last_outbreak*` levels when present.
+#'     NA → reference level (0 contribution).
 #'   frame_tu    — location frame restricted to TU (for level lookups).
 #'   basehaz_val — numeric vector length N, added to the LP (per-location step).
-#'   drop_ct_tu  — when TRUE, skip the o_ct/o_tu LP contribution entirely
-#'     (own-`o` is never affected). Threads `simulator.drop_country_tu_spillover`.
+#'   drop_ct_tu  — TRUE skips the o_ct/o_tu LP contribution (own `o` is never
+#'     affected); threads `simulator.drop_country_tu_spillover`.
 #'   nbr         — per-step neighbour-contagion pressure, or NULL.
 #'   plan        — lp_plan(draws, frame_tu, drop_region) built for exactly this
 #'     bundle and these rows, or NULL (a throwaway plan is built per call).
 #'   smooth_X    — named list (by smooth) of the seasonal-spline design at this
 #'     step's t_start_seas, or NULL (computed from draws$smooth_pred_fn).
 #'
-#' Terms consumed: intercept(s) and nested intercept REs (region -> country ->
-#' adm1 -> adm2, primary key format with the alternate format as fallback --
-#' grouped brms_cb fits mix bare-country and AFRO-prefixed keys); the linear
-#' terms (climate, enso_lag/lead, nbr, every `_cb<k>` column, the mon track's
-#' four harmonics, admin_levelADM2, P4 log_pop_c rebuilt from `pop` around the
-#' TRAINING centres), each as (FE + nested RE slope over every level) x value;
-#' the three spillover lags with their FALSE-level slopes (NA lag -> 0, as rows
-#' with NA lag were excluded at fit time); the TTLO levels (incl. the reference
-#' bin's RE slope and the optional "none" level); the seasonal spline.
+#' Terms consumed: intercepts and nested intercept REs (region -> country ->
+#' adm1 -> adm2; grouped brms_cb fits mix bare-country and AFRO-prefixed keys,
+#' so the alternate key is a fallback); every linear term (climate, ENSO, nbr,
+#' `_cb<k>` columns, mon harmonics, admin_levelADM2, log_pop_c centred on the
+#' TRAINING centres) as (FE + nested RE slopes) x value; the spillover lags
+#' with their FALSE-level slopes (NA lag -> 0, as at fit time); the TTLO
+#' levels incl. the reference bin's RE slope and the optional "none" level;
+#' the seasonal spline.
 #'
 #' Returns a numeric vector length N of log-rates (log λ).
 evaluate_lp <- function(
@@ -3335,7 +3199,7 @@ evaluate_lp <- function(
     }
     contrib_true <- sp$true * lag_vec
     contrib_true[is.na(lag_vec)] <- 0 # NA lag → term absent at fit time → 0
-    # brms stores RE slopes for ALL factor levels, including FALSE: applied to
+    # brms stores RE slopes for all factor levels, including FALSE: applied to
     # rows where lag_vec == 0 (NA treated as 0).
     contrib_false <- if (!is.null(sp$false)) {
       w <- 1L - as.integer(lag_vec)
@@ -3508,13 +3372,14 @@ basehaz_dur_eval <- function(draws_dur, s, mso, N) {
 # TTLO helpers — categorical binning (step 4)
 # ---------------------------------------------------------------------------
 
-# Cutpoints mirror utils.R:1020 exactly.
+# Cutpoints mirror occ_data.R::make_time_to_last_outbreak_cat().
 .TTLO_BREAKS <- c(0, 1, 2, 3, 4, 5, 6, Inf)
 
 #' Bin continuous days-since-last-outbreak into the factor-level labels used
 #' at fit time.  Mirrors `cut((pmax(0,days)+1)/365, .TTLO_BREAKS,
-#' include.lowest=TRUE, right=FALSE)` from utils.R:1124 (occ track; size track
-#' uses the identical /365 binning at utils.R:4690).
+#' include.lowest=TRUE, right=FALSE)` from
+#' occ_data.R::make_time_to_last_outbreak_cat() (occ track; size track: the
+#' identical /365 binning in siz_data.R::read_size_data()).
 #'
 #' @param days numeric vector; days elapsed since last outbreak end.
 #'   NA → NA (warm-up not available; treated as reference-level silence in LP).
@@ -3777,7 +3642,7 @@ advance_ttlo <- function(u_days, Y, step_days = 365.25 / 12) {
 #' time_to_last_outbreak) from DETECTED episodes. Feeding the kernel the latent
 #' field instead (5-20x more prevalent) evaluates those coefficients far
 #' outside what they were estimated on. With this flag the kernel feeds what
-#' the surveillance record would have seen, using the SAME delta_fn/delta_fp as
+#' the surveillance record would have seen, using the same delta_fn/delta_fp as
 #' the detect measurement:
 #'   onset this month           det ~ Bernoulli(1 - delta_fn)  (kept for the episode)
 #'   active, no onset           det unchanged
@@ -4019,24 +3884,14 @@ incidence_cap_of <- function(sim) {
 }
 
 # Onset eligibility: which inactive units may draw an onset.
-#   inactive  every unit not in a running episode (the default).
-#   season    also no recorded onset yet in the unit's current cholera season:
-#             the occurrence fit keeps the first onset of each (gid, season
-#             year) and censors the gid for the rest of that season
-#             (03_prepare_occ.R), so its hazard is the first-onset-of-season
-#             hazard and a second onset in the same season was never estimated.
-# The gate reads the existing u_days state (days since the last onset that reset
-# it: recorded onsets under covariate_feed: detected, latent ones otherwise) and
-# the month-of-season index seas_k = (month - min_seas) mod 12, 0 on the season's
-# first month. u_days is read BEFORE this month's update, so it holds the days
-# up to the end of the previous month: an onset in month m0 leaves u_days = 0
-# going into m0 + 1, and n = floor(u_days / 30.4375 + 0.5) is the months since
-# that onset minus one. The onset fell in the current season iff n + 1 <= seas_k,
-# so the unit is eligible iff n >= seas_k. The no-prior-onset sentinel
-# (.TTLO_NONE_DAYS = 1e9) and NA are always eligible. floor(x + 0.5), not
-# round(): the C kernel uses the same expression, and u_days is a sum of exact
-# 30.4375 steps, so both kernels gate the same units and consume the RNG
-# stream identically.
+#   inactive  every unit not in a running episode (default).
+#   season    also no onset yet in the unit's current cholera season (the
+#             occurrence fit models the first onset of each gid season).
+# Gate: n = floor(u_days / 30.4375 + 0.5), u_days read BEFORE this month's
+# update; seas_k = (month - min_seas) mod 12. Eligible iff n >= seas_k; the
+# no-prior-onset sentinel (.TTLO_NONE_DAYS) and NA always are. floor(x + 0.5),
+# not round(): it matches the C kernel, so both kernels gate the same units
+# and consume the RNG stream identically.
 .ONSET_ELIGIBILITY_DEFAULT <- "inactive"
 .ONSET_ELIGIBILITY_VALUES <- c("inactive", "season")
 
@@ -4443,20 +4298,13 @@ draw_monthly_cases <- function(mu, phi, cap = Inf) {
 #' @param panel_tu climate panel restricted to the TU + horizon.
 #' @param draws_occ occurrence draws bundle.
 #' @param draws_dur Optional duration (cessation-hazard) draws bundle
-#'   (extract_duration_draws()). NULL (default) selects the legacy path:
-#'   onset is an unconditional per-step Bernoulli draw with no `active`/`mso`
-#'   state and no cessation step, byte-identical to the onset-only kernel at
-#'   a fixed seed. Non-NULL selects the duration-aware path: onset is gated
-#'   on not-already-active (fixes the re-onset-every-month bug), `active`/
-#'   `mso` state is tracked, `update_lags()` is fed `active` instead of the
-#'   onset indicator (fixes the contagion-covariate duty-cycle bug), and a cessation
-#'   hazard is drawn each active month. The two paths are a hard branch, not
-#'   a masked/parameterized single code path: gating the same `rbinom()`
-#'   call by an `at_risk` mask would change the count/order of values drawn
-#'   from the RNG stream the moment any location's `active` first flips to
-#'   1, silently breaking bit-identical reproducibility for every run that
-#'   ever has an outbreak -- i.e. every real run. See
-#'   analysis/tests/test_duration_optional_backcompat.R.
+#'   (extract_duration_draws()). NULL: the onset-only path, an unconditional
+#'   per-step onset draw with no `active`/`mso` state and no cessation.
+#'   Non-NULL: onset only when not active, `active`/`mso` tracked,
+#'   `update_lags()` fed `active`, a cessation draw each active month. The two
+#'   paths are a hard branch on purpose: masking one `rbinom()` call would
+#'   change the RNG stream and break bit-identical output
+#'   (test_duration_optional_backcompat.R).
 #' @param replicate_ids vector of replicate IDs to simulate in this task.
 #' @param posterior_idx_occ length-R vector of posterior indices to use per
 #'   replicate (paired strategy); will be clamped to draws_occ$S.
@@ -4466,46 +4314,33 @@ draw_monthly_cases <- function(mu, phi, cap = Inf) {
 #' @param output_part directory to write partition outputs into.
 #' @param dt_months step size (default 1).
 #' @param dry_run if TRUE, no files written.
-#' @param enso_scenarios Optional named list of [M × n_rep] numeric matrices, one
-#'   entry per lag name (e.g. "enso_lag5", "enso_lag10"), as returned by
-#'   `sample_enso_forecast_trajectories()`. Column `rep_id` (global replicate ID)
-#'   of each matrix overrides the corresponding ENSO covariate for that replicate.
-#'   ENSO is location-invariant — broadcast across all N rows. NULL = use shared
-#'   panel values (default, backward-compatible).
-#' @param warmup_panels_list Optional list of length >= max(replicate_ids) mini-
-#'   panel tibbles, as returned by `build_hybrid_warmup_panels()`. Element `rep_id`
-#'   (global replicate ID) provides the warmup-window panel for that replicate.
-#'   When not NULL, `build_warmup_state` is called per-replicate with the
-#'   corresponding mini-panel; when NULL, a single shared warmup state is
-#'   computed from `panel_tu` (default, backward-compatible).
-#' @param force_o_tu logical; when TRUE, override update_lags()'s per-step o_tu
-#'   output to 1 for every valid-TU row instead of the computed leave-one-
-#'   country-out value. Under partition_by=country a TU is collapsed to a
-#'   single country, so that computed value is always 0 (no other country to
-#'   spill from); this flag is the forward-simulation counterpart of the same
-#'   fix applied to the spatPomp rprocess variants (see generate_rprocess_csnippet
-#'   in spatpomp_core_c.R). NA-TU
-#'   rows are left untouched. Default FALSE preserves prior behaviour exactly.
-#' @param drop_country_tu_spillover logical; when TRUE, suppresses o_ct/o_tu
-#'   state tracking AND their LP contribution in this kernel, independent of
-#'   whether the fit still carries the coefficients (own-`o` is never
-#'   affected). Threads `simulator.drop_country_tu_spillover`. Zeroes o_ct/o_tu
-#'   at warmup init, passes `drop_ct_tu = TRUE` to every `evaluate_lp()` call,
-#'   and forces the post-`update_lags()` o_ct/o_tu to 0 each step -- this
-#'   takes PRECEDENCE over `force_o_tu` (o_tu forced to 0, not 1, when both
-#'   are TRUE). Default FALSE preserves prior behaviour exactly.
+#' @param enso_scenarios Optional named list of [M × n_rep] numeric matrices,
+#'   one per lag name, from `sample_enso_forecast_trajectories()`. Column
+#'   `rep_id` overrides that replicate's ENSO covariate, broadcast over all N
+#'   rows. NULL (default) uses the panel values.
+#' @param warmup_panels_list Optional list (length >= max(replicate_ids)) of
+#'   per-replicate warmup mini-panels from `build_hybrid_warmup_panels()`,
+#'   each passed to `build_warmup_state`. NULL (default) computes one shared
+#'   warmup state from `panel_tu`.
+#' @param force_o_tu logical; TRUE sets update_lags()'s o_tu to 1 on every
+#'   valid-TU row (under partition_by = country the leave-one-country-out value
+#'   is always 0), as the spatPomp rprocess variants do
+#'   (`generate_rprocess_csnippet()`). NA-TU rows untouched. Default FALSE.
+#' @param drop_country_tu_spillover logical; TRUE drops o_ct/o_tu state and LP
+#'   terms (own `o` untouched) even if the fit has the coefficients
+#'   (`simulator.drop_country_tu_spillover`). Takes precedence over
+#'   `force_o_tu` (o_tu is 0). Default FALSE.
 #' @param incidence_cap NULL (no cap) or a number > 0: monthly cases per
 #'   location are held at incidence_cap x pop, on the mean (`mu_mon`) and on
 #'   the drawn `cases_month`. Config-driven callers pass
 #'   incidence_cap_of(opt$simulator) (simulator.incidence_cap, default 0.15).
-#' @param onset_eligibility "inactive" (default, the behaviour before the key)
-#'   or "season": an inactive unit may draw an onset only if no onset that
-#'   reset u_days fell in its current season (season_onset_open()). Needs
-#'   draws_dur. Config-driven callers pass onset_eligibility_of(opt$simulator).
-#' @param cessation_exposure "full" (default) or
-#'   "half": the monthly case mean and draw follow the cessation draw and a
-#'   unit ceasing this month gets half its exposure (see
-#'   .ONSET_EXPOSURE_FRAC). Config-driven callers pass
+#' @param onset_eligibility "inactive" (default) or "season": an inactive unit
+#'   may draw an onset only if no onset that reset u_days fell in its current
+#'   season (season_onset_open()). Needs draws_dur. Config-driven callers pass
+#'   onset_eligibility_of(opt$simulator).
+#' @param cessation_exposure "full" (default) or "half": the monthly case mean
+#'   and draw follow the cessation draw, and a unit ceasing this month gets
+#'   half its exposure (.ONSET_EXPOSURE_FRAC). Config-driven callers pass
 #'   cessation_exposure_of(opt$simulator).
 simulate_one_tu <- function(
   tu,
@@ -4905,7 +4740,7 @@ simulate_one_tu <- function(
     # `04_fit_dur_brms_cb.R` fits carry `enso_cb<k>` fixed effects, and the
     # duration track's best lag is chosen independently of the other tracks
     # (Horn: occ=11, siz=9, mon=11, dur=8), so the duration basis must be built
-    # from its OWN cb_meta -- reusing the occurrence columns would evaluate the
+    # from its own cb_meta -- reusing the occurrence columns would evaluate the
     # duration coefficients on the wrong lag and the wrong spline basis.
     # `d_split` is NULL when the duration fit carries no cross-basis, which
     # makes build_cb_mats() a no-op and reproduces the pre-fix behaviour.
@@ -5072,7 +4907,7 @@ simulate_one_tu <- function(
     })))
   )
 
-  # Exposure offset — mirrors `offset(log_offset)` in 04b_run_occ_brms.R:114:
+  # Exposure offset — mirrors `offset(log_offset)` in the occurrence fit:
   #   exposure = pmax(t_end_seas - t_start_seas, 1L)
   #   log_offset = log(exposure)
   # brms parameters encode log-rate per day; the probability kernel needs
@@ -5160,7 +4995,7 @@ simulate_one_tu <- function(
     NULL
   }
 
-  # Neighbour-contagion kernel (within-partition / within-country). Built ONCE
+  # Neighbour-contagion kernel (within-partition / within-country). Built once
   # per TU, replicate-invariant, only when `use_nbr` (flag on AND the occurrence
   # fit carries an nbr_* FE, resolved by the caller). `K_adm1_nbr` is a dense
   # n_adm1 x n_adm1 matrix in `unique(frame_tu$adm1_unit)` order with zero
@@ -5224,7 +5059,7 @@ simulate_one_tu <- function(
     xrow_mon <- xrow
     xrow_mon[["month_num"]] <- rep(as.integer(lubridate::month(months[m])), N)
     # monthly.seasonal_term: "harmonic2" (the default) names these four
-    # columns; load_monthly_data() (utils/mon_data.R:92-99) builds them the
+    # columns; load_monthly_data() (utils/mon_data.R) builds them the
     # same way at fit time. Harmless when the fit used seasonal_term: none
     # -- evaluate_lp() drops any term absent from `fe`.
     mnum <- as.numeric(lubridate::month(months[m]))
@@ -5632,22 +5467,13 @@ simulate_one_tu <- function(
         }
       }
 
-      # Monthly case-count draw (`mon` track).
-      #
-      # Placement is load-bearing on both sides:
-      #   * AFTER the promotion block, so a location onsetting this month is
-      #     already active with mso = 1 and emits a first month of cases;
-      #   * BEFORE update_lags() and the cessation draw, so (a) the spillover
-      #     covariates carry the same lag-1 values the occurrence LP used
-      #     this month, matching how the fit sees them, and (b) a location
-      #     ceasing this month still emits its final month.
-      # Under simulator.cessation_exposure: half the call moves after the
-      # cessation draw (below), fed the saved pre-update values, so (a) and
-      # (b) still hold and the ceasing month's exposure can be halved.
-      #
-      # The offsets are read off the bundle (`offset_pop`, `offset_logoffset =
-      # TRUE` pinned by extract_monthly_draws(), and the optional base_rate_mon
-      # anchor). mu is gated on `active`, not on `Y`.
+      # Monthly case-count draw (`mon` track). Placement is load-bearing:
+      # AFTER promotion (an onsetting unit emits its first month, mso = 1) and
+      # BEFORE update_lags() and the cessation draw (spillover lags match the
+      # occurrence LP; a ceasing unit emits its final month). Under
+      # cessation_exposure: half the call moves after the cessation draw, fed
+      # saved pre-update values. Offsets come from the bundle; mu is gated on
+      # `active`, not on `Y`.
       if (has_mon && !cess_half && any(active == 1L)) {
         mc <- mon_case_step(m, active, mso, o, o_ct, o_tu, u_days)
         monthly_MU[r_idx, mc$act_i, m] <- mc$mu

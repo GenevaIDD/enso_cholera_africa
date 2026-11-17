@@ -10,7 +10,7 @@
 # Details:
 #   Not a test_*.R file and not in run_all.R: it checks the artefacts on disk,
 #   not the code, so it runs only where they exist. The size mean
-#   mu_i = pop_i * mean_rate_{c(i)} * exp(eta_i) has BOTH offsets fixed, so the
+#   mu_i = pop_i * mean_rate_{c(i)} * exp(eta_i) has both offsets fixed, so the
 #   absolute scale lives in the two denominators: a whole-gid population (Q)
 #   offset paired with a reporting-footprint (H) mean_rate multiplies every
 #   prediction by Q/H, and nothing in the model can absorb it. The gates are
@@ -113,10 +113,9 @@ skip <- function(label, why) {
   cat(sprintf("  SKIP  %s\n        (%s)\n", label, why))
 }
 
-# Why gates and not provenance: assert_pop_provenance() compares population
-# DIGESTS, so it fires when the two sides used different population *numbers*;
-# `Q x rbar^H` uses the right numbers on both sides and is still wrong, because
-# it uses them as different *units*. Digests see bytes, not semantics.
+# Gates, not provenance: assert_pop_provenance() compares population digests,
+# so it catches different numbers but not the same numbers used as different
+# units (Q x rbar^H).
 #
 # GATES
 #   (1) estimand identity   fit stamp == mean_rate stamp == frame stamp
@@ -127,17 +126,13 @@ skip <- function(label, why) {
 #   (6) elasticity          log_pop_c present and centred iff free
 #   (7) training calibration    eta_fixed in [lo, hi]        -- NEEDS A REFIT
 #   (8) frame extrapolation     frame ratio in [lo, hi]      -- NEEDS A REFIT
-# Gates (1)/(2)/(3)/(4)/(6) are repeated on the MONTHLY panel (the
-# `=== MONTHLY TRACK ===` section at the bottom): mon has the same H-vs-Q
-# problem in the same shape. Gate (5) does not transfer: it is about the
-# mean_rate TABLE, and mon has none.
+# Gates (1)/(2)/(3)/(4)/(6) repeat on the monthly panel (`=== MONTHLY TRACK ===`
+# at the bottom); gate (5) is about the mean_rate table, which mon lacks.
 # ---------------------------------------------------------------------------
 # Resolve the declared estimand
 # ---------------------------------------------------------------------------
-# `cli_argv` is passed EXPLICITLY, never left NULL: make_options_from_config()
-# runs its own parse_args() over commandArgs() when cli_argv is NULL, and that
-# parser knows nothing of this file's flags -- so `--frame_path` died there with
-# "long flag is invalid" long after our own parse_args() had accepted it.
+# `cli_argv` is passed explicitly: with NULL, make_options_from_config() runs
+# its own parse_args() over commandArgs() and rejects this file's flags.
 opt <- if (!is.null(opt_cli[["config"]])) {
   make_options_from_config(
     list(),
@@ -438,20 +433,11 @@ if (is.na(opt_cli[["frame_target"]])) {
 # ---------------------------------------------------------------------------
 # Gates (2)/(3)/(4)/(6) — repeated on the MONTHLY panel
 # ---------------------------------------------------------------------------
-# The mon track has size's H-vs-Q problem in exactly the same shape (a ~76x
-# CMR over-prediction), so it needs the same audit. Bolted on ADDITIVELY
-# rather than by making the whole file `--track`-aware, for two reasons:
-#
-#   * the size gates above are the reference run whose pass/fail counts are
-#     compared across commits; rewriting their control flow to thread a track
-#     through would make that comparison meaningless exactly when it matters;
-#   * gates (1) and (5) do not transfer as written. They are about the
-#     mean_rate TABLE, and mon has no mean_rate table at all -- its analogue is
-#     the base-rate anchor (utils/anchor.R), which is OFF by default
-#     (`monthly.offset_baserate`), so a mon run usually has no second
-#     denominator artefact to be incoherent with. Gate (1) below is therefore
-#     the weaker, honest version: fit-data stamp vs anchor stamp, skipped when
-#     the anchor is not enabled.
+# The mon track has size's H-vs-Q problem in the same shape, so it gets the
+# same audit, added after the size gates so their pass/fail counts stay
+# comparable across commits. Gates (1) and (5) concern the mean_rate table,
+# which mon lacks: gate (1) here compares the fit-data stamp with the base-rate
+# anchor stamp, skipped when the anchor is off (`monthly.offset_baserate`).
 #
 # Skips by default: pass --mon_data to audit the monthly panel.
 cat("\n\n=== MONTHLY TRACK ===\n")

@@ -9,32 +9,23 @@
 #   bash analysis/bash/stages/02_population.sh --config <config.yml> --concurrency 10
 #   bash analysis/bash/stages/02_population.sh --config <config.yml> --after <jobid> --plan
 #
-# --task-unit country (default): one array task per country,
-#   all years, 02b_preprocess_population_run_country.R (geometry once per
-#   country, Q_g cache). country_year: the per-(country, year) array of
-#   02b_preprocess_population_run.R. --years applies to country_year only.
-# --after JOBID: the array waits for that job (afterok; campaigns/preprocess.sh
-#   chains it after 00, which writes the LP shapefiles).
-# --plan: print the steps and sbatch lines; builds no tasks, submits nothing.
+# --task-unit country [default]: one task per country, all years
+#   (02b_preprocess_population_run_country.R). country_year: one task per
+#   (country, year) (02b_preprocess_population_run.R); --years applies here.
+# --after JOBID: the array waits afterok on that job.
+# --plan: print the steps and sbatch lines; builds and submits nothing.
 #
 # Steps:
-#   0. REFUSE to submit unless the boundary-cache manifest is complete.
-#   1. Build task YAMLs via Rscript analysis/02a_preprocess_population_tasks.R.
-#   2. Count task files; derive --array spec.
-#      --resume: re-submit only tasks with a missing or stale partition
-#      (population_core.R::pop_part_fresh(): _SUCCESS built from the current LP
-#      corpus); emit a sparse spec.
-#   3. sbatch the array, then 02c_preprocess_population_compile.R afterok on it.
-#
+#   0. Refuse to submit unless the boundary-cache manifest is complete.
+#   1. Build task YAMLs (02a_preprocess_population_tasks.R).
+#   2. Derive the --array spec; --resume keeps only tasks whose partition is
+#      missing or stale (population_core.R::pop_part_fresh()).
+#   3. sbatch the array, then 02c_preprocess_population_compile.R afterok.
 # Prints POP_ARRAY_JOB_ID= and POP_COMPILE_JOB_ID=.
 #
-# The layout of the other array stages (08_smoothing.sh), plus step 0.
-#
-# NOTE: do NOT run two arrays against the same raster_dir at
-# once. The truncated-LZW delete-and-retry path in download_worldpop_constrained()
-# (OutbreakExtractR R/get_pop.R:52-63) has no cross-worker lock, so a second
-# array can delete a raster a first array is mid-read on. --resume is the
-# supported way to fill gaps.
+# Never run two arrays against the same raster_dir at once: OutbreakExtractR's
+# download_worldpop_constrained() delete-and-retry has no cross-worker lock.
+# Use --resume to fill gaps.
 
 set -euo pipefail
 

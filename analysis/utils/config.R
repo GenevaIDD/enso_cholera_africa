@@ -834,7 +834,7 @@ get_default_options <- function() {
         cross_absent_levels = TRUE
       ),
 
-      # Which population the size estimand is denominated in, on BOTH sides of
+      # Which population the size estimand is denominated in, on both sides of
       # mu = pop x mean_rate x exp(eta). `denominator` and `rate_denominator`
       # must agree: they are the same quantity, and resolve_size_estimand() hard-
       # errors on a mismatch precisely because the likelihood cannot detect one
@@ -944,9 +944,10 @@ get_default_options <- function() {
       # re-running 03_prepare_dur.R.
       mso_breaks = c(1, 2, 3, 4, 6, 9, Inf),
       # Which event resets time_to_last_outbreak in the v1 kernel. `onset`
-      # reproduces 03_prepare_occ.R:650 (the occurrence track's fit-time rule);
-      # `end` matches the size track's TR-based reset (03_prepare_siz.R:768-780).
-      # The two tracks genuinely disagree; default `onset` changes nothing.
+      # reproduces 03_prepare_occ.R (the occurrence track's fit-time rule);
+      # `end` matches the size track's TR-based reset
+      # (03_prepare_siz.R section 10). The two tracks genuinely disagree;
+      # default `onset` changes nothing.
       ttlo_reset = "onset", # onset | end
 
       # Standalone toggles (does not inherit from occurrence or size). Empty
@@ -1130,30 +1131,15 @@ get_default_options <- function() {
         fits_baseline = NULL,
         monthly_enable = FALSE
       ),
-      # Filter (spatPomp bpfilter) defaults. Each key's value is the EFFECTIVE
-      # runtime default, i.e. the consumer's `%||%` fallback, so filling it here
-      # changes no run (the runtime R defaults
-      # win; config_defaults.yml restates these values and
-      # tests/test_config_defaults_parity.R + test_hardcoded_default_parity.R
-      # gate both). Where two consumers disagreed, the value is the one the
-      # deployed path uses and the other literal stays, commented, at its site:
-      #   enable        FALSE: the only live reader is simulations.R
-      #                 (isTRUE(sim$filter$enable) -> survival panel for the
-      #                 warmup obs); 07b_simulator_spatpomp.R's
-      #                 `flt$enable %||% TRUE` feeds a variable nothing reads.
-      #   warmup_window 07b_simulator_spatpomp.R's fallback; every forecast /
-      #                 hindcast / event config omits it and runs on it, while
-      #                 every smoothing (historical) config sets it, so
-      #                 smoothing_core.R's `%||% list()` (= keep its own
-      #                 2008-01 burn-in) is reached only by a hand-built opt.
-      #   forecast_window / smoothing_input: NULL = unset. 07b derives the
-      #                 forecast window from warmup_window$end and
-      #                 horizon$end, and smoothing keeps its own FILTER_START /
-      #                 FILTER_END, so no static value reproduces both.
-      # Np is read by 07b only: 08 smoothing reads it from the raw, unmerged
-      # config (default 25000, smoothing_core.R::smoothing_default_config()).
-      # save_states / forecast_engine are not read; configs that carry them
-      # are unaffected (no key check).
+      # Filter (spatPomp bpfilter) defaults: each value is the consumer's
+      # EFFECTIVE `%||%` fallback, so filling it here changes no run;
+      # config_defaults.yml restates them (parity gates:
+      # test_config_defaults_parity.R, test_hardcoded_default_parity.R). Where
+      # two consumers disagreed, the value is the deployed path's and the other
+      # literal stays, commented, at its site. enable: only simulations.R reads
+      # it. warmup_window: 07b's fallback (smoothing configs set their own).
+      # forecast_window / smoothing_input: NULL = unset. Np is read by 07b only
+      # (08 reads the raw config, default 25000).
       filter = list(
         enable = FALSE,
         Np = 2000L,
@@ -1739,7 +1725,7 @@ get_default_options <- function() {
           skill_area_summaries = FALSE
         )
       ),
-      # BOTH: 09 computes against these, 10 states them in captions.
+      # Both: 09 computes against these, 10 states them in captions.
       thresholds = list(
         prob_threshold = 0.50,
         low_signal = 2.0,
@@ -1749,7 +1735,7 @@ get_default_options <- function() {
         pop_prob_cutoffs = c(0.5, 0.8, 0.95),
         pop_magnitudes = c(0.25, 0.5),
         # Phase-11 ENSO-sensitive population: an ADM1 is sensitive at a
-        # condition when ANY track's IRR is beyond 1 +/- this fraction, in
+        # condition when any track's IRR is beyond 1 +/- this fraction, in
         # either direction (|log IRR| > log(1 + sensitive_irr)).
         sensitive_irr = 0.10,
         # Phase-11 ENSO exposure tables: magnitude axis (IRR beyond 1 + m in
@@ -1957,7 +1943,7 @@ get_default_options <- function() {
       # Distance-weighted neighbour-contagion covariate parameters. These drive
       # the occurrence artefact filename token via paths.R (scale="raw" ->
       # "_nbr500", scale="rownorm" -> "_nbr500n"), so deploy_collect_fits()
-      # reconstructs the SAME canonical names the fits were written with.
+      # reconstructs the same canonical names the fits were written with.
       contagion = list(
         rho_km = 500L,
         scale = "raw",
@@ -1981,7 +1967,7 @@ get_default_options <- function() {
         rho_km = 500L
       ),
 
-      # Cross-track episode definition for the WHOLE rollout (see the top-level
+      # Cross-track episode definition for the whole rollout (see the top-level
       # `episodes:` block). The single authority: deploy_collect_fits() refuses
       # per-lag configs / fits / prep artefacts of another key, the smoothing
       # stage refuses a historical template declaring another key, and the
@@ -2048,21 +2034,13 @@ get_default_options <- function() {
 
       grouping = "enso_grouping",
       # brms_kl latent-class sweep that DERIVES the fit registry `grouping`
-      # (deploy_prod_run.R --stage gen_grouping, utils/kl_grouping.R; relay
-      # phase `classes` in bash/tools/run_pipeline.sh). batch "" = no sweep:
-      # `grouping` is an existing registry, used as is. cell = the pinned fit id
-      # (kl_sweep.R::kl_sweep_inventory() `id`, e.g. "ns5_K4"); never chosen
-      # automatically. chains: "agree" (the agreeing chains recorded by
-      # 05_fit_postprocess_kl_sweep.R) | "all" | ids "2,6". fill_from: registry
-      # whose countries absent from the fit are carried over ("" = none).
-      # meta_from: registry whose sidecar labels / colours / order are reused
-      # for the derived groups it shares. n_agree / mode_tol: how the
-      # comparison picks each fit's agreeing chains (kl_sweep.R::
-      # kl_agreeing_chains(); 05 --n_agree / --mode_tol): n_agree 0 = the
-      # dominant mode (chains whose mean class centres lie within mode_tol
-      # lags), N > 0 = the N chains whose centres agree best. Passed to 05 by
-      # stages/04_fit_kl.sh --deploy; gen_grouping refuses a comparison run
-      # with other values when chains = "agree".
+      # (deploy_prod_run.R --stage gen_grouping). batch "" = no sweep,
+      # `grouping` used as is. cell = the pinned fit id (e.g. "ns5_K4"), never
+      # chosen automatically. chains: "agree" | "all" | ids "2,6". fill_from /
+      # meta_from: registries supplying absent countries / sidecar labels.
+      # n_agree, mode_tol: how 05 picks agreeing chains
+      # (kl_sweep.R::kl_agreeing_chains()); with chains = "agree", gen_grouping
+      # refuses a comparison run with other values.
       kl_sweep = list(
         batch = "",
         cell = "",
@@ -2134,25 +2112,15 @@ get_default_options <- function() {
         seam_at = "launch" # library: join the analog paths to the observed ONI of the launch month (launch_minus_1 = the month before)
       ),
 
-      # Hindcast-only knobs (make_hindcast_configs.R). launch_years EXPLICIT in
-      # the deploy YAML (default "" here = auto-derive from the smoothing cache,
-      # which only works once the cache exists) so all config-wiring runs
-      # locally before the HPC smoothing job finishes.
-      # season_end: "by_group" = the
-      # season_end_by_group month of each country's fit group (unchanged
-      # output); "by_country_from_panel" = each country's own cholera-year end
-      # (min_seas - 1, modal over its gids in climate_panel; ties -> the later
-      # end), the window ending at the first such month at least
-      # season_min_window_months after the launch (utils/season_calendar.R).
-      # season_window: enable = one run per (unit, launch month,
-      # season year), each country's season from the month after its trough
-      # (start floored at launch_floor_month) to the next trough + max(0, min
-      # lag); replaces launch_month / season_end for the hindcast only (the
-      # event attribution still reads season_end). trough_rule onset_rate =
-      # the country's onset-rate trough in its occurrence panel where it has
-      # >= min_onsets onsets and stability >= min_stability (bootstrap over
-      # years), else its modal min_seas; trough_years "" = every panel year;
-      # survival_panel "" = the template episodes' panel.
+      # Hindcast-only knobs (make_hindcast_configs.R). Set launch_years
+      # explicitly in the deploy YAML ("" = derive from the smoothing cache,
+      # which needs the cache to exist). season_end: "by_group" (the fit group's
+      # month) | "by_country_from_panel" (each country's cholera-year end;
+      # utils/season_calendar.R). season_window.enable: one run per (unit,
+      # launch month, season year), trough to trough (start floored at
+      # launch_floor_month), replacing launch_month / season_end for the
+      # hindcast only. trough_rule onset_rate: the onset-rate trough where data
+      # suffice (min_onsets, min_stability), else the modal min_seas.
       hindcast = list(
         launch_month = "05-01",
         launch_years = "",
@@ -2812,7 +2780,7 @@ make_options_from_config <- function(
     )
   }
 
-  # A results config reads every observed panel under ONE episode definition:
+  # A results config reads every observed panel under one episode definition:
   # results.inputs.episode_key (stamped, deploy-derived) is copied onto the
   # top-level episodes.key that make_surv_dat_file() & co. key off. A top-level
   # episodes.key written in the results YAML must agree with it. Applies only

@@ -109,28 +109,12 @@ message(sprintf(
 ))
 
 # 3a. gid key normalisation (single convention boundary) -----------------------
-# 02b extracts against GADM polygons, so parts carry GADM-native DOTTED ids
-# ("NAM.1_1", "AGO.1.1_1"). Every outbreak-side consumer keys on the FLAT
-# underscore form ("AGO_10_1"): both 03_prepare_* tracks overwrite gid with
-# flatten_gid() (03_prepare_occ.R:148,172), and the deployed brms fits'
-# RE level names are underscore-joined (occ_post.R:478).
-#
-# Leaving the two conventions to meet at read time breaks
-# resolve_gid_population(): almost no survival gid matches the dotted keys, and
-# the tier ladder then refuses to invent a denominator -- a naming mismatch
-# presenting as total absence of population data.
-#
-# Normalising here, at the single point where the canonical artefacts are
-# written, means every downstream reader sees one convention instead of each
-# read seam having to re-derive it. Flattening is injective over this corpus
-# (verified: 0 collisions across all 4861 gids), and the (gid, level, year)
-# duplicate guard immediately below doubles as the standing assertion that
-# it stays injective -- if flattening ever merged two distinct GADM units, the
-# compile hard-fails here rather than silently summing them.
-#
-# `lp_pop` is keyed by lctn_pr and carries no gid column, so it is untouched.
-# Applied BEFORE derive_crosswalk_shares() so every derived artefact (xwalk,
-# census, tiling) inherits the flat keys.
+# Flatten gids here, the single place the canonical artefacts are written:
+# 02b parts carry GADM dotted ids ("AGO.1.1_1"), every outbreak-side consumer
+# and the fits' RE level names use the flat form ("AGO_1_1"). A mismatch makes
+# resolve_gid_population() find no population at all. The (gid, level, year)
+# duplicate guard below fails the compile if flattening ever merges two units.
+# Applied before derive_crosswalk_shares(); `lp_pop` has no gid and is left.
 crosswalk$gid <- flatten_gid(crosswalk$gid)
 gid_pop$gid <- flatten_gid(gid_pop$gid)
 
@@ -304,7 +288,7 @@ xwalk <- xwalk %>%
   )
 
 # `is_composite` stays per (LP, level, year) — it is the per-level fact and the
-# QC census is built on it. `is_composite_lp` is the ONE flag that answers "is
+# QC census is built on it. `is_composite_lp` is the one flag that answers "is
 # this LP a genuine multi-unit aggregate", evaluated at the LP's own selected
 # tiling, so it cannot be read at the wrong level. Constant within an LP.
 tiling <- tiling %>%
@@ -328,7 +312,7 @@ message(sprintf(
 ))
 
 # Overlapping sibling LPs: sum_l H[l,g] > Q_g means two LPs report the same
-# people, so BOTH their cases and their population are double-counted in a
+# people, so both their cases and their population are double-counted in a
 # collapsed (gid, period) cell. Reported, never silently fixed.
 overlap <- xwalk %>%
   group_by(gid, gadm_level, year) %>%
@@ -375,23 +359,11 @@ xwalk <- xwalk %>%
   dplyr::left_join(geom_dup, by = c("lctn_pr", "gadm_level"))
 
 # 6. Persist -------------------------------------------------------------------
-# Writes:
-#   generated_data/population_crosswalk_<Y0>-<Y1>.qs   (carries reconcile_ok /
-#     reconcile_rel_diff / cross_border per (lctn_pr, gadm_level, year) — see
-#     "Checkpoint A" above — plus geom_dup_n / geom_dup_group per
-#     (lctn_pr, gadm_level), the downstream-detected duplicate/parent-inherited
-#     geometry flag: detect_geom_dup_lps(), analysis/utils/population_core.R —
-#     plus lp_level / is_composite_lp per lctn_pr, the geometry-derived GADM
-#     tiling depth and the composite flag evaluated at it:
-#     derive_lp_tiling_level())
-#   generated_data/gid_population_<Y0>-<Y1>.qs
-#   generated_data/wpp2024_national_totals.csv        (refreshed if absent)
-#   generated_data/population_qc/qc_crosswalk_reconciliation.csv
-#   generated_data/population_qc/qc_composite_census.csv
-#   generated_data/population_qc/qc_lp_tiling_level.csv
-#   generated_data/population_qc/qc_gid_overlap.csv
-#   generated_data/population_qc/qc_geom_dup_lps.csv
-#   generated_data/population_qc/qc_manifest.csv
+# Writes generated_data/population_crosswalk_<Y0>-<Y1>.qs (with the
+# reconcile / cross_border, geom_dup and lp_level / is_composite_lp columns:
+# see "Checkpoint A", detect_geom_dup_lps(), derive_lp_tiling_level()),
+# gid_population_<Y0>-<Y1>.qs, wpp2024_national_totals.csv (if absent) and the
+# QC tables in generated_data/population_qc/ (qc_*.csv + qc_manifest.csv).
 xwalk_path <- make_run_file(opt, kind = "pop_crosswalk")
 gid_path <- make_run_file(opt, kind = "pop_gid")
 wpp_path <- make_run_file(opt, kind = "pop_wpp")

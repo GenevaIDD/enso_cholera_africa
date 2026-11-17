@@ -1,52 +1,29 @@
 #!/bin/bash
-# slurm/submit_forecast_groups.sh — SBATCH ARRAY script for ONE per-ENSO-group
-# forecast or counterfactual spatPomp run (07b_simulator_spatpomp.R): one SLURM
-# ARRAY TASK per COUNTRY in the group, with intra-task parallelism over REPLICATE
-# CHUNKS only (background Rscript processes, one per chunk, `wait`ed at the end —
-# no parallelism over transmission units, since --only_country restricts each
-# task to exactly one TU/country already).
+# slurm/submit_forecast_groups.sh — SBATCH array payload for one per-ENSO-group
+# forecast or counterfactual spatPomp run (07b_simulator_spatpomp.R): one array
+# task per country, replicate chunks run as background Rscript processes.
 #
-# Correctness (see analysis/07b_simulator_spatpomp.R + analysis/utils/spatpomp_core.R):
-#   --only_country restricts the TU list to one ISO3 per task (requires
-#   filter.partition_by=country, i.e. TU==ISO3, as in these generated configs).
-#   --replicate_offset makes each chunk's replicate_id globally unique (no
-#   collision with other chunks of the same country downstream in 07b/07c) and
-#   nests its output under parts/tu=<ISO3>/repoff=<offset>/ (no overwrite
-#   collision between concurrently-running chunks). aggregate_partitions() (07b)
-#   already globs `_SUCCESS` sentinels recursively, so chunks merge back together
-#   with no further change needed on the read side.
+# Country mode (filter.partition_by = country): --only_country restricts each
+# task to one TU; --replicate_offset makes replicate ids unique per chunk and
+# nests output under parts/tu=<ISO3>/repoff=<offset>/ (07b's
+# aggregate_partitions() globs the _SUCCESS sentinels recursively).
+# Region mode (--partition_by enso_region): the whole group is one partition,
+# a single task (index 0), no --only_country; output under
+# parts/tu=<region>/repoff=<offset>/.
 #
-#   --partition_by enso_region switches this to REGION mode: the whole ENSO
-#   group is one forward partition, submitted as a SINGLE array task (index 0)
-#   with NO --only_country (07b derives the region TU from the frame and
-#   assembles its handoff IC from the per-country smoothing caches). Output
-#   nests under parts/tu=<region>/repoff=<offset>/. Replicate-chunk fan-out is
-#   unchanged; only --only_country and the log label differ.
-#
-# Submitted by analysis/bash/stages/07_forecast_groups.sh, which computes
-# --array=0-<N-1> and --countries from each config's simulator.scope.countries
-# (N = number of countries in that ENSO group) and passes them through; may also
-# be submitted directly:
+# Submitted by stages/07_forecast_groups.sh (computes --array and
+# --countries from simulator.scope.countries), or directly:
 #   sbatch --job-name=spfc_fo_east --array=0-5 \
 #          analysis/bash/slurm/submit_forecast_groups.sh \
 #          --config analysis/configs/forecast_country_by_group/forecast_enso_east.yml \
 #          --countries BDI,COD,KEN,RWA,TZA,UGA \
 #          [--n_replicates 1000] [--chunk_size 50] [--Np 10000] [--dry-run] [--overwrite]
 #
-# Replicates: --n_replicates when given, else the config's simulator.n_replicates,
-# else 100 (get_default_options()'s default, what 07b itself would use).
-#
-# --chunk_size splits the replicates into ceil(n_replicates/chunk_size) background Rscript chunks run
-# CONCURRENTLY within this one array task. Default (no --chunk_size) = one chunk
-# = fully serial (no fan-out). Size --chunk_size
-# together with -c/--mem below: each chunk is a full single-threaded Rscript
-# process holding one country's model+draws+panel copy (~6GB, per
-# the earlier single-config forecast's per-worker budget) plus headroom for the ~1.5GB
-# historical smoothing cache read once per chunk.
-#
-# Sized for 10000 replicates (e.g. 200 draws x 50): at 5000 the La Nina
-# 2020-23 hmmCE event run took 1 h 59 and 12.4 GB, the counterfactual hmmCE
-# 1 h 26 and 6.7 GB; doubled, 32G / 8 h leaves headroom.
+# Replicates: --n_replicates, else the config's simulator.n_replicates, else
+# 100. --chunk_size splits them into ceil(n_replicates / chunk_size) chunks run
+# concurrently in the task [default: one serial chunk]; size it with -c / --mem
+# (each chunk is a single-threaded Rscript holding one country's model, draws
+# and panel plus the smoothing cache).
 #SBATCH --output=logs/%x_%A_%a.log
 #SBATCH --time=08:00:00
 #SBATCH --mem=32G

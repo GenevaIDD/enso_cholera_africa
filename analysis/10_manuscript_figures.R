@@ -60,50 +60,22 @@ for (.m in c(
 }
 
 # 2. CLI -----------------------------------------------------------------------
-# --figures (comma-separated subset of 1,2,3,4,H, or the supplementary
-# S5,S6,FC,SC,AE,EV,MB,MU,GM,KC,DC,SV,FA,AA,PC,SE,WR) and --supplementary
-# (true|false) override results.scope.build_figures / .supplementary for this
-# run only: they pick which figures are drawn, never which artefacts are read
-# or how they were derived (RES and the analog sets stay as the config says).
-#
-# S5 / S6 / FC / SC / AE: supplementary (figures_supp.R); FC = forecast vs
-# counterfactual by country, SC = historical reconstruction (smoothing) by
-# country, AE = population in ADM1s with more ENSO-attributable cases, EV =
-# attributable fraction of the past strong ENSO events (needs results.event_manifest).
-# Keys are matched upper-cased.
-# MB = membership uncertainty of the deployed classes (report_membership;
-# needs results.kl_sweep_dir and results.kl_sweep_cell).
-# Supplement maps: MU = modelled units by admin level
-# (figS_modelled_units; 09 modelled_units + GADM), GM = the deployed partition
-# (figS_group_map), KC = MAP class and probability per country for K = 2..5 at
-# the pinned basis (figS_kl_classes_by_K; report_kl_sweep, needs
-# results.kl_sweep_dir and results.kl_sweep_cell).
-# Supplement figures (figures_supp.R): DC = outbreak data
-# coverage by country and season year + by admin level (figS_data_coverage;
-# report_dataset$outbreaks); SV = the historical reconstruction against the
-# observations: PIT, seasonality, durations, active fraction, contagion
-# conditionals (figS_smoothing_validation; smoothing v4 $validation); FA =
-# monthly onsets and cases under the attribution factual and the counterfactual
-# of every analogue set, Africa + each group (figS_forecast_analogues;
-# attribution ribbons); AA = ADM1 maps of the ratio of means and of the
-# probability of an increase, one row per analogue set
-# (figS_attribution_analogues; report_attrib_exposure$adm1).
-# SE = seasonality against the rainy season:
-# rainfall climatology with the Fig. 1d rainy season, observed onset, cessation
-# and case rates by calendar month with the fitted occurrence and monthly
-# seasonality, and the fitted cessation seasonality where the duration fit has
-# one (duration.seasonal_term), per ENSO group (figS_seasonality; 09 seasonality).
-# WR = observed vs modelled ENSO ratio of the target year: the WHO
-# ratio of 2026 to the ENSO-neutral years against the smoothing / ENSO-
-# counterfactual ratio of means over their common months, per country of each
-# derived group (figS_who_enso_ratio; 09 report_who_enso_ratio;
-# style.who_enso_ratio picks the year definition and the analogue set).
-# EG = ENSO teleconnection groups (GM, KC and MB panel a in one figure):
-# map, membership probability per class and most probable class at K = 2..4
-# (figS_enso_groups), and the class paths of MB panel b on their own
-# (figS_membership_paths); needs results.kl_sweep_dir and results.kl_sweep_cell.
-# One step per figure key (section 6 defines the fig_step_*() functions, section
-# 7 runs the requested ones in this order); FIGURE_KEYS is the CLI contract.
+# --figures and --supplementary override results.scope.build_figures /
+# .supplementary for this run only: they pick which figures are drawn, never
+# which artefacts are read or how they were derived. Keys are matched
+# upper-cased. Main: 1-4, H (hindcast). Supplementary (figures_supp.R; the
+# owning fig*_() builder is named in each fig_step_*()):
+#   S5 / S6 supplementary variants; FC forecast vs CF by country; SC smoothing
+#   by country; AE ADM1 population with more ENSO-attributable cases; EV past
+#   ENSO events (results.event_manifest); MB class membership uncertainty;
+#   MU modelled units; GM deployed partition; KC classes for K = 2..5;
+#   EG groups (GM + KC + MB a); DC data coverage; PC processing cascade;
+#   SV smoothing validation;
+#   FA / AA attribution by analogue set; SE seasonality vs the rainy season;
+#   WR WHO vs model ENSO ratio (style.who_enso_ratio).
+# MB, KC and EG need results.kl_sweep_dir and results.kl_sweep_cell.
+# One step per key (section 6 defines fig_step_*(), section 7 runs them in
+# this order); FIGURE_KEYS is the CLI contract.
 FIGURE_STEPS <- c(
   "1" = "fig_step_1",
   "2" = "fig_step_2",
@@ -236,30 +208,12 @@ DPI <- as.integer(STYLE$dpi)
 OUT_DIR <- STYLE$out_dir
 ERF_XLIM <- as.numeric(unlist(STYLE$erf_xlim))
 
-# Figure 2 presentation constants (not config surface).
-#   FIG2_MAP_LO/HI      — IRR cap, symmetric on the log scale; also the ratio
-#     colourbar of Figures 4b, AE and AA (ps_ratio_fill_scale()). Figure 1d's
-#     ERF axis has its own range (FIG1_ERF_YLIM, up to 10).
-#   FIG2_RULE_LWD / FIG2_RULE_TRIM — booktabs \cmidrule-style header rules
-#     (ggplot linewidth, mm) under each ENSO phase and each ONI column, trimmed
-#     at both ends (the phase-header fills are trimmed to the same width).
-#   Figure height: fitted to the layout (fig2_fit_height()), so the maps fill
-#     the WIDTH_MM width with no space left around them.
-#   FIG2_PHASE_FILL     — La Nina / El Nino header fills: Figure 1's ENSO-phase
-#     colours at PS_ENSO_PHASE_ALPHA.
-#   FIG2_ROW_KEY_*      — the direction key right of each track row (labels and
-#     column width).
-#   Map line widths: white ADM1 borders FIG2_ADM1_LWD, significant-ADM1
-#     outlines FIG2_SIG_LWD, black country borders FIG2_COUNTRY_BORDER_LWD.
-#   Map layout: track titles FIG2_STRIP_GAP_MM from the
-#     maps, maps FIG2_SPACING_MM apart (x, y) with no coord_sf() expansion,
-#     outer margin FIG2_MARGIN_MM, the legend row FIG2_LEGEND_GAP_MM under the
-#     maps (no legend margin).
-#   Panel b (population share in ENSO-sensitive areas, under each ONI column):
-#     a FIG2_BAR_GAP_MM spacer row (tag "b" + FIG2_BAR_TITLE), the bars
-#     (FIG2_BAR_ROW_MM; bar thickness FIG2_BAR_WIDTH of a row) and their axis
-#     (FIG2_BAR_AXIS_MM); shares above FIG2_LABEL_INSIDE are printed inside
-#     the bar.
+# Figure 2 presentation constants (not config surface). FIG2_MAP_LO/HI is
+# the IRR cap, symmetric on the log scale, shared by the ratio colourbar of
+# Figures 4b, AE and AA (ps_ratio_fill_scale()); Figure 1d's ERF axis has its
+# own range (FIG1_ERF_YLIM). Figure height is fitted to the layout
+# (fig2_fit_height()). The rest are rule, fill, line-width and mm layout
+# constants of panels a (maps) and b (population-share bars).
 FIG2_MAP_LO <- 1 / 3
 FIG2_MAP_HI <- 3
 FIG2_COUNTRY_BORDER_LWD <- 0.1
@@ -306,29 +260,12 @@ FIG2_INSET_BORDER_LWD <- 0.08
 FIG2_PHASE_HEADER_FILL <- FALSE
 
 
-# Figure 1 presentation constants, not config surface, like the FIG2_* ones.
-# Figure 1b inset map (panel a's top-right corner):
-#   FIG1_INSET_MAX_ROWS — the inset reaches down at most this many panel-a rows,
-#     fewer if a deeper box (wider, by the map's fixed aspect) would cover a
-#     case bubble.
-#   FIG1_INSET_MARGIN   — gap to panel a's top/right border (panel-width fraction).
-#   FIG1_INSET_ASPECT   — map height / width of the inset's lon/lat box.
-#   FIG1_PANEL_A_ASPECT — panel a's width / height in the 183 x 140 mm layout,
-#     measured from the render (1307 x 2632 px at 600 dpi);
-#     re-measure if the figure size, panel a's share of the width, the ONI strip
-#     or panel a's tick / legend / country-label text changes.
-# Panel a's rows: one per country, by date of its last case bubble, latest at
-# the bottom (no group blocks; the group is the bubble colour), labelled with
-# FIG1_COUNTRY_NAMES (every country of the ENSO groupings; "\n" splits the
-# longest name so it does not set panel a's left edge).
-# Layout: FIG1_HEIGHT_MM tall at WIDTH_MM; left (a) : right (c / d / e) columns
-# FIG1_WIDTHS; FIG1_ONI_STRIP_MM the ONI strip above a; FIG1_A_RIGHT_MM the
-# margin right of a (room for its last year label; no other margin between the
-# columns); FIG1_A_LEFT_MM / FIG1_A_TOP_MM the left column's outer left / top
-# margins (the top one puts the "a" tag, drawn inside the ONI strip, level with
-# "c"); FIG1_A_XLIM panel a's window (every coverage period and case bubble,
-# with a little room). The right column's own constants (heights, e's bottom
-# margin aligning e's panel bottom with a's, ...) are in section 5a.
+# Figure 1 presentation constants (not config surface): the 1b inset map
+# (FIG1_INSET_*), panel a's rows (one per country, by date of its last case
+# bubble, labelled with FIG1_COUNTRY_NAMES) and the layout (FIG1_HEIGHT_MM,
+# FIG1_WIDTHS, margins, FIG1_A_XLIM). FIG1_PANEL_A_ASPECT is measured from the
+# render: re-measure it when the figure size or panel a's text changes. The
+# right column's own constants are in section 5a.
 FIG1_GADM_PATH <- "data/geodata/gadm_valid.gpkg"
 FIG1_INSET_BBOX <- c(xmin = -19, xmax = 52.5, ymin = -36.5, ymax = 37.5)
 FIG1_INSET_MAX_ROWS <- 16L
@@ -574,23 +511,13 @@ set_lab <- function(s) {
 }
 
 # 4b. Cross-figure conventions (Figures 1-4) -----------------------------------
-#   width        — one double-column width for every figure (WIDTH_MM, the
-#                  save_figure() default).
-#   typeface     — FONT everywhere, maps included (taxdat::map_theme() leaves the
-#                  family to the device default): ps_map_font().
-#   ENSO phase   — sand (El Nino) / no fill / slate (La Nina) at alpha 0.14,
-#                  labels El Nino / Neutral / La Nina (PS_ENSO_*: none of the
-#                  group colours (Dark2) nor the maps' red / blue; Neutral
-#                  unshaded, white, so La Nina stands apart). Shading bands at PS_ENSO_PHASE_ALPHA,
-#                  solid where a line or text needs the colour (Figure 3's
-#                  event brackets, the analogue-set lines).
-#   legends      — title BASE_SIZE - 1, labels BASE_SIZE - 1.5 (ps_legend_theme()).
-#   counterfactual wording — "neutral-ENSO counterfactual" (ps_cf_label()).
-#   uncertainty  — median + 50% + 95% bands (phase-09 q025 / q975 columns).
-#   map greys    — two states with a legend key: "Not modelled" (outside the
-#                  fitted ENSO groups, or no outbreak in the survival panel) and
-#                  "Modelled, no ADM1 estimate" (outbreak countries / ADM1s
-#                  without an estimate, incl. low-signal ADM1s in Figure 4b).
+#   width        WIDTH_MM for every figure (the save_figure() default).
+#   typeface     FONT everywhere, maps included (ps_map_font()).
+#   ENSO phase   sand (El Nino) / none (Neutral) / slate (La Nina) at
+#                PS_ENSO_PHASE_ALPHA, solid where a line or text needs it.
+#   legends      ps_legend_theme(); counterfactual wording ps_cf_label().
+#   uncertainty  median + 50% + 95% bands (phase-09 q025 / q975 columns).
+#   map greys    "Not modelled" and "Modelled, no ADM1 estimate".
 
 PS_ENSO_PHASE_COL <- c(elnino = "#c49a5a", neutral = "white", nina = "#2f3e4c")
 PS_ENSO_PHASE_LAB <- c(
@@ -723,25 +650,11 @@ ps_phase_layer <- function(phases) {
 }
 
 # 4c. Shared cross-figure helpers, Figures 1-4 ---------------------------------
-# One set used by every figure that shows these elements:
-#   PS_AFRICA_COL       — Africa's colour wherever Africa is a series or a row
-#                         (F3_AFRICA_COL is an alias).
-#   PS_AFRICA_RULE / PS_AFRICA_GAP_ROWS / ps_africa_rows() — the Africa row of a
-#                         row-per-scope panel sits PS_AFRICA_GAP_ROWS rows above
-#                         the ENSO groups, with a thin rule centred in the gap.
-#   PS_ERRORBAR / ps_interval_layers() — one interval format: the 95% interval
-#                         as a thin capped error bar, the 50% interval as a
-#                         thicker capped error bar on top, the point estimate as
-#                         a point; optional arrows where the 95% interval runs
-#                         past the axis limits. Linewidths in ggplot units, caps
-#                         in category units (one row / column = 1).
-#   PS_ENSO_STATE_TITLE / PS_ENSO_KEY_OUTLINE / PS_KEY_SPACING_MM /
-#   ps_enso_phase_guide() — the ENSO-state legend: swatches at the bands' own
-#                         alpha (PS_ENSO_PHASE_ALPHA) with a thin outline (a true
-#                         0.2 mm; one ggplot linewidth unit = .pt * 25.4 / 96 mm),
-#                         1 mm between a label and the next key.
-#   PS_TAG_GP           — panel-tag text as grid gpar (the values of TAG_THEME),
-#                         for tags drawn as grobs.
+# One set used by every figure that shows these elements: PS_AFRICA_COL and
+# ps_africa_rows() (the Africa row above the ENSO groups, with a rule in the
+# gap), ps_interval_layers() (95% thin and 50% thick capped bars, point
+# estimate, arrows past the axis limits), ps_enso_phase_guide() (the
+# ENSO-state legend) and PS_TAG_GP (panel tags drawn as grobs).
 PS_AFRICA_COL <- "#7b1e3c"
 PS_AFRICA_RULE <- list(colour = "grey55", linewidth = 0.3)
 PS_AFRICA_GAP_ROWS <- 0.5
@@ -1329,42 +1242,15 @@ blank_left_strip <- function(p, size = BASE_SIZE) {
 # ENSO exposure-response overview (stacked); builders in
 # utils/figures_manuscript_fig1.R.
 
-# Figure 1 right column (c / d).
-# Columns = ENSO teleconnection group (c carries the group header).
-#   c  one tile row per group: the occurrence track's ELPD-implied lag weight
-#      (pseudo-BMA over the lag grid, from 09's lag_rank) as the group colour's
-#      opacity on a log scale (FIG1_W_*), weights below FIG1_W_LIM[1] white;
-#      over the rainfall-correlation tiles of
-#   c' (untagged, part of c) the rainfall anomaly-ONI correlation per rainfall
-#      month and lag (FIG1_CORR_*), the rainy seasons outlined, and right of
-#      each group's tiles the occurrence seasonal baseline per calendar month
-#      (09's occ_seasonality; viridis on a log scale log-symmetric round 1,
-#      FIG1_ONSET_*). The selected occurrence lag is a white dot-dashed line in
-#      both (FIG1_BEST_*); the dashed rule on lag 0 (FIG1_LEAD_RULE) splits
-#      leads from lags, named under the leftmost group's axis (FIG1_KEY_*).
+# Figure 1 right column (c / d), columns = ENSO group:
+#   c  the occurrence ELPD lag weights (09's lag_rank) as opacity, over the
+#      rainfall anomaly-ONI correlation tiles (09's rain_enso; `*` p < 0.05 for
+#      >= half the group's countries with the same sign, `.` group mean only)
+#      and the occurrence seasonal baseline (09's occ_seasonality); the
+#      selected lag is a white dot-dashed line, lag 0 a dashed rule.
 #   d  the ERF grid (rows = track) on the ENSO-phase shading.
-#   FIG1_A_TICK_PT       panel a's tick labels (countries, years, ONI).
-#   FIG1_TAG_POS / FIG1_TAG_GUTTER_MM   c / d tags at the far left of each
-#     sub-plot, in a gutter (shared by patchwork's alignment) left of c's labels.
-#   FIG1_LAG_BREAKS / FIG1_LEAD_RULE    lag axis; the dashed rule on lag 0.
-#   FIG1_X_PAD / FIG1_ONSET_GAP / FIG1_ONSET_W / FIG1_ONSET_LABEL_PAD   lag
-#     units: the frame beyond the tiles, the onset column's centre right of the
-#     last tile, its width, the room right of it for its rotated label.
-#   FIG1_FRAME / FIG1_W_FRAME_LWD       the frames, drawn as rectangles in data
-#     coordinates (c's weight strip thinner).
-#   FIG1_HEADER*         c's nested header strip over the group names, with a
-#     rule; FIG1_STRIP_GAP_MM above the strip text.
-#   FIG1_CORR_*          the correlation tiles: 09's rain_enso corr table
-#     (Pearson r of the group-mean 3-month rainfall deviation with ONI per
-#     centre month and lag; method in results.derivation.rain_enso); `*`
-#     p < 0.05 and >= half the group's countries significant with the same
-#     sign, `.` p < 0.05 for the group mean only.
-#   FIG1_ERF_*           d's y axis (Figure 2's fraction labels, up to 10).
-#   FIG1_RIGHT_HEIGHTS   the weight strip, the correlation tiles, the legend
-#     block (mm; replaced by its measured height), d.
-#   FIG1_E_TOP_MM / FIG1_E_BOTTOM_MM   d's margins; the bottom one aligns d's
-#     panel bottom with a's (measured on the render; re-measure when the
-#     layout changes).
+# FIG1_E_BOTTOM_MM is measured on the render: re-measure when the layout
+# changes. The FIG1_* names below say which element each one sets.
 FIG1_A_TICK_PT <- BASE_SIZE - 2
 FIG1_TAG_POS <- c(0, 1)
 FIG1_TAG_GUTTER_MM <- 2.2
@@ -1463,22 +1349,9 @@ FIG1_PANEL_THEME <- theme(
 )
 
 # Figure 1c, seasonality design (builders fig1c_*() and build_fig1() in
-# utils/figures_manuscript_fig1.R; the c above stays for build_fig1_v91()). Inputs:
-# 09's oni_composite, rain_enso,
-# seasonality (fitted curves, v2: with the occurrence band) and lag_rank.
-#   FIG1C_TRACKS / _SEAS_TRACK / _TRACK_LABELS  the track blocks (10's ids),
-#     the seasonality artefact's track names, the names left of each block.
-#   FIG1C_PEAK_X / _PHASES / _X_BREAKS  the 2-year axis (x 1..24 = Jan Y ..
-#     Dec Y+1): the lag anchor (Dec Y, lag L at x = 12 + L), the Rising / Peak /
-#     Decay boxes, the month ticks.
-#   FIG1C_REF            d's dashed reference style (fig1_erf_panel()): the
-#     peak rule, ONI 0, x annual mean 1.
-#   FIG1C_FONT           c's text at d's sizes.
-#   FIG1C_KEY_*          the same / following-year key (first track only).
-#   FIG1C_VKEY_*         d's vertical "more / fewer" key, leftmost column.
-#   FIG1C_HEIGHTS        row heights (relative): the ONI row at 0.5, the lag
-#     strips shortened (keyed x0.85, key-less x0.7) in favour of the
-#     seasonality rows; c's legend row and d.
+# utils/figures_manuscript_fig1.R; the c above stays for build_fig1_v91()).
+# Inputs: 09's oni_composite, rain_enso, seasonality and lag_rank. The x axis
+# spans 2 years (x 1..24 = Jan Y .. Dec Y+1); lag L sits at x = 12 + L.
 FIG1C_TRACKS <- c("occurrence", "duration", "monthly")
 FIG1C_SEAS_TRACK <- c(
   occurrence = "occurrence",
@@ -1687,25 +1560,14 @@ F3_EV_INSET_COL <- 1L
 F3_EV_INSET_BOX <- c(left = 0.01, bottom = 0.01, right = 0.30, top = 0.45)
 
 # 5e. Figure 4 constants -------------------------------------------------------
-# The 2026 ENSO forecast: forecast vs the neutral-ENSO counterfactual and its
-# ENSO-attributable fraction (the paired ratio + ADM1 probability maps Figure 4
-# is in 10_manuscript_figures_legacy.R); builders in
-# utils/figures_manuscript_fig34.R.
-#   a  Figure 3's forecast panels: the ONI forecast strip over Africa + the
-#      ENSO regions from the analogue window (forecast vs counterfactual,
-#      fig3_panel_b()), the cumulative totals (fig3_panel_c()'s column for the
-#      metric) and the forecast / counterfactual ratio of means, 1 / (1 - AF)
-#      from af_posterior, filled by the scope's IPCC class at the headline m
-#      (report_attrib_metrics v2 ipcc_scope).
-#   b  the AE map (attrib_ratio_map_layers(), utils/figures_supp.R): ADM1 ratio
-#      of means, IPCC hatching at the headline m, Figure 2's colour bar.
-#   c  ENSO-attributable fraction AF = 1 - CF / F of Africa and each ENSO region
-#      (af_posterior: noise-adjusted posterior median, 50% / 95%).
-# Main analog set, the headlined attribution cell and explosive mode (09's
-# headline slice). Cases in the main figure, outbreak onsets supplementary.
-# Layout: one flat grid -- columns = a's time series | cumulative | ratio |
-# b / c; rows = the ONI strip (mm), a's upper / lower part (b ends, c starts at
-# their border), the legend row (arm keys under a, group keys under c).
+# The 2026 ENSO forecast against the neutral-ENSO counterfactual (builders in
+# utils/figures_manuscript_fig34.R; the paired-ratio Figure 4 is in
+# 10_manuscript_figures_legacy.R):
+#   a  ONI strip, forecast vs CF series, cumulative totals and the ratio of
+#      means 1 / (1 - AF) filled by the IPCC class (report_attrib_metrics);
+#   b  the AE map: ADM1 ratio of means with IPCC hatching;
+#   c  AF = 1 - CF / F, Africa + each region (af_posterior).
+# Main analog set and headline cell; cases main, onsets supplementary.
 FIG4_WIDTHS <- c(ts = 1.15, cum = 0.6, ratio = 0.6, right = 2.6)
 FIG4_HEIGHTS <- c(upper = 1.32, lower = 0.88, legend = 0.24) # c taller
 FIG4_HEIGHT_MM <- 165
@@ -2344,58 +2206,14 @@ build_fig_hindcast <- function() {
 
 # 6. Figure steps --------------------------------------------------------------
 # One fig_step_<key>() per FIGURE_STEPS entry (section 7 runs the requested
-# ones; nothing here runs at definition).
-# Figures (catalogue)
-#   1  ENSO exposure-response overview (stacked)
-#        a  observed-ONI strip over the data-coverage timeline (rows = full
-#           country names, ordered by last case bubble; ENSO-phase background)
-#        b  inset map: onsets per surveillance-covered month per gid
-#        c  per ENSO group (columns), on a 2-year calendar axis: the
-#           composite El Nino / La Nina ONI (09's oni_composite), the mean
-#           monthly rainfall (rain_enso), and per track the ELPD lag weights
-#           (deployed lag marked) over its seasonality relative to the annual
-#           mean (09's seasonality)
-#        d  ERF grid (rows = track, columns = group; 50% + 95% CrI;
-#           direction arrows in the first column)
-#   2  ENSO effects by ONI condition (stacked)
-#        a  ADM1 IRR maps, rows = track, columns = ONI condition
-#           (results.derivation.enso_conds), a direction key per row
-#        b  under each ONI column, the share of the population in
-#           ENSO-sensitive ADM1s (report_enso_exposure at
-#           results.style.enso_headline), Africa + each ENSO group
-#   3  Attribution of the past strong ENSO events (needs
-#      results.event_manifest; the smoothing -> forecast Figure 3 is in
-#      10_manuscript_figures_legacy.R)
-#        a  event brackets over the observed-ONI strip over Africa's smoothing
-#           (masked / unmasked) and observed series
-#        b  per event (columns): ENSO-attributable fraction for Africa and each
-#           ENSO group, posterior median + 50% / 95% (noise-adjusted)
-#        c  ENSO-attributable fraction per ADM1 under each event's bars
-#      Main: cases; supplementary: onsets.
-#   4  The 2026 ENSO forecast against the neutral-ENSO counterfactual
-#      (the paired-ratio attribution Figure 4 is in
-#      10_manuscript_figures_legacy.R)
-#        a  the ONI forecast strip over Africa + the ENSO regions from the
-#           analogue window (forecast vs counterfactual), their cumulative
-#           totals and the ratio of means 1 / (1 - AF) filled by the scope's
-#           IPCC class (report_attrib_metrics ipcc_scope)
-#        b  ADM1 ratio of means, IPCC hatching (the fig. AE map)
-#        c  ENSO-attributable fraction, Africa + each ENSO region (af_posterior:
-#           posterior median + 50% / 95%, noise-adjusted)
-#      Main: cases; supplementary: onsets.
-#   H  Hindcast forecast skill (results.scope.hindcast; builders in
-#      utils/figures_hindcast.R, shared with notebooks/hindcast_skill.qmd)
-#        a  outbreak-count CRPSS vs the climatology references, all leads and
-#           the 0-7-month class (headline reference solid)
-#        b  CRPSS against the headline reference by lead class
-#        c  case totals by support: sim/obs ratio, CRPSS vs LOO climatology,
-#           95% coverage (headline support solid)
-#        d  reliability diagram
-#
-# Supplementary: Figure 1 ERF at country granularity; Figures 3 and 4 for onsets;
-# 4-set ONI-envelope comparison (with Figure 4); hindcast
-# calibration (PIT, rank histogram, coverage, ROC), per-country case skill and
-# legacy-basis comparison.
+# ones; nothing here runs at definition). Main figures: 1 ENSO
+# exposure-response overview; 2 ENSO effects by ONI condition (ADM1 IRR maps
+# + population share); 3 attribution of past strong ENSO events
+# (results.event_manifest); 4 the 2026 forecast vs the neutral-ENSO
+# counterfactual; H hindcast skill (results.scope.hindcast; builders in
+# utils/figures_hindcast.R). Panel contents are in each figure's constants
+# block (section 5) and its builder. Figures 3 and 4 draw cases in the main
+# set, onsets in the supplementary one.
 
 fig_step_1 <- function() {
   build_fig1(STACKED_TRACKS)

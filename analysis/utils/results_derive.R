@@ -398,7 +398,7 @@ results_context <- function(opt) {
   )
   # Canonical per-(gid, year) population Q_g table (02c_preprocess_population_compile.R
   # output). The manuscript "key numbers" report joins every population number at
-  # POP_REF_YEAR through this ONE table via resolve_gid_population(), so the
+  # POP_REF_YEAR through this one table via resolve_gid_population(), so the
   # population-covered / significant-effect-population / threshold-population
   # tables cannot drift on which population source they used.
   GID_POP_PATH <- make_pop_run_file(opt, "pop_gid")
@@ -462,7 +462,7 @@ results_context <- function(opt) {
   ))
 
   #' The archive of currently-deployed per-track/per-group best-lag fits
-  #' (collected by deploy_prod_run.R --stage deploy_fits from the SAME
+  #' (collected by deploy_prod_run.R --stage deploy_fits from the same
   #' select_best_lag() rule this script calls directly below). Unlike
   #' forecast_horizons.yml (which only carries each group's deployed fit files
   #' for the spatPomp forecast simulator), this archive has fit AND cb_meta paths
@@ -773,7 +773,7 @@ results_dispatch <- function(ctx) {
 #' are a single step (id `<stem>`). `after` names the steps whose artefacts this
 #' one reads: `enso_relation:{track}` is the same track's step, `enso_relation:*`
 #' every track's. `kinds` are the RESULTS_SCHEMA artefact kinds the step writes
-#' (each kind owned by exactly one step). `hindcast` is ONE step on purpose: its
+#' (each kind owned by exactly one step). `hindcast` is one step on purpose: its
 #' three tables and report share one scoring of every hindcast run
 #' (ensure_hindcast()'s memoised bundle); `enabled` drops it when
 #' results.scope.hindcast.enable is false.
@@ -1781,7 +1781,7 @@ lag_rank_with_selection <- function(ctx, track, groups, mnf) {
 #' does and does not claim: 1/HR is a monotone reorientation of the hazard
 #' ratio, exactly a ratio of expected durations only under a constant baseline
 #' hazard (duration.basehaz_duration: none) -- not under the default `factor`
-#' baseline, whose hazard spans a ~492x range across mso bands (dur_post.R:27).
+#' baseline, whose hazard spans a ~492x range across mso bands.
 invert_duration_irr <- function(df) {
   if ("IRR" %in% names(df)) {
     df$IRR <- 1 / df$IRR
@@ -2402,8 +2402,8 @@ derive_enso_relation <- function(ctx, track) {
   erf_all <- dplyr::bind_rows(erf_list)
   adm1_all <- dplyr::bind_rows(adm1_list)
   country_erf_all <- dplyr::bind_rows(country_erf_list)
-  # NOTE the duration track is NO LONGER inverted here: the ENSO exposure-response
-  # artefacts now carry the duration model's own estimand, the CESSATION-HAZARD
+  # The duration track is not inverted here: the ENSO exposure-response
+  # artefacts carry the duration model's own estimand, the cessation-hazard
   # IRR (high = ends sooner = SHORTER outbreak), the same scale 06_fit_figures.R
   # plots it on. Any orientation flip (invert_duration_irr(), above) is the
   # figure layer's business.
@@ -3012,38 +3012,18 @@ ensure_occ_seasonality <- function(ctx) {
 
 # --- Supplement fig. SE: seasonality against the rainy season ---
 #
-# seasonality (v1, unkeyed), the reviewer's "does cholera peak in the rainy
-# season of every region, and do case counts, outbreak frequency and cessation
-# share one seasonal pattern". Per ENSO group and calendar month:
-#   rain     the group's population-weighted rainfall climatology (mm) and
-#            whether the month is in its main rainy season: rain_enso$month,
-#            weighting "pop" (the Fig. 1d outlines; read, never recomputed);
-#   rates    the observed rate of each track on the rows the fits keep
-#            (results.derivation.seasonality.admin_level through
-#            gid.R::apply_admin_level_filter()), by calendar month:
-#              occurrence  onsets per 1,000 at-risk unit-months (survival
-#                          panel: `outbreak` rows over exposure_days at risk,
-#                          month of t_start);
-#              cessation   episode ends per 100 active episode-months
-#                          (duration panel: `ended` over exposure days);
-#              cases       median suspected cases per active episode-month and
-#                          its IQR (monthly panel; cases_gap months left out,
-#                          their 0 is a reporting gap, not an observation).
-#            Occurrence and cessation carry exact Poisson intervals at
-#            `interval`. A month with fewer than min_n events (cases:
-#            episode-months) is `sparse` and takes no part in the peak;
-#   fitted   the occurrence model's seasonal spline (09's occ_seasonality; v2:
-#            with its interval, from occ_seasonality's draws) and the monthly
-#            model's calendar harmonics
-#            (deployed mon fit per group: exp(h - mean h) per draw, posterior
-#            mean and interval), each also `scaled` to the observed mean rate
-#            of its track so 10 draws them without arithmetic. The duration
-#            model has no seasonal term, so cessation has no fitted curve;
-#   peaks    per group x track (observed and fitted) the peak month, whether
-#            it is a rainy-season month, and the signed circular lag in months
-#            from the centre of the nearest rainy season (positive: after it).
-# The occurrence panel's load-time masks of the fits (national zero fill,
-# censor_orphan) are not re-applied: the rates describe the panel's rows.
+# seasonality (v1, unkeyed): per ENSO group and calendar month,
+#   rain    the group's pop-weighted rainfall climatology and rainy-season flag
+#           (read from rain_enso, never recomputed);
+#   rates   observed occurrence (onsets / 1,000 at-risk unit-months), cessation
+#           (ends / 100 active episode-months), cases (median + IQR per active
+#           episode-month, cases_gap months left out) on the fits' admin-level
+#           rows; exact Poisson intervals; months under min_n are `sparse`;
+#   fitted  the occurrence spline and the monthly harmonics, each also `scaled`
+#           to its track's observed mean (duration has no seasonal term);
+#   peaks   peak month per group x track, rainy-season flag, and signed circular
+#           lag from the nearest rainy-season centre.
+# The fits' load-time panel masks are not re-applied.
 
 # Days per calendar month: converts exposure days to unit-months.
 .SEAS_DAYS_PER_MONTH <- 365.25 / 12
@@ -3597,37 +3577,16 @@ ensure_oni_composite <- function(ctx) {
 
 # --- Supplement fig. WR: observed vs modelled ENSO ratio ---------
 #
-# report_who_enso_ratio (v1, unkeyed). For the countries of
-# results.derivation.who_enso_ratio.groups (West only), two ratios of the target year,
-# the year of the attribution
-# window (2026):
-#   modelled  ratio of means of the smoothing (the factual) to the ENSO
-#             counterfactual of each analogue set over their common months, the
-#             attribution window's stitch months (counterfactual launch to
-#             factual launch, e.g. May-August 2026), cases summed over the
-#             window per replicate. Spread (model_lo .. model_hi): each smoothing
-#             replicate's total over the mean of the
-#             counterfactual replicates launched from it (handoff_map.csv), at
-#             `interval` and 50%; the paired bootstrap of the ratio of means
-#             over smoothing replicates is kept as rom_lo / rom_hi.
+# report_who_enso_ratio (v1, unkeyed), for the countries of
+# results.derivation.who_enso_ratio.groups, over the attribution window:
+#   modelled  ratio of means, smoothing (factual) over ENSO counterfactual per
+#             analogue set, on their common stitch months; spread per smoothing
+#             replicate (handoff_map.csv), paired bootstrap kept as rom_lo/hi.
 #   observed  WHO suspected cases of the target year over the mean of the
-#             ENSO-neutral years (each of `year_definitions`;
-#             enso.R::enso_year_states(), the lag_occ window at the group's
-#             deployed occurrence lag from group_labels), population-
-#             standardised to the target year (WPP), two estimators:
-#               same_window  the window's calendar months in the WHO monthly
-#                            series (03_prepare_who_monthly.R; complete months
-#                            only, so dashboard years only);
-#               ytd_annual   the target year to the WHO cut-off against full
-#                            years (who_annual.R::build_who_annual_cases(): annual
-#                            report + dashboard weekly, absence NA, censored
-#                            target-year series NA) -- a lower bound.
-#             Interval: bootstrap over the neutral years (none with one year).
-# Both ratios add `pseudo_count` cases to numerator and denominator. A group
-# row pools the countries with an observed ratio in its estimator x definition,
-# over neutral years where every one of them has a value; its modelled ratio
-# is over the same countries. Every analogue set of ctx$SETS is derived; 10
-# draws results.style.who_enso_ratio's.
+#             ENSO-neutral years (enso_year_states()), population-standardised;
+#             estimators same_window (WHO monthly) and ytd_annual (who_annual.R;
+#             a lower bound); bootstrap over the neutral years.
+# Both add `pseudo_count`. A group row pools countries with an observed ratio.
 
 #' Smoothing window totals per replicate and country, zero-filled (pure).
 #' @param events_mon smoothing events (rep_id, gid, t_start, cases_month[, country])
@@ -4833,7 +4792,7 @@ load_group_arm_runs <- function(
   )
 }
 
-#' Replicate ids present in EVERY element of `dfs` (list of data frames each
+#' Replicate ids present in every element of `dfs` (list of data frames each
 #' with a replicate_id column). The Africa-total sum/ratio is only valid over
 #' a replicate id that exists in every included group's run -- silently
 #' summing over whatever happens to be present would pool mismatched draws.
@@ -5151,7 +5110,7 @@ explosive_summary_cells <- function(country_month, cells, sets, factual) {
 }
 
 # ---------------------------------------------------------------------------
-# Attribution cells: ONE table of the window x
+# Attribution cells: one table of the window x
 # explosive-mode cells every attribution step derives (report_attrib_exposure,
 # report_attrib_metrics, af_posterior, attrib_exposure_posterior,
 # report_attrib_information, the event attribution), instead of a windows /
@@ -6266,7 +6225,7 @@ derive_attribution_aggregates <- function(ctx, sets) {
         # ratio itself, which only encodes relative shift).
         med_forecast = median(fc_val, na.rm = TRUE),
         # Same PROB_THRESHOLD flag (results.thresholds.prob_threshold,
-        # default 0.50) Figure 4b's ADM1 map already uses in BOTH
+        # default 0.50) Figure 4b's ADM1 map already uses in both
         # roles: the fractional shift ("> 50% more/fewer") AND
         # the significance probability ("> 50% chance of").
         # Paired per-replicate `ratio` (vs. fig4b's unpaired
@@ -6310,7 +6269,7 @@ derive_attribution_aggregates <- function(ctx, sets) {
   # The cum_per_rep_group sums behind Figure 4a's ratio, summarised as absolute
   # totals per arm (both metrics from the same replicates, so the explosive-
   # replicate guard on cases applies to onsets too). Per analog set: Africa sums
-  # the replicate ids present in every group on BOTH arms of that set, so its
+  # the replicate ids present in every group on both arms of that set, so its
   # forecast row also depends on the set.
   qv <- function(x, p) unname(quantile(x, p, na.rm = TRUE))
   cum_totals_of <- function(cum_per_rep_group) {
@@ -6904,34 +6863,25 @@ derive_smoothing <- function(ctx) {
 
 #' smoothing_validation_tables
 #'
-#' Checks of the historical reconstruction against the observations (smoothing
-#' v4; supplementary fig. SV), every replicate at uniform weight (as the
-#' ribbons), from the smoothing event tables and the observed panel:
-#'   pit_hist   randomised PIT of the observed monthly onsets (binary, at-risk
-#'              unit-months: p = share of replicates with an onset) and cases
-#'              (covered unit-months with known cases: the replicates' case
-#'              draws, 0 when inactive), counted in `n_bins` equal bins per
-#'              scope x metric (a storage resolution; 10 re-bins for display);
-#'   seasonal   onset frequency per calendar month (onsets / at-risk
-#'              unit-months), observed and across replicates;
-#'   duration   share of episodes (runs of consecutive active months in a
-#'              unit) by duration in months, observed and across replicates;
+#' Checks of the historical reconstruction against the observations
+#' (supplementary fig. SV), every replicate at uniform weight:
+#'   pit_hist   randomised PIT of observed monthly onsets (at-risk unit-months)
+#'              and cases (covered unit-months with known cases), in `n_bins`
+#'              equal bins per scope x metric;
+#'   seasonal   onset frequency per calendar month;
+#'   duration   share of episodes by duration in months;
 #'   active     fraction of covered unit-months in an active episode;
-#'   contagion  onset frequency among at-risk unit-months not active themselves
-#'              in the previous month, by whether an outbreak was ongoing in the
-#'              previous month in the same ADM1 (`adm1`), in another ADM1 of the
-#'              country (`country`) or in another country of the transmission
-#'              unit (`tu`; units without a TU left out) -- the definitions of
-#'              the kernel's update_lags(); state "ongoing" / "none".
-#'   season_onsets  share of unit-seasons (gid x cholera year from min_seas,
-#'              those with a covered cell) by number of onsets (0, 1, 2, 3 =
-#'              three or more), observed and across replicates; with
-#'              max_season_onsets (the most onsets in one unit-season of any
-#'              replicate, every simulated onset) and n_unit_seasons. NULL / NA
-#'              when the frame has no min_seas.
+#'   contagion  onset frequency among at-risk unit-months not active the month
+#'              before, by whether an outbreak was ongoing then in the same ADM1
+#'              (`adm1`), another ADM1 of the country (`country`) or another
+#'              country of the transmission unit (`tu`), as in the kernel's
+#'              update_lags(); state "ongoing" / "none";
+#'   season_onsets  share of unit-seasons by number of onsets (0, 1, 2, 3+),
+#'              with max_season_onsets and n_unit_seasons; NULL / NA when the
+#'              frame has no min_seas.
 #' Replicate summaries: q025 / q25 / q50 / q75 / q975 of the per-replicate
-#' statistic; `obs` the observed one. Scopes as the ribbons (Africa + the
-#' groups' stored short names).
+#' statistic, `obs` the observed one; scopes as the ribbons.
+#'
 #' @param ev_onset tibble(rep_id, gid, t_start): one row per simulated onset
 #' @param ev_mon tibble(rep_id, gid, t_start, cases_month): simulated active months
 #' @param rep_ids every replicate id (one without events counts as zeros)
@@ -7380,7 +7330,7 @@ ensure_smoothing <- function(ctx) {
 # projection climate panel actually pointed at by the config.
 
 #' Earliest smoothing-handoff month across the per-country hist_filter_tu=*.qs
-#' caches (mirrors analysis/07b_simulator_spatpomp.R:227-255): take the last
+#' caches (mirrors analysis/07b_simulator_spatpomp.R): take the last
 #' 8-digit token of each basename as %Y%m%d, then min().
 earliest_smoothing_handoff <- function(smoothing_input_dir) {
   fs <- Sys.glob(file.path(smoothing_input_dir, "hist_filter_tu=*_Np=*.qs"))
@@ -8281,7 +8231,7 @@ ensure_report_dataset <- function(ctx) {
 # --- R2: BRMS effect sizes per track ---------------------------------------
 
 #' Construction-faithful duration RMD newdata: one row per months-since-onset
-#' 1..horizon, taken from the fit's OWN design frame (so mso_band / the mso &
+#' 1..horizon, taken from the fit's own design frame (so mso_band / the mso &
 #' season M-spline columns are the actual fitted values, never re-derived), with
 #' only the ENSO cross-basis columns overwritten to the onebasis row at a
 #' constant ONI value via build_cb_columns_from_Q() (bit-identical to fit time).
@@ -10001,29 +9951,18 @@ enso_pop_inputs <- function(ctx) {
 
 # --- R6: ENSO exposure by direction, magnitude and certainty -----------------
 
-#' Population exposed to an ENSO effect, by DIRECTION (adverse: more / longer
-#' cholera; protective: the opposite; either: |log IRR| beyond the magnitude in
-#' either direction, the duration ratio unflipped -- the former
-#' report_sensitive_pop rule), MAGNITUDE (IRR beyond 1 + m, m in
-#' ENSO_MAGNITUDES; m = 0 is "any effect in that direction") and, for the grid,
-#' CERTAINTY (posterior probability >= p, p in POP_PROB_CUTOFFS). Each track's
-#' adverse direction is TRACK_ADVERSE_SIGN (utils/results_core.R): occurrence
-#' and monthly up, the duration cessation hazard DOWN (= longer outbreaks).
-#' Per-track rows plus `any` (union across tracks, within the direction) and
-#' `concordant2` (at least two tracks meet the rule on the draw; under `either`
-#' each may meet it in its own direction); the grid also has `any_credible`
-#' (the track-wise union of the per-track certain sets, prob_grid_rows()).
-#'
-#' Two readings of the same masks:
-#'   * exposure -- the per-draw companion with a 95% CrI: on every draw sum
-#'     the population of the ADM1s whose drawn effect exceeds m (mask_pop_rows);
-#'     over the m axis this is the population exceedance curve. m = 0 is the
-#'     directional counterpart of report_effects' per-draw dir_pop_ci() CrI;
-#'     direction `either` at m = sensitive_irr reproduces the former
-#'     report_sensitive_pop rows.
-#'   * grid -- the probability-threshold count with no interval
-#'     (prob_grid_rows): population where P(effect >= m) >= p. p = 0.95 at
-#'     m = 0 is "significant" in the usual sense.
+#' Population exposed to an ENSO effect, by DIRECTION (adverse, protective, or
+#' either: |log IRR| beyond the magnitude, duration ratio unflipped), MAGNITUDE
+#' (IRR beyond 1 + m, m in ENSO_MAGNITUDES; m = 0 = any effect) and, for the
+#' grid, CERTAINTY (posterior probability >= p, p in POP_PROB_CUTOFFS). A
+#' track's adverse direction is TRACK_ADVERSE_SIGN (utils/results_core.R): up
+#' for occurrence and monthly, down for the duration cessation hazard. Rows per
+#' track plus `any` (union across tracks), `concordant2` (>= 2 tracks on the
+#' draw) and, in the grid, `any_credible` (union of the per-track certain sets).
+#'   * exposure: per-draw population of the ADM1s whose effect exceeds m, with a
+#'     95% CrI (mask_pop_rows()); over m, the population exceedance curve.
+#'   * grid: population where P(effect >= m) >= p (prob_grid_rows()), no
+#'     interval; p = 0.95 at m = 0 is "significant".
 #'
 #' @return list(exposure = tibble(direction, magnitude, track, level, scope,
 #'   enso_group, region, country, enso_label, enso_val, n_adm1_universe,
@@ -10088,30 +10027,15 @@ ensure_report_enso_exposure <- function(ctx) {
 
 # --- R7: population in ADM1s with more ENSO-attributable cases ---------------
 #
-# Forecast arm vs counterfactual arm over the attribution window (the window and
-# runs of report_forecast / Figure 4), per ADM1, paired by replicate_id (the
-# arms share each replicate's smoothing handoff state and posterior draw). Two
-# estimands per metric x analog set x magnitude m (thresholds.attrib_magnitudes):
-#   * childs: the ADM1 counts when mean forecast / mean counterfactual >= 1 + m
-#     (the impact-attribution convention of Childs et al. 2025, PNAS: a threshold
-#     on the expected-incidence ratio), with a 95% interval on the population
-#     from a paired bootstrap of the replicate ids within each group;
-#   * childs_median: the same rule on the ratio of medians (insensitive to the
-#     heavy upper tail of the replicate totals), also with a bootstrap interval;
-#   * IPCC AR6 Atlas robustness classes from the paired replicates (the
-#     magnitude m is the variability threshold): robust when >= robust_exceed of
-#     the pairs have f > (1 + m) cf AND >= robust_agree have f > cf (ties
-#     disagree); conflicting when the first holds but not the second; none
-#     otherwise.
-# Replicates excluded from Figure 4a's group ratio (results.thresholds.explosive_case_cap) are
-# dropped from every ADM1 of their group and arm (explosive_guard = TRUE; the
-# FALSE rows keep them, a sensitivity). Two windows: `attribution` (the
-# inherited window, from the earlier arm launch, the factual series stitched
-# from the smoothing before its own launch) and `post_fork` (from the factual
-# launch: both arms free simulations; equal to `attribution` when the arms
-# launch together). The headline slice is attribution x explosive_guard. Scope rows reuse the R5
-# machinery (enso_scopes, mask_pop_rows, .point_scope_row) with the analog set
-# as the condition axis and bootstrap resamples as the draw axis.
+# Forecast vs counterfactual arm per ADM1 over the attribution window, paired
+# by replicate_id. Per metric x analog set x magnitude m:
+#   * childs: ADM1 population where mean F / mean CF >= 1 + m (Childs et al.
+#     2025), paired-bootstrap interval; childs_median: same on medians;
+#   * IPCC AR6 robustness: robust when >= robust_exceed of pairs have
+#     f > (1 + m) cf AND >= robust_agree have f > cf; conflicting when only
+#     the first holds.
+# explosive_guard = TRUE drops Figure 4a's capped replicates. Windows:
+# `attribution` and `post_fork`. Headline: attribution x explosive_guard.
 
 #' Bootstrap resamples drawn by attrib_exposure_tables(), and their fixed seed
 #' (both stored in the artefact).
@@ -10355,7 +10279,7 @@ attrib_class_hits <- function(cls, U, sets) {
   )
 }
 
-#' The pure core of report_attrib_exposure (no IO) for ONE window and one
+#' The pure core of report_attrib_exposure (no IO) for one window and one
 #' explosive-replicate cap: the per-ADM1 table and the Africa / region / country
 #' population rows of every estimand (childs, childs_median, robust,
 #' conflicting, none).
@@ -11093,29 +11017,16 @@ ensure_report_attrib_incidence <- function(ctx, sets) {
 }
 
 # ===========================================================================
-# report_attrib_metrics: attribution metrics of the paired
-# forecast / ENSO-counterfactual runs of report_attrib_exposure, beside its
-# Childs and IPCC-robustness classes. Three families, so the manuscript can pick
-# one later:
-#   * attributable number / fraction (AN = F - CF, AF = AN / F; Gasparrini &
-#     Leone 2014, Vicedo-Cabrera et al. 2021, Childs et al. 2025) of cases and
-#     onsets, per replicate and of the replicate means;
-#   * probability ratio PR = p1 / p0 of an outbreak event (World Weather
-#     Attribution) with FAR = 1 - 1/PR (= the probability of necessary
-#     causation PN), PS = (p1 - p0) / (1 - p0) and PNS = p1 - p0 (Hannart &
-#     Naveau), for two events: onset_any (an onset in the window) and cases_ge
-#     (window cases >= thresholds.pr_case_threshold); when the counterfactual
-#     never has the event PR is infinite and pr_lo is the exact one-sided bound
-#     p1 / (1 - alpha^(1/n)) (Paciorek et al.);
-#   * signal-to-noise of the paired difference, mean / sd across replicates
-#     (Hawkins & Sutton), and the population of the ADM1s where |S/N| reaches
-#     thresholds.sn_levels.
-# Same axes as report_attrib_exposure: analog sets x window x explosive guard,
-# ADM1 + country + region + Africa. Scope totals are sums of the ADM1 rows per
-# replicate (country / region within one group's paired ids; Africa over the
-# ids common to every group), so ADM1 and scope rows are consistent. Bootstrap
-# weights: the same draws as attrib_exposure_tables() per (set, group), plus one
-# resample of the common ids for Africa.
+# report_attrib_metrics: attribution metrics of the paired forecast / ENSO-
+# counterfactual runs of report_attrib_exposure, three families:
+#   * AN = F - CF, AF = AN / F, of cases and onsets;
+#   * PR = p1 / p0 for onset_any and cases_ge events, with FAR = 1 - 1/PR,
+#     PS = (p1 - p0) / (1 - p0), PNS = p1 - p0; when CF never has the event,
+#     pr_lo = p1 / (1 - alpha^(1/n));
+#   * S/N of the paired difference (mean / sd) and the ADM1 population where
+#     |S/N| reaches thresholds.sn_levels.
+# Same axes as report_attrib_exposure. Scope totals are per-replicate sums of
+# the ADM1 rows, so ADM1 and scope rows agree; bootstrap draws as there.
 # ===========================================================================
 
 #' Type-1 (no interpolation) quantiles, safe with Inf (type 7 gives NaN on
@@ -11781,21 +11692,12 @@ ensure_report_attrib_metrics <- function(ctx, sets) {
 }
 
 # ===========================================================================
-# report_event_attrib: attribution of PAST strong ENSO events.
-# For each event of the event manifest (utils/make_event_attribution_configs.R,
-# deploy --stage gen_events), the paired factual / counterfactual runs of every
-# simulation unit, both handed off from the smoothing at the event launch:
-# factual = observed ENSO, counterfactual = Lenssen analogs of one set (default
-# neutral: the event did not develop). The report_attrib_metrics families (AF /
-# AN, PR + FAR / PS / PNS, S/N) and the report_attrib_exposure classes (Childs,
-# IPCC robustness) are derived by the same pure cores, per event x factual
-# source x explosive guard. Two factual sources, both headline candidates:
-#   simulation  the free factual run (observed ENSO);
-#   smoothing   the smoothing replicate each factual replicate was handed off
-#               from (data-conditioned; only the smoothing's distinct replicates).
-# Plus the observed totals of the window (survival-panel onsets, monthly
-# cases) and the observed-anchored attributable number AN_obs = AF x observed.
-# Off unless results.event_manifest is set (top level, unstamped).
+# report_event_attrib: attribution of PAST strong ENSO events (manifest from
+# make_event_attribution_configs.R). Paired factual (observed ENSO) /
+# counterfactual (analogs, default neutral) runs from the smoothing at event
+# launch, through the report_attrib_metrics / _exposure cores. Factual sources:
+# `simulation` (free run) and `smoothing` (the handoff replicate). Adds observed
+# window totals and AN_obs = AF x observed. Off unless results.event_manifest.
 # ===========================================================================
 
 #' A copy of the results context with fields replaced (an event's manifest view).
@@ -13806,27 +13708,15 @@ ensure_report_lags <- function(ctx) {
 
 # --- Lag averaging over the single-lag fits --
 #
-# lag_averaging (v1, track-keyed, wave 1; on with results.derivation.
-# lag_averaging.enable): from the 05 lag sidecars (05_fit_postprocess_loo_lags.R
-# --lag_sidecar: per (batch, group) the N x L pointwise elpd and Pareto-k of
-# every single-lag fit and each lag's population crossbasis draws), per group:
-#   lags      per lag: elpd_loo, Pareto-k counts, the paired elpd difference
-#             (and SE) to the rank-1 lag and to the deployed lag, the k-robust
-#             difference (rows with k > k_threshold at ANY lag dropped, rank 1
-#             re-found on the rest), and the weight of every method x lag set
-#             (stacking = loo::stacking_weights(), pseudobma_plus =
-#             loo::pseudobma_weights(BB = TRUE), seeded; lag sets `all` and
-#             `eligible` = single_lag >= the deploy floor, results_lag_floor())
-#   erf       the population ERF on one grid (the intersection of every lag's
-#             ONI range, 200 points incl. 0, centred exactly at ONI 0), per lag
-#             and for each method x lag set's mixture: n_irr_draws draws whose
-#             lag labels are systematic samples by weight (seeded); the
-#             deployed / rank-2 / unbounded rank-1 lags are rows of the per-lag
-#             table (roles in `roles`)
-#   irr       IRR at enso_conds of every lag and mixture, median, 95% CrI, P(IRR > 1)
-# Only the population ERF and the IRR at the ENSO conditions are averaged; no
-# ADM1 map, no attribution at an averaged lag. A track with no sidecar is
-# skipped with a message.
+# lag_averaging (v1, track-keyed; results.derivation.lag_averaging.enable),
+# from the 05 lag sidecars, per group:
+#   lags  per lag elpd_loo, Pareto-k, paired elpd diff to rank-1 and deployed,
+#         the k-robust diff, and weights per method (stacking, pseudobma_plus)
+#         x lag set (`all`, `eligible` = >= results_lag_floor());
+#   erf   population ERF per lag and per mixture on a common grid centred at 0;
+#   irr   IRR at enso_conds per lag and mixture.
+# Only the population ERF and IRR are averaged. A track with no sidecar is
+# skipped.
 
 LAG_AVG_SEED <- 20261027L
 LAG_AVG_GRID_N <- 200L
@@ -15017,33 +14907,13 @@ derive_report_kl_sweep <- function(ctx) {
 
 # --- Membership uncertainty of the deployed classes ----------
 #
-# report_membership (v1, unkeyed, wave 1; on when results.kl_sweep_dir AND the
-# top-level results.kl_sweep_cell are set): from the extended 05 kl-sweep
-# comparison (responsibilities.csv, country_mixture.csv, stability.csv,
-# loo_country.csv, loo.csv, fits.csv, loo.rds), for the deployed cell:
-#   country      each country's deployed group, p_max (largest mean
-#                responsibility, agreeing chains), the full responsibility row
-#                (r_<group>), its prior registry group, the M1 contrast / lag
-#                (mixture vs hard MAP) and `carried_over` (countries the fit
-#                lacks, added by fill_from: NA)
-#   group        per deployed group: hard members, soft size sum_c r_ck, median /
-#                min p_max (the count under style.membership_low is display)
-#   stability    stability.csv (sampled partitions vs the MAP, ARI)
-#   sensitivity  per sweep cell x chain set: ARI vs the deployed partition,
-#                countries agreeing by label and after the optimal class
-#                matching (kl_sweep.R::kl_match_classes()), the countries that
-#                move, the pairwise country-block elpd difference vs the
-#                deployed cell with SE = sqrt(C var(diff)) from loo_country.csv,
-#                Pareto k > 0.7 counts of both cells and the kl stacking weight
-#                -- descriptive (country-block PSIS-LOO; high k expected)
-#   mixture_m1   country_mixture.csv rows of the cell (agreeing chains)
-#   mixture_m2   per track and country: sum_k r_ck ERF_k at group k's deployed
-#                lag, from the 05 lag sidecars' population draws (the reader of
-#                lag_averaging), vs the hard (deployed group) ERF: IRR at
-#                enso_conds and the ERF on a common grid; skipped per track with
-#                a message while the sidecars are absent
-# 09 stops unless the cell's agreeing-chain MAP partition is the deployed
-# registry (results.inputs.grouping), naming the countries that differ.
+# report_membership (v1, unkeyed; on when results.kl_sweep_dir and
+# results.kl_sweep_cell are set), from the 05 kl-sweep comparison for the
+# deployed cell: tables country (group, p_max, responsibilities), group (hard
+# and soft sizes), stability, sensitivity (per sweep cell: ARI, moving
+# countries, country-block elpd diff -- descriptive), mixture_m1 and mixture_m2
+# (responsibility-weighted ERF vs the hard ERF; skipped without lag sidecars).
+# 09 stops unless the cell's MAP partition is the deployed registry.
 
 MEMBERSHIP_SEED <- 20261027L
 
@@ -15951,36 +15821,16 @@ ensure_report_kl_sweep <- function(ctx) {
 }
 
 # ===========================================================================
-# af_posterior / event_af_posterior: the POSTERIOR interval of the
-# attributable fraction (AF = 1 - CF / F) and number (AN = F - CF) of paired
-# factual / counterfactual runs, for the forecast (Figure 4) and the past ENSO
-# events (Figure 3). The paired bootstrap of report_attrib_metrics /
-# report_event_attrib is the Monte-Carlo precision of the replicate means
-# (width ~ 1 / sqrt(R)); this is the uncertainty of the ENSO effect: the spread
-# of the expected AF over posterior draws.
-#
-# Needs runs with a fixed draw design (simulator.forecast.param_draw_mode:
-# cycle, replicate r runs draw ((r - 1) mod max_draws) + 1, e.g. 199 draws x 50
-# replicates); a run with random draws is refused. Per cell (forecast window or
-# event) x analog set x explosive guard x metric x scope (Africa, ENSO group,
-# country):
-#   F_d, CF_d  expected window totals under draw d: the mean over the unit's
-#              replicates that ran d, summed over the scope's units AT THE SAME
-#              d (d indexes the group's own fit in every unit: one parameter
-#              vector); AF_d = 1 - CF_d / F_d, AN_d = F_d - CF_d.
-#   Africa     the groups are separate fits (independent posteriors): AF_MC
-#              combinations of one draw per group.
-#   noise      F_d / CF_d still carry the within-draw spread (epidemic noise,
-#              the handoff state, the counterfactual ENSO trajectory). Its
-#              variance is estimated directly by the delta method on the ratio
-#              of means, var(AF_d) ~ sum_u var_u(cf - R_d f) / n_u / F_d^2
-#              (R_d = CF_d / F_d; AN: sum_u var_u(f - cf) / n_u), and AF_d is
-#              shrunk towards the pooled value by sqrt(1 - mean noise var /
-#              var(AF_d)) before its quantiles are taken ("adj"; "raw" =
-#              unshrunk). Validated on a synthetic known posterior
-#              (tests/test_results_af_posterior.R).
-# The per-replicate window totals come from the same run load as
-# the other attribution steps when they run in one 09 job (ctx$AF_POST_STASH).
+# af_posterior / event_af_posterior: POSTERIOR interval of AF = 1 - CF / F and
+# AN = F - CF of paired runs (Figure 4 forecast, Figure 3 events) -- the spread
+# of the expected AF over draws, not the Monte-Carlo precision of the paired
+# bootstrap. Needs a fixed draw design (param_draw_mode: cycle); random draws
+# are refused. Per draw d, F_d / CF_d are the means over the replicates that
+# ran d, summed over the scope's units at the same d. Africa: AF_MC
+# combinations of one draw per group (independent fits). Within-draw noise is
+# removed by delta-method shrinkage towards the pooled value ("adj"; "raw" =
+# unshrunk); gate tests/test_results_af_posterior.R. Run totals are shared via
+# ctx$AF_POST_STASH.
 # ===========================================================================
 
 AF_POST_MC <- 4000L # Africa: combinations of one draw per group
@@ -17049,24 +16899,13 @@ ensure_event_af_posterior <- function(ctx) {
 }
 
 # ===========================================================================
-# attrib_exposure_posterior: the posterior interval of the Childs
-# population of report_attrib_exposure (the population of the ADM1s whose mean
-# forecast is at least (1 + m) x the mean counterfactual), from the fixed-draw
-# runs of af_posterior. Per ADM1 and draw d, F_d / CF_d are the means over the
-# replicates that ran d, AF_d = 1 - CF_d / F_d with its delta-method noise
-# variance (.afp_stats()), and the Childs rule F >= (1 + m) CF is
-# AF >= m / (1 + m). As in af_posterior, AF_d is shrunk towards the ADM1's
-# pooled AF by sqrt(1 - noise share) before the rule is applied (variant "adj",
-# the headline); "raw" applies the rule to the unshrunk per-draw means, so it
-# counts the epidemic noise of ~50 replicates as posterior spread (an upper
-# bound on the width). An ADM1 whose noise share is >= 1 keeps its pooled class
-# on every draw: its posterior spread is not identified. A draw with F_d = 0 is
-# no hit unless CF_d = 0 too (then the pooled class). Population per draw: the
-# population of the ADM1s that pass; every scope from AF_MC combinations of one
-# draw per group (independent fits; a region's quantiles are those of its own
-# draws, resampled). Same windows (attribution / post_fork), explosive guards
-# and magnitudes as report_attrib_exposure; pop_point is its Childs population.
-# Gate: tests/test_results_attrib_exposure_posterior.R.
+# attrib_exposure_posterior: posterior interval of report_attrib_exposure's
+# Childs population, from af_posterior's fixed-draw runs. Per ADM1 and draw the
+# rule F >= (1 + m) CF is AF_d >= m / (1 + m), on AF_d shrunk as in
+# af_posterior ("adj", headline; "raw" overstates the width). An ADM1 with
+# noise share >= 1 keeps its pooled class; F_d = 0 is no hit unless CF_d = 0.
+# Scopes from AF_MC draw combinations. Gate:
+# tests/test_results_attrib_exposure_posterior.R.
 # ===========================================================================
 
 #' Per-ADM1 x draw means of a paired table (adm1_unit, draw, f, cf) with the
@@ -17138,7 +16977,7 @@ childs_draw_hits <- function(dt, m, noise_share_max = Inf) {
   dplyr::select(x, -F_pool, -CF_pool)
 }
 
-#' The pure core of attrib_exposure_posterior (no IO) for ONE window and one
+#' The pure core of attrib_exposure_posterior (no IO) for one window and one
 #' explosive-replicate cap.
 #'
 #' @param adm1_month,country_month,adm1_pop,group_short,sets,window_start,mags,cap
@@ -17543,27 +17382,15 @@ ensure_attrib_exposure_posterior <- function(ctx, sets) {
 }
 
 # ===========================================================================
-# report_attrib_information: the information component of the
-# forecast attribution. With an
-# attribution factual (results.inputs.attrib_manifest) three factual /
-# counterfactual pairs share every replicate's smoothing replicate and
-# posterior draw:
-#   total        S - C   the displayed (stitched) factual vs the counterfactual
-#   information  S - M   the displayed factual vs the attribution factual: what
-#                        the months between the two launches add (the smoothed
-#                        trajectory over them, and observed vs forecast ENSO
-#                        inputs there) beyond re-simulating them
-#   enso         M - C   the attribution factual vs the counterfactual: the ENSO
-#                        trajectory only (af_posterior's headline under the
-#                        attribution factual)
+# report_attrib_information: with an attribution factual
+# (results.inputs.attrib_manifest), three pairs sharing each replicate's
+# smoothing replicate and draw:
+#   total        S - C  displayed (stitched) factual vs counterfactual
+#   information  S - M  displayed factual vs attribution factual
+#   enso         M - C  attribution factual vs counterfactual
 # so AN_total = AN_information + AN_enso per replicate (AF does not add). Each
-# pair goes through af_posterior_tables() (per-draw AF / AN, noise-adjusted
-# quantiles), relabelled as forecast / counterfactual. Needs the fixed draw
-# design of af_posterior (results.af_posterior). Both factuals start from the
-# same smoothing replicate of each replicate id (checked on the handoff maps):
-# the attribution factual from its April state, which the smoother traced back
-# from the August data, so the information component is "realised vs
-# re-simulated May-Aug", not the value of the May-Aug data alone.
+# pair goes through af_posterior_tables(). Information = "realised vs
+# re-simulated" months between the launches, not the value of that data alone.
 # ===========================================================================
 
 #' The three pairs of report_attrib_information as af_posterior_tables() inputs:

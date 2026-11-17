@@ -23,37 +23,12 @@
 
 #' Band edges for the `mso` (months-since-onset) baseline hazard.
 #'
-#' Left-closed, right-open on `mso` (which is 1-based: the onset month is 1).
-#'
-#' These edges were FITTED against the realised panel, not assumed, and kept
-#' unchanged for the outbreak_data_Nov_2026 vintage, whose outbreaks end at the
-#' last week before their six-week closing run. Empirical monthly cessation
-#' hazard on that panel (outbreaks_duration_data_base-1990_2019_ep-gs.rds, the
-#' deployed prep: 7137 active months, 1404 episodes, 1300 observed cessations):
-#'
-#'   band   at-risk  events  haz/month
-#'   1        1404      44     0.0313
-#'   2        1352     239     0.1768
-#'   3        1096     257     0.2345
-#'   4-5      1439     333     0.2314
-#'   6-8      1084     258     0.2380
-#'   9+        762     169     0.2218
-#'
-#' Two things this says. First, the hazard is NOT flat -- a 7.6x range across
-#' bands -- so a constant-hazard (geometric) duration model would be wrong and
-#' `basehaz_duration: none` is not a serious default. Second, the structure is
-#' entirely in the first two months: 3, 4-5, 6-8 and 9+ sit within noise of
-#' each other. The tail bands are kept separate anyway (the model can shrink
-#' them together; merging them cannot be undone at fit time), but a
-#' `c(1, 2, 3, 4, Inf)` variant is the natural parsimony check and is reachable
-#' via `duration.mso_breaks` in config without re-running 03_prepare_dur.R.
-#'
-#' The mso = 1 band is informed by data: the minimum outbreak length is two
-#' weeks (the shortest episode runs 13 days from TL to TR), 52 episodes are
-#' active in a single calendar month and 44 of them end in it. Before the
-#' Nov_2026 vintage the closing run was part of the outbreak, no episode ended
-#' in its first month (0 of 1405 on that vintage's panel) and this band's
-#' coefficient was prior-dominated.
+#' Left-closed, right-open on `mso` (1-based: the onset month is 1). Fitted
+#' against the realised panel: the cessation hazard is not flat, but its
+#' structure sits in the first two months. The tail bands stay separate (the
+#' model can shrink them; merging cannot be undone at fit time). The
+#' `c(1, 2, 3, 4, Inf)` parsimony variant is reachable via
+#' `duration.mso_breaks` without re-running 03_prepare_dur.R.
 .DUR_MSO_BREAKS <- c(1, 2, 3, 4, 6, 9, Inf)
 
 #' bin_mso
@@ -98,13 +73,13 @@ bin_mso <- function(mso, breaks = .DUR_MSO_BREAKS) {
 #'
 #' Last date on which each location's surveillance record carries data, from
 #' the pre-outbreak-extraction aggregated time series written by
-#' 01_preprocess_outbreaks.R:107. An episode whose TR sits at that boundary was
-#' still ongoing when observation stopped, i.e. right-censored.
+#' 01_preprocess_outbreaks.R section 5. An episode whose TR sits at that
+#' boundary was still ongoing when observation stopped, i.e. right-censored.
 #'
 #' KEYED ON `location_period_id`, NOT `gid`. build_coverage_mask() (sim_io.R),
 #' which bridges location_period_id -> gid, is lossy for this purpose:
 #'   * build_coverage_mask() filters the series to admin_level ADM2/ADM3
-#'     (sim_io.R:520), discarding the 32 ADM0 and 252 ADM1 series. 31 of 1582
+#'     (coverage.R), discarding the 32 ADM0 and 252 ADM1 series. 31 of 1582
 #'     episodes then had no coverage window at all.
 #'   * Worse, it silently substitutes a country x ADM2 window for gids with no
 #'     series of their own, which put NGA's series end at 2020-01 while NGA
@@ -291,24 +266,14 @@ flag_right_censored <- function(episodes, series_end, censor_tol_days = 73L) {
   )
 }
 
-# Why this track exists. At fit time the occurrence contagion covariates are ON
-# for every month an outbreak spans TL..TR (03_prepare_occ.R::
-# active_last_month()): a whole-month span (onset month to last active month)
-# of median 4 [IQR 3-7] under gid_season (duration_span_summary(), stamped by
-# 03_prepare_dur.R as median_span_months). A simulator fed last month's ONSET
-# indicator is on for exactly one month -- roughly a quarter of the fit-time
-# duty cycle. The missing ingredient is a model of when a location stops being
-# active.
-#
-# Source of the episode table. The panel is expanded from the SIZE track's
-# episode table (generated_data/outbreak_size_analysis_data.rds), not rebuilt
-# from outbreak_metadata.rds. Two reasons, both load-bearing:
-#   1. It already carries gid / ADM1 / min_seas / AFRO_region resolved through
-#      the seasonality-match cascade (03_prepare_siz.R sections A-B). Rebuilding
-#      that cascade here would duplicate ~250 lines and could silently drift.
-#   2. Phase 05 (dependence check) pairs size and duration residuals PER
-#      EPISODE. Deriving both from one episode table makes the keys align by
-#      construction rather than by a join that might not be 1:1.
+# Why this track exists: at fit time the occurrence contagion covariates are on
+# for every month an outbreak spans (03_prepare_occ.R::active_last_month()),
+# while a simulator fed last month's onset indicator is on for one month only.
+# The duration model supplies when a location stops being active.
+# The panel is expanded from the size track's episode table, not rebuilt from
+# outbreak_metadata.rds: it already carries gid / ADM1 / min_seas / AFRO_region
+# from the seasonality-match cascade (03_prepare_siz.R), which must not be
+# duplicated here.
 #' make_duration_panel
 #'
 #' Expand an episode table into the active-month panel the cessation hazard is
@@ -316,7 +281,7 @@ flag_right_censored <- function(episodes, series_end, censor_tol_days = 73L) {
 #'
 #' The climate join is the point of the whole design: an AFT or count model of
 #' duration can only use covariates at onset, whereas this panel carries the
-#' climate of EACH active month, so within-outbreak weather can drive when the
+#' climate of each active month, so within-outbreak weather can drive when the
 #' outbreak ends.
 #'
 #' @param episodes episode-level table -- the size track's
@@ -438,8 +403,8 @@ make_duration_panel <- function(
     ) %>%
     dplyr::mutate(
       ended = as.integer(mso == n_months & !censored),
-      # pmax mirrors 04_fit_occ_brms.R:124 -- log(0) would be -Inf and drop the
-      # row's contribution entirely.
+      # pmax mirrors the occurrence exposure -- log(0) would be -Inf and drop
+      # the row's contribution entirely.
       log_offset = log(pmax(exposure, 1))
     )
 
@@ -492,8 +457,8 @@ make_duration_panel <- function(
     )
 
   # --- 6. seasonal time of the ACTIVE MONTH -------------------------------
-  # Same rotation as the size/occurrence tracks (03_prepare_siz.R:286-293), but
-  # applied to the active month rather than to TL, so a `basehaz_poisson` on
+  # Same rotation as the size/occurrence tracks (03_prepare_siz.R section 5),
+  # but applied to the active month rather than to TL, so a `basehaz_poisson` on
   # t_start_seas tests "outbreaks end when the season ends" rather than
   # re-expressing the onset date.
   panel <- panel %>%
@@ -506,13 +471,13 @@ make_duration_panel <- function(
     )
 
   # --- 7. climate at the active month -------------------------------------
-  # .make_size_clim_stats() (siz_data.R:42) is the batched multi-gid form; the
+  # .make_size_clim_stats() (siz_data.R) is the batched multi-gid form; the
   # per-gid make_size_data()/make_surv_data() helpers would issue one SQLite query
   # per episode.
   #
   # Raw values (`precip`, `temp_daymean`, ...) are joined ALONGSIDE the derived
   # mean_*/dev_* columns, not instead of them. Two reasons: guard_missing_climate_data()
-  # (occ_data.R:112) tests `precip` and `temp_daymean` by name, and the other two
+  # (occ_data.R) tests `precip` and `temp_daymean` by name, and the other two
   # tracks both carry raw and derived, so a formula term means the same thing in
   # all three. The hlq_* extreme categories are NOT carried -- they belong to the
   # extreme-index sensitivity variants, which lost the CPO/WAIC comparison
@@ -538,7 +503,7 @@ make_duration_panel <- function(
 
   # --- 8. climate lags ----------------------------------------------------
   # make_climate_lags(mode = "panel") lags within `uid` x season group and works
-  # on any monthly panel (occ_data.R:322-387) -- no new mode is needed.
+  # on any monthly panel (occ_data.R) -- no new mode is needed.
   #
   # It is handed `episode_id` AS `uid` on purpose. Its season grouping keys on a
   # DECREASE in t_start_seas, which does not necessarily occur between two
@@ -706,7 +671,7 @@ duration_episode_rows <- function(d, dur) {
 #' load_duration_data
 #'
 #' Read + filter + scale the duration panel for 04_fit_dur_brms.R. Mirrors
-#' read_size_data()'s column-class scaling (siz_data.R:114-125) so a coefficient
+#' read_size_data()'s column-class scaling (siz_data.R) so a coefficient
 #' on `dev_precip` means the same thing in all three tracks.
 #'
 #' The size track's population guards are deliberately absent: the cessation

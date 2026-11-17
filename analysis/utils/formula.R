@@ -39,7 +39,7 @@
 #' Deliberately NOT folded in here:
 #'   - `.validate_basehaz()` (line ~95) reads the RAW value per backend and
 #'     needs the un-normalised string for its error messages.
-#'   - `make_run_file()`'s basehaz token (utils/paths.R:228-235) tokenises the RAW
+#'   - `make_run_file()`'s basehaz token (utils/paths.R) tokenises the RAW
 #'     value: "seasonal" and "cyclic" are the same model but must stay distinct
 #'     artefact names, since configs in the repo use both spellings.
 #'   - build_formula_terms()'s / build_formula_terms_legacy()'s
@@ -229,33 +229,16 @@ nested_slope_re_terms <- function(
 
 #' filter_re_terms_for_data
 #'
-#' Drop or reshape RE formula terms whose grouping columns have fewer than 2
-#' distinct values in `dat`.  Called after RE term construction in
-#' build_size_formula_parts() and after CB slope RE terms are appended in
-#' 04_fit_siz_brms_cb.R.
-#'
-#' Two grouping notations are handled:
-#'
-#' Slash (`country/ADM1`) — intercept nesting.  brms expands `A/B` into
-#'   separate RE groups for `A` and `A:B`.  Each *individual* column in the
-#'   slash sequence must have ≥2 distinct values; a column with only 1 level is
-#'   removed from the nesting.  E.g. `(1 | country/ADM1)` becomes `(1 | ADM1)`
-#'   when the fitted subset contains only one country.  If no component
-#'   remains, the whole term is dropped.
-#'
-#' Colon (`country:ADM1`) — slope RE compound group.  What matters is the
-#'   number of distinct *combinations* of the constituent columns.  A
-#'   single-level compound key (e.g. all rows same country AND same ADM1) is
-#'   dropped; a compound key with ≥2 distinct values is kept even when one
-#'   constituent column is constant (e.g. single-country data still has
-#'   multiple ADM1 units → country:ADM1 compound has multiple levels → kept).
-#'
-#' `keep` names grouping columns that are never trimmed or dropped for having
-#' a single level (see .single_country_keep(): a grouped fit of ONE country
-#' keeps `country`, so the nested groups stay `country:ADM1[:gid]`, the names
-#' the simulator / smoothing extractors and the figure helpers map; trimming
-#' to `ADM1[/gid]` silently zeroed those REs downstream). character(0), the
-#' default, is the original behaviour.
+#' Drops or reshapes RE terms whose grouping columns have fewer than 2 distinct
+#' values in `dat`.
+#'   - Slash (`country/ADM1`, intercept nesting): each column needs >= 2 levels;
+#'     a single-level column is removed from the nesting (`(1 | country/ADM1)`
+#'     -> `(1 | ADM1)` for one country); with none left the term is dropped.
+#'   - Colon (`country:ADM1`, slope groups): counts distinct combinations; a
+#'     single-level compound key is dropped, otherwise kept.
+#' `keep` columns are never trimmed (.single_country_keep() keeps `country` in a
+#' one-country grouped fit, so group names stay what the simulator and figure
+#' extractors map).
 #'
 #' @param re_terms character vector of "(... | group)" RE strings
 #' @param dat      data.frame on which the model will be fit
@@ -681,20 +664,12 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 # Offsets (shared across all four tracks)
 # ---------------------------------------------------------------------------
 #
-# The offsets of all four tracks are built in ONE place, so each track's
-# `Intercept` prior cannot drift out of step with its own offset semantics
-# (see utils/anchor.R's header).
-#
-# Emission order is `pop`, then person-time, then the anchor. That order is
-# load-bearing, not cosmetic: size emits `offset(log(pop))` then
-# `offset(log(mean_rate))` and monthly `offset(log(pop))` then
-# `offset(log_offset)`, and the formula strings (and their goldens) depend on
-# it. brms is order-insensitive here -- the formula string is not.
-#
-# The anchor column is a JOINED COLUMN carried into an `offset(log(...))` term,
-# never folded into `log_offset` (see utils/anchor.R):
-# folding would hide it from `pp_check`/postprocessing and break the simulator's
-# per-offset flag protocol.
+# All four tracks' offsets are built here, so each Intercept prior stays in
+# step with its offsets (see anchor.R's header). Emission order is pop, then
+# person-time, then the anchor: brms ignores it but the formula strings and
+# their goldens do not. The anchor is a joined column in its own
+# offset(log(...)) term, never folded into log_offset, which would hide it from
+# pp_check / postprocessing and break the simulator's per-offset flags.
 .OFFSET_SPEC <- list(
   # `time`       — emit the unconditional person-time offset `offset(log_offset)`
   # `pop_gate`   — config key under the track's block toggling `offset(log(pop))`
@@ -835,46 +810,26 @@ filter_fixed_factor_terms_for_data <- function(fixed_terms, re_terms, dat) {
 
 #' build_formula_terms
 #'
-#' Occurrence formula builder using the size-model resolve_slopes() convention.
-#' Replaces the hardcoded climate_slope_to_cov table with resolve_slopes() and
-#' emits explicit per-level RE terms (e.g. AFRO_region, AFRO_region:country,
-#' AFRO_region:country:ADM1) instead of /-nested terms.
-#'
-#' Convention 2: active slope RE flags imply the corresponding climate
-#' fixed effect.  opt$occurrence$covariates is the escape hatch for
-#' time_to_last_outbreak_cat, ongoing_outbreak_lag1, enso, months, quarter.
-#'
-#' Special-cased (outside the generic covariate loop):
-#'   - Intercept REs (re_region_country_adm1_intercept, re_adm2_intercept)
-#'   - re_region_country_ongoing_slope  (column name = ongoing_outbreak_lag1)
-#'   - ENSO slope families              (dynamic column; requires covariates$enso)
-#'   - re_region_country_basehaz_slope  (factor basehaz only)
-#'
-#' Returns a list:
-#'   $fixed_terms  — character vector of covariate names (no intercept)
-#'   $re_terms     — character vector of "(x - 1 | g)" strings
+#' Occurrence formula terms via the size-model resolve_slopes() convention,
+#' with explicit per-level RE terms (AFRO_region, AFRO_region:country, ...)
+#' instead of `/`-nesting. Active slope RE flags imply their fixed effect;
+#' opt$occurrence$covariates switches time_to_last_outbreak_cat,
+#' ongoing_outbreak_lag1, enso, months and quarter. Special-cased: the intercept
+#' REs, re_region_country_ongoing_slope, the ENSO slope families (need
+#' covariates$enso) and re_region_country_basehaz_slope (factor basehaz only).
+#' Returns list($fixed_terms, $re_terms ("(x - 1 | g)" strings)).
 #'
 #' @param opt         resolved options list (must have opt$occurrence)
-#' @param n_country   integer, number of country levels in the data. Currently
-#'                    unread in the body below (kept for interface parity with
-#'                    build_formula_terms_legacy(), which does use them, and
-#'                    because callers already hold the value) -- not dead code
-#'                    to remove, just not the sparsity-awareness channel.
-#' @param n_region    integer, number of AFRO_region levels in the data (see
-#'                    n_country)
-#' @param dat         optional data frame. When supplied, applies the same
-#'                    data-aware pruning size/duration already have:
-#'                    filter_fixed_factor_terms_for_data() (drops fixed-effect
-#'                    factor/character columns with <2 distinct levels and
-#'                    cascades removal to referencing RE slope terms), then
-#'                    filter_re_terms_for_data() (drops or trims RE terms whose
-#'                    grouping columns have <2 distinct values). NULL (the
-#'                    default) skips both filters -- this is deliberate, not a
-#'                    placeholder: test_occurrence_config_merge.R's
-#'                    single-country/single-region case (":198-207") asserts
-#'                    full nesting survives when dat is not passed, and every
-#'                    existing call site that must keep pre-filter behaviour
-#'                    can rely on the default.
+#' @param n_country   integer, number of country levels in the data. Unread in
+#'                    the body (kept for interface parity with
+#'                    build_formula_terms_legacy(), which uses it).
+#' @param n_region    integer, number of AFRO_region levels (see n_country)
+#' @param dat         optional data frame. When supplied, applies
+#'                    filter_fixed_factor_terms_for_data() (drops single-level
+#'                    factor fixed effects and their RE slopes), then
+#'                    filter_re_terms_for_data(). NULL (default) skips both, so
+#'                    full nesting survives (test_occurrence_config_merge.R's
+#'                    single-country case relies on it).
 build_formula_terms <- function(opt, n_country, n_region, dat = NULL) {
   occ <- opt$occurrence
   covs <- occ$covariates %||% list()
@@ -1372,39 +1327,13 @@ resolve_slopes <- function(re_block, admin_level = "ADM1") {
 
 #' .pop_elasticity_terms
 #'
-#' Free the population elasticity (shared by the size and monthly parts
-#' builders).
-#'
-#' `offset(log(pop))` does not "include population as a covariate"; it IMPOSES
-#' an elasticity of exactly 1 -- a doubling of population must double expected
-#' cases -- and the likelihood is never allowed to test that. Measured on the
-#' size track's training rows under corrected admin-level keys (P3), the
-#' elasticity is ~0.30, i.e. strongly sub-linear: outbreak size grows much
-#' slower than population. Imposing 1 is therefore not a neutral modelling
-#' convenience, it is a constraint the data rejects, and it is the single
-#' largest lever on simulated mass when the frame's units differ in size from
-#' the fitted rows.
-#'
-#' The OFFSET IS KEPT and a deviation term added beside it, rather than
-#' replacing the offset with a free log(pop) covariate. Two reasons:
-#'   (1) the coefficient then reads directly as `beta - 1`, the departure from
-#'       proportionality, so its sign and CI are interpretable without
-#'       arithmetic;
-#'   (2) `beta = 1` recovers the current model EXACTLY (the coefficient simply
-#'       goes to 0), so `fixed` and `free` runs stay comparable and the old
-#'       path is never disturbed -- the side-by-side rule.
-#'
-#' `log_pop_c` must be CENTRED WITHIN admin_level (see .add_log_pop_centred();
-#' the monthly track builds it in load_monthly_data()): uncentred, the
-#' deviation term shifts the intercept as well as the slope, and `beta = 1`
-#' would no longer reproduce the offset-only fit. That identity is what makes
-#' the two paths comparable, so the centring is load-bearing, not cosmetic.
-#'
-#' `free_by_level` is implemented and inert by default. Under corrected keys
-#' there are only two canonical levels and their (size-track) elasticities are
-#' statistically indistinguishable (ADM1 0.334 [0.219, 0.448], ADM2 0.296
-#' [0.214, 0.379]), so a single beta is the reported model. A three-level
-#' split computed on the phantom ADM3 stratum must not be quoted.
+#' Frees the population elasticity (size and monthly parts builders).
+#' `offset(log(pop))` imposes an elasticity of exactly 1. The offset is kept and
+#' a deviation term `log_pop_c` added beside it, so the coefficient reads as
+#' `beta - 1` and `beta = 1` reproduces the offset-only model. `log_pop_c` must
+#' be centred within admin_level (.add_log_pop_centred(); monthly:
+#' load_monthly_data()), or that identity breaks. `free_by_level` is
+#' implemented but not the reported model.
 #'
 #' @param cfg      the track's config block (opt$size | opt$monthly)
 #' @param blk_name "size" | "monthly" -- used only in the error message
@@ -1650,7 +1579,7 @@ build_size_formula <- function(opt, dat) {
 
 # Column-name prefixes for the two optional M-spline bases. The bases themselves
 # are built in 04_fit_dur_brms.R (splines2::mSpline) and bound onto the data
-# before the formula is assembled, exactly as 04_fit_occ_brms.R:129-134 does for
+# before the formula is assembled, exactly as 04_fit_occ_brms.R does for
 # the occurrence baseline. The builder below only NAMES them, so it stays a pure
 # function of (opt, dat) and is testable without splines2.
 .DUR_MS_PREFIX <- "msoms" # basehaz_duration = "ms", basis on mso
@@ -1835,7 +1764,7 @@ build_duration_formula_parts <- function(opt, dat) {
 #' `y = as.integer(ended)` (set by load_duration_data), family Poisson with the
 #' time offset — the Holford / Laird-Olivier equivalent of a discrete-time
 #' hazard, which is why the occurrence backend's offset apparatus transfers
-#' unchanged (04_fit_occ_brms.R:124,125,153).
+#' unchanged (04_fit_occ_brms.R).
 #'
 #' Callers that need to modify terms before assembly should call
 #' build_duration_formula_parts() directly, as 04_fit_siz_brms_cb.R does on the

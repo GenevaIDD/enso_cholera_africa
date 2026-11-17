@@ -148,7 +148,7 @@ expect(
 
 # --- [2] write: owned leaves move, nothing else changes ----------------------
 # On a copy of manuscript.yml: every owned leaf (deploy_config + the eight
-# inputs.*) carries the target deploy's value, EVERY other line is
+# inputs.*) carries the target deploy's value, every other line is
 # byte-identical (comments kept), the pre-edit copy lands under
 # generated_data/deploy/<stem>/, and comment lines still naming another run
 # are reported (a run id's letter suffix is part of the id).

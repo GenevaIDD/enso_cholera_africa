@@ -333,7 +333,7 @@ load_artefacts <- function(opt) {
     hmm_clusters_path = lf_opts$hmm_clusters_path,
     outbreak_metadata_path = lf_opts$outbreak_metadata_path,
     size_data_path = lf_opts$size_data_path,
-    # Each anchor resolves off its OWN fit's training opt (the sidecar name
+    # Each anchor resolves off its own fit's training opt (the sidecar name
     # carries the estimator + that track's own tokens), never off `opt`.
     # opt_dur/opt_mon are NULL unless those optional fits were configured, and
     # resolve_base_rate_paths() drops a NULL track -- so this is fully inert for

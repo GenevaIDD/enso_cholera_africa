@@ -135,20 +135,13 @@ make_adm1_precip_file <- function(outdir = "generated_data/") {
 # ---------------------------------------------------------------------------
 # Episode-key token (cross-track episode definition)
 # ---------------------------------------------------------------------------
-# `episodes.key` selects what ONE outbreak episode is, for all four tracks at
-# once (see utils/footprint.R::build_canonical_episodes()):
-#   lp_season   today's behaviour (DEFAULT): occurrence censors per location
-#               period and unions to gid afterwards; size/duration/monthly key
-#               on (gid, year_seas, admin_level) with first()-taken dates.
-#   gid_season  one canonical episode per (gid, year_seas): onset = earliest
-#               member TL, end = latest member TR, one geometry-derived
-#               admin_level per gid.
-# The token is "" under the default, so EVERY existing artefact name -- prep
-# frames, fits, base-rate tables -- is unchanged. Under gid_season it is
-# "_ep-gs" everywhere, so the two definitions coexist on disk instead of
-# overwriting each other (prep artefacts included: an episode key changes
-# the ROWS of a prep frame, not a policy applied to the same rows -- see the
-# note at prep_policy_stamp_path() in utils/provenance.R).
+# `episodes.key` defines one outbreak episode for all tracks
+# (footprint.R::build_canonical_episodes()):
+#   lp_season   (default) occurrence per location period, the other tracks per
+#               (gid, year_seas, admin_level).
+#   gid_season  one canonical episode per (gid, year_seas).
+# The token is "" under the default (existing names unchanged) and "_ep-gs"
+# under gid_season, prep artefacts included, so both coexist on disk.
 EPISODE_KEYS <- c("lp_season", "gid_season")
 
 #' Resolve the episode key from an opt list (config-resolved or CLI).
@@ -447,7 +440,7 @@ occ_panel_spec_of <- function(opt) {
 }
 
 # The variant tokens a filename carries after "_ep-gs" ("" when none, or when
-# the name has no "_ep-gs"): the WHOLE run of variant tokens, in grammar order,
+# the name has no "_ep-gs"): the whole run of variant tokens, in grammar order,
 # ending at "_" or ".rds".
 .OCC_PANEL_VARIANT_RE <- "_ep-gs((?:_nz[0-9]*(?:-[a-z][a-z0-9]*)?)?(?:_ae)?(?:_a1c)?)(?=_|\\.rds$)"
 .occ_panel_file_variant <- function(files) {
@@ -595,7 +588,7 @@ make_size_dat_file <- function(opt = NULL) {
 #'   baseline, no population policy and no composite policy -- nothing that
 #'   would legitimately fork the filename. The parameters that DID shape it
 #'   (`--indir` above all) are recorded in the `.policy.rds` sidecar instead,
-#'   same as the duration track (`03_prepare_dur.R:183`). Lives under
+#'   same as the duration track (`03_prepare_dur.R`). Lives under
 #'   `SECURE_OUTBREAK_DIR` (outbreak-identifying data), not `generated_data/`.
 make_monthly_cases_file <- function() {
   glue::glue("{SECURE_OUTBREAK_DIR}outbreak_monthly_cases.rds")
@@ -730,7 +723,7 @@ make_who_annual_file <- function(
 #' @details Records which (uid, location_period_id) rows fed each (gid,
 #'   year_seas, admin_level) footprint, written by `03_prepare_siz.R` alongside
 #'   the size frame. Takes no `opt` for the same reason the size frame itself
-#'   is a hardcoded literal at `03_prepare_siz.R:834` -- the two are produced
+#'   is a hardcoded literal at `03_prepare_siz.R` -- the two are produced
 #'   by one invocation and must be read as a pair, so a second naming scheme
 #'   would only let them drift apart. The pop/composite policy that shaped
 #'   both lives in the size frame's own `.policy.rds` sidecar.
@@ -863,28 +856,14 @@ make_adm1_dist_file <- function(cache_dir = "generated_data/") {
 # ---------------------------------------------------------------------------
 # Neighbour-contagion covariate naming -- single source of truth
 # ---------------------------------------------------------------------------
-# The occurrence track's distance-weighted neighbour-contagion covariate is a
-# DYNAMIC column name, nbr_lag1_r<rho>[_rn][_pg]: `_rn` is the row-normalised
-# (share-of-neighbours, bounded in [0, 1]) sibling and `_pg` the
-# partition-restricted sibling (neighbour set AND normalising denominator
-# limited to the unit's grouping partition, e.g. its ENSO group). Prep
-# (03_prepare_occ.R via spatial_contagion.R::build_contagion_table()) writes the
-# columns, the formula builder (formula.R::build_formula_terms()) selects one,
-# make_occ_run_file() below derives the artefact token, and the simulator kernels
-# (simulator_core.R::evaluate_lp(), spatpomp_core_c.R::precompute_nbr_coefs(),
-# spatial_contagion.R::resolve_nbr_spec()) recognise the fixed effect by
-# pattern. Every one of them goes through these four helpers, so the convention
-# lives in exactly one place. NULL `scale` / `partition` mean the defaults
-# ("raw" / "none"), preserving byte-identical names for every pre-existing
-# config. Call-time dependency only: callers source paths.R themselves
-# (utils/README.md dependency table).
-# partition = "registry": neighbour set and denominator limited to
-# the unit's group in an ARBITRARY registry `partition_source`, named in the
-# covariate itself as `_part<token>` (token = lower-case alphanumeric stem of
-# the registry name, config.R::grouping_label_token()), so the simulator
-# recovers the registry from the fit's fixed effect
-# (config.R::grouping_source_from_token()). `_pg` stays the fit-grouping
-# partition, byte-identical.
+# The neighbour-contagion covariate is a dynamic column name
+# nbr_lag1_r<rho>[_rn][_pg|_part<token>]: `_rn` = row-normalised share in
+# [0, 1]; `_pg` = limited to the fit grouping's partition; `_part<token>` = to
+# an arbitrary registry (token from config.R::grouping_label_token(), recovered
+# by grouping_source_from_token()). Prep, formula builder, run-file names and
+# the simulator kernels all go through these helpers, so the convention lives
+# only here. NULL scale / partition = "raw" / "none" (names unchanged).
+# Callers source paths.R themselves.
 .nbr_partition_token <- function(partition_source) {
   if (is.null(partition_source) || !nzchar(partition_source)) {
     stop(
@@ -943,7 +922,7 @@ contagion_coverage_csv_path <- function(surv_path) {
   sub("\\.rds$", ".contagion_coverage.csv", as.character(surv_path))
 }
 
-#' Inverse of nbr_covariate_name() for ONE name; NULL when it is not an nbr term.
+#' Inverse of nbr_covariate_name() for one name; NULL when it is not an nbr term.
 #' `partition_token` is the registry token of a `_part<token>` term (else NULL).
 parse_nbr_covariate <- function(name) {
   m <- regmatches(
@@ -1456,27 +1435,14 @@ make_sim_panel_extended_file <- function(opt, end) {
 # Outbreak-size scaffold
 # ============================================================================
 
-# Estimand-coherence path token.
-# `build_mean_rate_table()`/`read_size_data()` behavior depends on
-# opt$size$estimand$denominator, opt$size$pop_elasticity,
-# opt$size$canonical_admin_level, opt$size$mean_rate$level_factor, and
-# opt$size$mean_rate$cross_absent_levels, so they are encoded into every size
-# output path: otherwise two configs differing only in these fields would
-# collide on one filename, and persist_mean_rate_table()'s `if (!file.exists(path))`
-# skip would silently reuse the first config's table. Reads raw opt$size fields directly (not
-# resolve_size_estimand()) per the "modules never source() each other" rule --
-# paths.R must not depend on provenance.R's validation/defaulting logic.
-# Deployed-default config (denominator=footprint, pop_elasticity=fixed,
-# canonical_admin_level unset/FALSE, level_factor=TRUE, cross_absent_levels=TRUE)
-# resolves to "" -- bit-inert, zero path changes for every pre-existing config.
-#
-# Track-parameterised: the monthly track carries the same estimand keys
-# (`monthly.estimand`, `monthly.pop_elasticity`, `monthly.canonical_admin_level`
-# -- see `.ESTIMAND_SPEC` in utils/provenance.R). The `nolf`/`noxal` pair is
-# emitted for SIZE ONLY: those two flags live under `size$mean_rate`, whereas
-# the other three tracks carry their equivalents under `<block>$base_rate` and
-# already get them from `.base_rate_flag_token(opt, block)`. Emitting both here
-# would double-encode them into one filename.
+# Estimand-coherence path token: the size (or monthly) estimand keys
+# (denominator, pop_elasticity, canonical_admin_level, and for size mean_rate
+# level_factor / cross_absent_levels) go into every output path, so two
+# configs differing only there never share a file (the
+# persist_mean_rate_table() file.exists() skip would reuse the first table).
+# Reads raw opt fields: paths.R must not depend on provenance.R. The deployed
+# defaults give "" (names unchanged). `nolf` / `noxal` are emitted for size
+# only; the other tracks get them via .base_rate_flag_token().
 .estimand_path_token <- function(opt, block = "size") {
   blk <- opt[[block]] %||% list()
   parts <- c()
@@ -1527,30 +1493,13 @@ make_sim_panel_extended_file <- function(opt, end) {
 # every archived size artefact name.
 .size_estimand_path_token <- function(opt) .estimand_path_token(opt, "size")
 
-# Shared path builder for the baseline-rate anchor sidecars (`utils/anchor.R`).
-#
-# Every track's anchor table is GLOBAL -- built once over the whole corpus, then
-# shared by every country/group/backend config -- so its filename must carry the
-# inputs that change its CONTENT and none of the run-scoped tokens the rest of
-# this file assembles. Get that wrong in either direction and the failure is
-# silent: run-scoped tokens fragment one table into many (each a different
-# subset, none reproducible), while a missing content token makes two genuinely
-# different tables collide on one name, whereupon `persist_base_rate_table()`'s
-# `if (!file.exists(path))` skip hands the second run the first run's table.
-#
-# Content-determining inputs, in the order they appear in the name:
-#   `pre_tokens`  per-track quality guards (size: min_pop / max_attack_rate)
-#   `est-`        the estimator (geometric | arithmetic | pooled)
-#   `pop-<hash>`  the population digest -- ONLY for tracks whose denominator
-#                 contains `pop` (mon, siz). occ/dur divide by exposure days
-#                 alone, so no population can change their table and a pop token
-#                 would only invalidate their cache spuriously.
-#   `suffix`      remaining per-track flags (size: `.size_estimand_path_token()`,
-#                 which already encodes `nolf`/`noxal`; the new tracks get the
-#                 same two flags via `.base_rate_flag_token()`).
-#
-# `make_size_run_file(opt, "size_mean_rate")` delegates here and its filename is
-# byte-identical to the hand-rolled version it replaces.
+# Shared path builder for the baseline-rate anchor sidecars (utils/anchor.R).
+# Each table is GLOBAL, so its name carries only the inputs that change its
+# content, never run-scoped tokens; a missing content token lets two tables
+# collide, and persist_base_rate_table()'s file.exists() skip reuses the first.
+# Name order: `pre_tokens` (size quality guards), `est-<estimator>`,
+# `pop-<hash>` (mon / siz only: occ / dur do not divide by pop), `suffix`
+# (remaining per-track flags).
 .base_rate_path <- function(
   opt,
   stem,
@@ -1951,37 +1900,14 @@ RE_LEAF_SCOPES <- c("all", "adm2_only")
 
 #' The size track's `mean_rate` estimator, resolved once for every layer.
 #'
-#' Three places need this answer, and their fallbacks for an unset key differ:
-#'   * `make_size_run_file(opt, "size_mean_rate")` below  -> "geometric"
-#'   * `build_mean_rate_table()` (utils/provenance.R)     -> "geometric"
-#'   * `build_base_rate_table(opt, "siz")` (utils/anchor.R), which is what
-#'     `read_size_data()` actually builds the table with -> `.ANCHOR_SPEC$siz$
-#'     estimator`, i.e. "pooled".
-#'
-#' That disagreement is invisible while the key is set -- which it is for every
-#' config in the repo, because `config_defaults.yml` ships
-#' `size.mean_rate.estimator: pooled` and the merge injects the whole
-#' `mean_rate` sub-block when a config does not write one. It stops being
-#' invisible the moment a config writes a PARTIAL `mean_rate:` block (say
-#' `level_factor: false` alone): the merge replaces that sub-block wholesale
-#' rather than filling in the missing key, so `estimator` comes out genuinely
-#' NULL, the table is built `pooled`, and the path it is looked up under says
-#' `est-geometric` -- where `persist_base_rate_table()`'s `if (!file.exists(path))`
-#' skip finds the deployed geometric table and loads THAT. A silently wrong
-#' anchor on every row, not a crash.
-#'
-#' So the partial-block case is a hard error rather than a fourth guess: there
-#' is no defensible default for a config that configured this block and then
-#' left out the one field that changes every cell of the table.
-#'
-#' The no-`size`-block case keeps returning "geometric", and must. It is not a
-#' modelling default -- it is the NAME of the already-deployed sidecar, which
-#' the simulator/smoothing entry points (`07a_simulator_tasks.R:90`,
-#' `07c_simulator_postprocess.R:1818`) resolve from their own simulator `opt`,
-#' an object that has no `size:` block at all. 567 configs reach the size
-#' mean-rate path that way. Nothing is being built on that route -- it is pure
-#' path algebra against an artefact that already exists on disk -- so the
-#' estimator disagreement cannot arise there.
+#' Three callers fall back differently for an unset key:
+#' `make_size_run_file(opt, "size_mean_rate")` and `build_mean_rate_table()` to
+#' "geometric", `build_base_rate_table(opt, "siz")` to "pooled". A config with a
+#' partial `mean_rate:` block replaces the whole sub-block in the merge, leaving
+#' `estimator` NULL, so the table would be built pooled but looked up under the
+#' geometric path. That case is a hard error. With no `size` block at all
+#' (simulator / smoothing `opt`), it returns "geometric": the name of the
+#' deployed sidecar, used as path algebra only.
 #'
 #' @param opt Resolved options list (or any list; `opt$size` may be absent).
 #' @return "geometric" | "arithmetic" | "pooled"
@@ -2279,7 +2205,7 @@ make_duration_run_file <- function(
 #' keys as size (`monthly.estimand`, `monthly.pop_elasticity`,
 #' `monthly.canonical_admin_level` -- see `.ESTIMAND_SPEC` in
 #' utils/provenance.R), and those change both the fitted model and every cell
-#' of the `base_rate_mon` anchor. The token goes on BOTH the per-run artefacts
+#' of the `base_rate_mon` anchor. The token goes on both the per-run artefacts
 #' and the anchor sidecar, because each fit script early-exits on
 #' `file.exists()`: a footprint-denominated and a gid-denominated mon fit
 #' sharing one filename would not overwrite and would not error -- the second
@@ -2489,26 +2415,18 @@ make_figure_dir <- function(
 #'   (Figure 1d's rainfall tables, unkeyed).
 #' @param track Modelling track for `results_enso_relation` /
 #'   `results_report_effects` ("occurrence" | "size" | "duration" | "monthly").
-#' @param sets Character vector of ENSO analog sets, for the set-keyed
-#'   kinds. Order-insensitive: encoded via `sets_key()`'s sorted-and-hyphenated
-#'   form (`utils/results_core.R`), reproduced here so `paths.R` stays free of
-#'   cross-module dependencies.
-#' @param schema Schema-version token for this artefact
-#'   (`RESULTS_SCHEMA[[kind]]`, utils/results_core.R). Required for every file
-#'   kind: it is the ONLY invalidation channel for a change of estimand or an
-#'   added column, neither of which a modification-time comparison can see.
+#' @param sets Character vector of ENSO analog sets, for the set-keyed kinds.
+#'   Order-insensitive: encoded like `results_core.R::sets_key()` (sorted,
+#'   hyphenated), reproduced here so `paths.R` has no cross-module dependency.
+#' @param schema Schema-version token (`RESULTS_SCHEMA[[kind]]`). Required for
+#'   every file kind: the only invalidation channel for a changed estimand or
+#'   added column, which a modification time cannot see.
 #' @param config_path Passed through to `derive_config_run_tag()`.
 #' @return Character path. Path algebra only -- creates nothing.
 #' @details Resolves to `<outdir>/results/<tag>/<file>`, where
-#'   `<tag> = derive_config_run_tag(config_path)` -- the same tag
-#'   `make_figure_dir()` uses, so `analysis/configs/results/manuscript.yml`
-#'   produces `generated_data/results/manuscript/` alongside
-#'   `figures/manuscript/`.
-#'
-#'   Deliberately NOT routed through `make_run_file()`: that dispatcher
-#'   (`make_run_file()`, below) forwards only `kind` to every branch and drops
-#'   `...`, so `track`/`sets`/`schema` could not survive the hop. Callers
-#'   invoke this builder directly; nothing here needs generic dispatch.
+#'   `<tag> = derive_config_run_tag(config_path)`, the tag `make_figure_dir()`
+#'   uses. Not routed through `make_run_file()`, which drops `...` (so
+#'   `track` / `sets` / `schema` would be lost); call this builder directly.
 make_results_run_file <- function(
   opt,
   kind = c(
@@ -3002,7 +2920,7 @@ make_sim_run_file <- function(
   # Optional run_id (e.g. a timestamp set in the config) isolates partition
   # directories per invocation — prevents stale partitions from a previous
   # scope/parameter change from polluting aggregation. The merged and
-  # validation outputs are scoped by the SAME run_id so a bumped run_id never
+  # validation outputs are scoped by the same run_id so a bumped run_id never
   # silently reads stale merged/validation results from a previous invocation.
   # When absent, falls back to the flat layout for backward compat.
   run_id <- opt$simulator$run_id
@@ -3085,7 +3003,7 @@ make_smooth_run_file <- function(
 #'     \item{spatpomp_valid_dir}{07b --validate output (validation/)}
 #'   }
 #' @details For `07b_simulator_spatpomp.R`. Mirrors that script's own (manual,
-#'   hardcoded) path construction EXACTLY -- same root
+#'   hardcoded) path construction exactly -- same root
 #'   `<outdir>/sim_spatpomp/<run_tag>/`, FLAT (no run_id-scoping of
 #'   parts/merged/validation, unlike `make_sim_run_file()`'s v1 layout). This is
 #'   deliberate, not an oversight: both pre-existing real spatPomp forecast
@@ -3219,7 +3137,7 @@ partition_sentinels <- function(parts_dir, tus = NULL) {
 #'   `size_mean_rate` table (see `make_size_run_file()`'s early return): the
 #'   crosswalk is a property of the geography and the WorldPop rasters, not of
 #'   any particular fit, so every fit and every simulator run must read the
-#'   SAME artefact rather than each deriving its own. Overriding
+#'   same artefact rather than each deriving its own. Overriding
 #'   `population.crosswalk_path` / `population.gid_pop_path` in a config
 #'   bypasses this and is the supported escape hatch for a side-by-side
 #'   comparison.

@@ -274,7 +274,7 @@ expect_true(
 #          increments every month, no re-onset (tests the onset gate +
 #          update_lags() fed by `active` + mso-increment-while-active path).
 #       B) onset certain, cessation certain -> active pulses to 1 and back to
-#          0 within the SAME step every month (tests that the cessation hazard
+#          0 within the same step every month (tests that the cessation hazard
 #          reads the post-promotion mso, i.e. cessation-in-onset-month, and
 #          that update_lags() still sees `active` correctly).
 cat("\n## T2: degenerate active/mso trajectories — C-variant\n")

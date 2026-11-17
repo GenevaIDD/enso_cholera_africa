@@ -1,45 +1,32 @@
 #!/bin/bash
-# campaigns/postfit.sh — full postprocessing + figures
-# pipeline for grouped-ENSO single-lag batches of any track (brms_cb configs
-# sl-1..11 x grp-{east,horn,south,west}; the deploy config's fits.<track>_dir),
-# chained as dependent SLURM array jobs. Run this after the
-# 04_fit_run.R fitting arrays (campaigns/enso_grouped_singlelag.sh,
-# campaigns/dur_enso_grouped_singlelag.sh, campaigns/mon_enso_grouped_singlelag.sh
-# with --deploy <deploy.yml>) have completed for every config of the tracks
-# requested. The default --tracks occ runs the occurrence track only.
+# campaigns/postfit.sh — postprocessing + figures for grouped-ENSO single-lag
+# brms_cb batches of any track (the deploy's fits.<track>_dir), chained as
+# dependent SLURM arrays. Run after the fit arrays of every requested track.
 #
-# Chain, per track (each step an array job; steps 1 and 2 run in parallel,
-# step 3 waits on both via --dependency=afterok). Tracks are independent of
-# each other and are submitted back to back:
-#   1. CB postprocess   (05_fit_postprocess_cb.R)     — one task per config (44)
-#   2. LOO lag compare  (05_fit_postprocess_loo_lags.R) — one task per group (4)
-#   3. Lag-compare figs (06_fit_figures_lag_compare.R)  — one task per group (4)
-#      needs BOTH step 1 (cb_surfaces) and step 2 (the loo_compare_lags ranking
-#      under generated_data/loo_compare/<batch>/)
+# Per track (tracks submitted back to back, independent):
+#   1. CB postprocess   05_fit_postprocess_cb.R       one task per config
+#   2. LOO lag compare  05_fit_postprocess_loo_lags.R one task per group
+#   3. Lag-compare figs 06_fit_figures_lag_compare.R  one task per group,
+#                       afterok steps 1 and 2 (1 and 2 run in parallel)
 #
 # Usage (D=analysis/configs/deploy/prod_run<N>.yml):
-#   bash analysis/bash/campaigns/postfit.sh --deploy $D
 #   bash analysis/bash/campaigns/postfit.sh --deploy $D --tracks occ,dur,mon
-#   bash analysis/bash/campaigns/postfit.sh --occ-dir <dir>
 #   bash analysis/bash/campaigns/postfit.sh --tracks dur --dur-dir <dir>
-#   bash analysis/bash/campaigns/postfit.sh --deploy $D --no-redo-loo   # reuse cached per-fit loo
-#   bash analysis/bash/campaigns/postfit.sh --deploy $D --list          # print job lists, submit nothing
+#   bash analysis/bash/campaigns/postfit.sh --deploy $D --no-redo-loo --list
 #
 # Options:
-#   --deploy FILE    Deploy config; supplies the batch dirs + groups via
-#                    deploy_prod_run.R --stage resolve
-#   --tracks LIST    Comma list of tracks, from {occ,dur,mon} [default: occ]
-#                    (size is retired downstream)
-#   --occ-dir DIR    Occurrence batch config dir [default: from --deploy]
-#   --dur-dir DIR    Duration batch config dir   [default: from --deploy]
-#   --mon-dir DIR    Monthly batch config dir    [default: from --deploy]
-#                    Each requested track needs its dir, from --deploy or the flag.
-#   --groups G,...   ENSO groups      [default: from --deploy, else enso_east,enso_horn,enso_south,enso_west]
-#   Explicit --*-dir / --groups win over --deploy.
+#   --deploy FILE    Deploy config: batch dirs + groups via --stage resolve
+#   --tracks LIST    From {occ,dur,mon} [default: occ]
+#   --occ-dir / --dur-dir / --mon-dir DIR
+#                    Batch config dirs [default: from --deploy]; each requested
+#                    track needs one
+#   --groups G,...   ENSO groups [default: from --deploy, else enso_east,
+#                    enso_horn, enso_south, enso_west]
+#                    Explicit --*-dir / --groups win over --deploy.
 #   --no-redo-loo    Reuse cached per-fit LOO in step 2 (drop --redo)
-#   --format F       Figure format forwarded to step 3 [default: png]
+#   --format F       Figure format for step 3 [default: png]
 #   --concurrency K  Cap simultaneous array slots in all 3 steps [default: all]
-#   --list           Print the job lists for all 3 steps and exit (no submit)
+#   --list           Print the job lists and exit (no submit)
 
 set -euo pipefail
 

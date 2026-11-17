@@ -94,21 +94,11 @@ plan(multisession, workers = future::availableCores())
 
 # 4. Africa ISO3 filter --------------------------------------------------------
 #
-# The upstream WHO-region filter (00_ingest_outbreakextractr.R:96-99, `who_region
-# %in% c("AFR", "EMR")`) is a WHO *administrative* filter, not a continent filter:
-# WHO's EMR region spans North Africa/the Horn AND the Middle East/South Asia, so
-# non-African EMR countries (e.g. Afghanistan, Iraq, Lebanon, Pakistan, Syria,
-# Yemen) pass it and reach this script. This project models African cholera
-# outbreaks only, so we apply a genuine geographic Africa filter here (not in
-# the ingest script) -- warning loudly rather than
-# silently dropping, so a future re-ingest that pulls in more non-African EMR
-# countries doesn't go unnoticed.
-#
-# Uses the continent lookup already relied on elsewhere in the pipeline
-# (06_fit_figures.R's `.afro_sf`) rather than a hand-maintained ISO3 list --
-# this correctly keeps WHO-EMR-*administered* but geographically African
-# countries (Sudan, Somalia, Egypt, Morocco, Algeria, Libya, Tunisia, Djibouti)
-# while dropping genuinely non-African ones.
+# The upstream WHO-region filter (AFR + EMR) is administrative, not
+# geographic: EMR also holds non-African countries. Keep only geographically
+# African countries (africa_iso3_codes(), the continent lookup used elsewhere),
+# which keeps EMR-administered African countries (SDN, SOM, EGY, ...), and warn
+# loudly about what is dropped, so a re-ingest that adds more is noticed.
 africa_iso3 <- africa_iso3_codes() # utils/gid.R: giscoR Africa + the synthetic countries
 
 # 5. Load time series ----------------------------------------------------------

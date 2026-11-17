@@ -48,7 +48,7 @@ cat(
 # same unit under guard_scope = "unit" are checked by
 # test_results_af_posterior.R.
 #' Fixed-draw design of test_results_af_posterior.R, plus `shared`: groups g
-#' and h on ONE unit (u1), so the Africa total has within-unit dependence.
+#' and h on one unit (u1), so the Africa total has within-unit dependence.
 synth_af <- function(D = 49L, R = 30L, nb_size = 2, seed = 1L, shared = FALSE) {
   set.seed(seed)
   af_true <- list(g = rnorm(D, 0.45, 0.12), h = rnorm(D, 0.10, 0.05))

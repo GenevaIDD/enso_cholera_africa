@@ -66,12 +66,12 @@ option_list <- list(
     help = "Folder containing outbreak_shapefiles.gpkg [default: %default]"
   ),
   # --- gid universe source ---
-  # The centroid match below reduces every location period to ONE point, so a
+  # The centroid match below reduces every location period to one point, so a
   # composite LP (a union of K admin units, e.g.
   #   EMR::SDN::Gedaref|Gezira|Kassala|Khartoum|Blue Nile|River Nile|Red Sea
   # = 7 states) contributes exactly one gid to `u_gids`. Its other 6 members are
   # never extracted, so they have no climate row -- and make_size_data()'s
-  # inner_join (utils.R:1150-1154) then SILENTLY DROPS them once the
+  # inner_join (siz_data.R) then SILENTLY DROPS them once the
   # crosswalk starts apportioning cases to them.
   #
   # `crosswalk` unions the centroid universe with the crosswalk's member gids so
@@ -99,7 +99,7 @@ option_list <- list(
     )
   ),
   # Costing gate. dbWriteTable(..., overwrite = TRUE) below means a rerun
-  # rebuilds the WHOLE climate_stats table, not a delta -- so the cost of
+  # rebuilds the whole climate_stats table, not a delta -- so the cost of
   # switching to `crosswalk` is the full extraction, not the new gids alone.
   # This flag reports the diff and exits before doing any of it.
   make_option(
@@ -116,8 +116,9 @@ option_list <- list(
   # --- raw climate source ---------------------------------------------------
   # `csv`     : the per-country/per-variable/per-decade CSV corpus in
   #             data/climate_data/ (legacy; covers 29 countries, and its Ghana
-  #             rows are cartesian-inflated -- see utils.R:493).
-  # `parquet` : the Jahn et al. (2026) re-release of the SAME upstream product,
+  #             rows are cartesian-inflated -- see
+  #             clim_compile.R::compile_stats()).
+  # `parquet` : the Jahn et al. (2026) re-release of the same upstream product,
   #             one file per admin unit, 1981-01-01..2024-12-31, all of Africa.
   #             Fetch with analysis/bash/tools/download_jahn2026_parquet.sh.
   # `parquet` is the default (the deployed build); the CSV
@@ -153,7 +154,7 @@ option_list <- list(
     )
   ),
   # Staging targets. A rebuild is destructive (dbWriteTable(overwrite = TRUE)
-  # rebuilds the WHOLE table), so these exist to let a parquet build land in a
+  # rebuilds the whole table), so these exist to let a parquet build land in a
   # scratch database and be diffed against the live one first.
   make_option(
     "--stats_db",
@@ -399,7 +400,7 @@ n_gids_centroid <- length(u_gids)
 
 # 5a. Expand the gid universe with the crosswalk members -----------------------
 # Additive union only. `u_gids_crosswalk.rds` is written by the sibling
-# script 02_preprocess_crosswalk.R, which resolves each LP to ALL of its
+# script 02_preprocess_crosswalk.R, which resolves each LP to all of its
 # member gids by population overlap instead of to one centroid.
 if (identical(opt$gid_source, "crosswalk")) {
   if (!file.exists(opt$crosswalk_gids_path)) {
@@ -823,9 +824,9 @@ dbDisconnect(extrm_db)
     prov$weighting <- opt$weighting
     prov$parquet_dir <- opt$climate_parquet_dir
     # The CSV era's mean_cum7/max_cum7 summed value + lag1..lag6 + lag6 AGAIN
-    # (utils.R:269) -- eight terms, oldest day double counted. The parquet path
-    # uses a true 7-day trailing window, so *_cum7 values are NOT comparable
-    # across eras. This marker is the only record of that.
+    # (clim_compile.R) -- eight terms, oldest day double counted. The parquet
+    # path uses a true 7-day trailing window, so *_cum7 values are NOT
+    # comparable across eras. This marker is the only record of that.
     prov$cum7_definition <- "corrected_7day_trailing"
     prov$download_manifest <- if (file.exists(dl_manifest)) {
       readLines(dl_manifest)

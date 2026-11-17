@@ -522,25 +522,11 @@ if (!is.null(obj_c_hi)) {
 # ===========================================================================
 # T5 — Build-time regression guard (large U)
 # ===========================================================================
-# NOTE on expected build time:
-#   With the O(1) Csnippets, our generated C code is ~112
-#   lines (constant) for U=200.  However, pomp/spatPomp internally generates
-#   O(U) C wrapper boilerplate — specifically, named variable declarations for
-#   every unit state variable (e.g. u_days1, u_days2, ..., u_days200 × 7 vars
-#   = 1,400 declarations) plus all covariate aliases.  This pomp-internal O(U)
-#   cost is unavoidable at the Csnippet level and accounts for ~8 s at U=200.
-#
-#   Threshold rationale: old O(U) Csnippet code at U=200 took ~35 s.  Our
-#   current implementation takes ~8-9 s.  Threshold of 20 s catches a
-#   regression (accidentally reintroduced O(U) Csnippet) while passing for the
-#   current pomp-internal baseline.  Sub-second compilation would require
-#   patching pomp itself (out of scope).
-#
-#   The guard is on CPU time (this process + its children, i.e. the C compiler)
-#   rather than wall-clock time: under a parallel test run the elapsed time
-#   doubled (41 s seen) while the work did not, so the old elapsed-time guard
-#   failed with no regression. A reintroduced O(U) Csnippet raises the
-#   compiler's CPU time, so the 20 s threshold still catches it.
+# pomp/spatPomp itself generates O(U) C boilerplate (one declaration per unit
+# state and covariate), about 8 s at U = 200; our Csnippets are O(1). The 20 s
+# threshold catches a reintroduced O(U) Csnippet (the old code took ~35 s) while
+# passing the pomp baseline. It is on CPU time (this process and the compiler),
+# not wall-clock, so a parallel test run does not trip it.
 cat("\n## T5: build-time regression guard — U=200 C-variant build < 20 s CPU\n")
 
 fix_large <- make_fixture(

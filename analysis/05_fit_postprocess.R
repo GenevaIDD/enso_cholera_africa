@@ -150,7 +150,7 @@ if (!is.null(script_opt$batch_dir)) {
       # .compute_loo() below: before this, brms_cb fell through switch()'s
       # implicit no-match into stop("Unknown backend: brms_cb") here, which
       # tryCatch converted to a silent "Coef summary failed" warning -- no
-      # coef_summary file was ever written for ANY brms_cb config (occurrence,
+      # coef_summary file was ever written for any brms_cb config (occurrence,
       # size, duration, or monthly), across every track, until this fix.
       #
       # brms: fixef() returns Estimate / Est.Error / Q2.5 / Q97.5
@@ -245,7 +245,7 @@ process_one <- function(
   # Kind prefix: size model uses "size_fit", "size_re_stats", etc.; duration
   # uses "dur_fit", "dur_re_stats", etc.; monthly uses "mon_fit", "mon_re_stats",
   # etc. (routed by make_run_file() to make_duration_run_file() / make_monthly_run_file()
-  # -- see utils/paths.R:655-666 and make_monthly_run_file()).
+  # -- see utils/paths.R::make_run_file() and make_monthly_run_file()).
   kpfx <- if (model == "size") {
     "size_"
   } else if (model == "duration") {
@@ -277,8 +277,8 @@ process_one <- function(
   )
 
   # Duration panel (one row per active month); only needed for the duration
-  # track's RE-stats call below. Mirrors load_duration_data() as called at
-  # 04_fit_dur_brms.R:135 -- plain load, no ms-spline basis reconstruction,
+  # track's RE-stats call below. Mirrors load_duration_data() as called in
+  # 04_fit_dur_brms.R -- plain load, no ms-spline basis reconstruction,
   # since RE-stats enumeration only needs the RE grouping columns and the
   # smoke config (basehaz_duration: factor) never touches the basis columns.
   dur_dat_all <- if (model == "duration") {

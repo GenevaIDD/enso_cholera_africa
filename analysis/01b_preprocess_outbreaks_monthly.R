@@ -100,7 +100,7 @@ raw <- readRDS(ts_path) %>%
     TL = as.Date(TL),
     TR = as.Date(TR),
     sCh = as.numeric(sCh),
-    # Same uid construction as 01_preprocess_outbreaks.R:119.
+    # Same uid construction as 01_preprocess_outbreaks.R section 6.
     uid = str_c(location, "-", outbreak_number)
   ) %>%
   filter_africa(africa_iso3, "01b/outbreak-intervals")
@@ -155,30 +155,14 @@ cat("     intervals kept:", nrow(intervals), "\n")
 
 # 4. Apportion each interval's cases across the months it overlaps -------------
 #
-# Reporting intervals are sub-weekly and straddle month boundaries, so an
-# interval's `sCh` is split across the months it overlaps in proportion to
-# day-overlap. The weights are normalised WITHIN each interval
-# (w = overlap / sum(overlap)), not against the interval's nominal length, which
-# makes conservation of cases algebraic rather than approximate and makes
-# .expand_active_months()'s inclusive "+1 day" convention irrelevant to the
-# split.
-#
-# `sCh` is already fractional upstream: 19.1% of episode totals in
-# outbreak_metadata.rds are non-integer, with denominators of 2, 3, 4 and 6 --
-# the signature of multi-period aggregate reports already divided evenly across
-# their constituent intervals by OutbreakExtractR. Monthly aggregation is
-# therefore legitimate, but for those episodes the monthly profile is partly an
-# artefact of that upstream split rather than observed epidemiology. The
-# `cases_straddling_frac` column below flags where the boundary split of THIS
-# script contributed; the upstream split is not separable here and is a
-# documented caveat, not something this script can undo.
-#
-# .expand_active_months() (utils/dur_data.R:236-265) is reused verbatim: it is
-# fully vectorised, needs only (episode_id, TL, TR), and already implements the
-# day-overlap arithmetic with the project's inclusive "+1 day" convention. Handing
-# it interval_id AS episode_id keeps that arithmetic single-sourced with the
-# duration track instead of forking a second copy here. Its `mso` / `n_months`
-# outputs are meaningless at interval grain and are dropped.
+# An interval's `sCh` is split across the months it overlaps by day overlap,
+# w = overlap / sum(overlap) within the interval, so cases are conserved
+# exactly. Upstream `sCh` is already fractional (OutbreakExtractR splits
+# multi-period reports evenly), so part of a monthly profile can be an artefact
+# of that split; `cases_straddling_frac` flags only this script's split.
+# The day-overlap arithmetic reuses dur_data.R::.expand_active_months() with
+# interval_id as episode_id (single source with the duration track); its
+# `mso` / `n_months` outputs are meaningless here and dropped.
 
 month_parts <- .expand_active_months(
   tibble(
@@ -222,23 +206,12 @@ apportioned <- month_parts %>%
 
 # 5. Collapse to (uid, location_period_id, month) ------------------------------
 #
-# The key is (uid, location_period_id, month), NOT (uid, month). On the
-# current corpus six `uid`s carry two `location_period_id`s each -- 01's
-# grouping is by (uid, location, location_period_id, country), so one uid
-# observed under two location periods yields two episodes. All six pairs
-# overlap in calendar months (e.g. AFR::UGA::Kotido-1 runs 2010-05-03..07-18
-# under lp 16743 and 2010-07-19..08-29 under lp 6454, both active in July
-# 2010). Keying on (uid, month) would not fan the join out -- a row-count gate
-# would pass -- but it would hand the same month's cases to two different
-# episodes, and even a uid-level conservation check would still pass. Silent
-# double counting. Measured on the duration panel: 3 duplicated (uid, month),
-# 0 duplicated (uid, location_period_id, month).
-#
-# `obs_days` is the number of days in the month actually covered by a reporting
-# interval. It is NOT the duration panel's `exposure`, which counts calendar days
-# between TL = min and TR = max and therefore silently includes months in which
-# nothing was reported at all (the raw intervals can have holes). Carrying both
-# lets the fit choose an honest denominator and lets us measure the gap.
+# Key on (uid, location_period_id, month), NOT (uid, month): one uid can carry
+# two location periods that overlap in calendar months, and keying on uid
+# alone would hand the same month's cases to two episodes without failing any
+# row-count or conservation check.
+# `obs_days` = days of the month covered by a reporting interval; unlike the
+# duration panel's `exposure` (TL..TR) it excludes reporting holes.
 
 monthly <- apportioned %>%
   group_by(uid, location, location_period_id, country, month) %>%
@@ -254,7 +227,7 @@ monthly <- apportioned %>%
     .groups = "drop"
   )
 
-# Admin level, derived exactly as 01_preprocess_outbreaks.R:127-132 (including
+# Admin level, derived exactly as 01_preprocess_outbreaks.R section 5 (including
 # the TZA::Mainland shift-down). Computed on distinct locations and joined back:
 # taxdat::get_admin_level() is a per-string call and there are ~2.6k locations
 # against ~50k intervals.
@@ -310,7 +283,7 @@ if (!gC) {
   stop("01b: gate C failed -- output key is not unique or values are invalid.")
 }
 
-# A. The apportionment conserves cases, per (uid, lp), against the SAME frame it
+# A. The apportionment conserves cases, per (uid, lp), against the same frame it
 # was computed from. This isolates the month-split from any filter difference.
 recon_a <- monthly %>%
   group_by(uid, location_period_id) %>%
@@ -468,7 +441,7 @@ message(sprintf(
 # Policy sidecar. The artefact name is a constant (make_monthly_cases_file() takes
 # no opt), so --indir and the tolerance would otherwise leave no trace at all --
 # and --indir is exactly the parameter that silently changes the contents. Same
-# pattern and reasoning as 03_prepare_dur.R:183.
+# pattern and reasoning as the 03_prepare_dur.R policy sidecar.
 persist_prep_policy_stamp(
   OUT_PATH,
   prep_policy_stamp(

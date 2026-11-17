@@ -26,46 +26,21 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-# WHAT THIS BUILDS
-# ----------------
-# H[l, g, t] = UN-adjusted WorldPop mass inside the intersection of location
-# period geometry G_l and GADM polygon A_g, in year t. Everything downstream
-# is algebra on H:
-#
-#   P_l       = sum_g H[l,g]      LP population   — denominator of an OBSERVATION
-#   Q_g       = extraction over A_g   canonical gid population
-#                                 — denominator of a FORECAST UNIT
-#   w[l->g]   = H[l,g] / P_l      share of LP l's people in gid g (sums to 1)
-#   c[g<-l]   = H[l,g] / Q_g      share of gid g covered by LP l
-#   gid_cover = max_g w[l->g]     1 for a clean LP, ~1/K for a K-way composite
-#   n_gid_eff = 1 / sum_g w^2     inverse-Simpson composite index
-#
-# P_direct is an INDEPENDENT extraction over the whole LP geometry, never
-# sum_g H. That makes `P_l == P_direct` a real reconciliation test rather than
-# a tautology, and it is the main QC signal for the geometry handling below.
-#
-# WHY IT EXISTS
-# -------------
-# `pop` is a property of the upstream location period; everything downstream is
-# keyed by GADM gid. The bridge (analysis/02_preprocess_climate.R:72-106) is a
-# centroid join, so a composite LP — one report covering e.g. 7 Sudanese states
-# — is a MULTIPOLYGON with ONE centroid: all 7 states' cases and all 7 states'
-# population land on one arbitrary ADM1 gid and the siblings get nothing.
-#
-# Note a free consequence: an LP whose crosswalk spreads mass over more than one
-# gid IS a composite, by construction. No string parsing, and no reliance on the
-# upstream `composite_loc` column (backfilled FALSE at
-# analysis/00_ingest_outbreakextractr.R:137-139, so it detects nothing).
-#
-# ONE RASTER LOAD PER TASK
-# ------------------------
-# OutbreakExtractR::estimate_pop_for_geometries() loads the raster internally,
-# so calling it once per geometry class would load a 0.5-1 GB raster four times.
-# Instead every geometry — GADM ADM1, GADM ADM2, whole LPs, LP x GADM pieces —
-# is concatenated into ONE sf with a `role` column and extracted in a single
-# call, then split apart by role. The adjustment factor is applied uniformly per
-# (country, year) inside that call, so it is consistent across roles and
-# CANCELS EXACTLY in w[l->g] — the shares are adjustment-invariant.
+# H[l, g, t] = UN-adjusted WorldPop mass in the intersection of location
+# period geometry G_l and GADM polygon A_g, in year t. Downstream is algebra
+# on H:
+#   P_l       = sum_g H[l,g]    LP population (denominator of an observation)
+#   Q_g       = extraction over A_g, gid population (forecast unit)
+#   w[l->g]   = H[l,g] / P_l    share of LP l's people in gid g (sums to 1)
+#   c[g<-l]   = H[l,g] / Q_g    share of gid g covered by LP l
+#   gid_cover = max_g w[l->g]   1 for a clean LP, ~1/K for a K-way composite
+#   n_gid_eff = 1 / sum_g w^2   inverse-Simpson composite index
+# P_direct is extracted independently over the whole LP geometry, so
+# P_l == P_direct is a real reconciliation check (the main geometry QC).
+# An LP whose mass spreads over more than one gid is a composite by
+# construction: no string parsing, no upstream `composite_loc`.
+# All geometry roles go into one extraction call (one raster load per task);
+# the per-(country, year) adjustment factor cancels in w[l->g].
 #
 # Geometry roles concatenated into the single extraction call.
 POP_ROLES <- c("gadm1", "gadm2", "lp_whole", "lp_piece")
@@ -143,11 +118,11 @@ wpp_national_total <- function(wpp, iso3, year) {
 #' Sanitize an sfc for extraction.
 #'
 #' estimate_pop_for_geometries() SILENTLY DROPS non-dimension-2 geometries
-#' (R/add_population.R:485-491), leaving NA for that row — which for a crosswalk
-#' piece is invisible mass loss, not a visible failure. st_intersection() of two
-#' polygon layers routinely yields GEOMETRYCOLLECTIONs containing stray points
-#' and lines along shared edges, so this must run before the extraction, not
-#' after.
+#' (OutbreakExtractR add_population.R), leaving NA for that row — which for a
+#' crosswalk piece is invisible mass loss, not a visible failure.
+#' st_intersection() of two polygon layers routinely yields GEOMETRYCOLLECTIONs
+#' containing stray points and lines along shared edges, so this must run before
+#' the extraction, not after.
 #'
 #' @param g sfc
 #' @return list(geom = sfc, repair = character vector, empty = logical vector)
@@ -207,16 +182,16 @@ count_geom_parts <- function(g) {
 }
 
 #' Planimetric-free area in km^2, matching the convention already used for
-#' `area_per_1km2` at analysis/00_ingest_outbreakextractr.R:238.
+#' `area_per_1km2` in analysis/00_ingest_outbreakextractr.R.
 geom_area_km2 <- function(g) {
   suppressWarnings(as.numeric(sf::st_area(sf::st_geometry(g))) / 1e6)
 }
 
 #' Load the GADM ADM1 + ADM2 units of one country as a single long sf.
 #'
-#' Reads the same validated GPKG that analysis/02_preprocess_climate.R:52-68 uses,
-#' so the gids produced here are exactly the gids the climate panel and the
-#' simulator frame are keyed by.
+#' Reads the same validated GPKG that analysis/02_preprocess_climate.R section 4
+#' uses, so the gids produced here are exactly the gids the climate panel and
+#' the simulator frame are keyed by.
 #'
 #' Each layer is read with an SQL filter on GID_0, so a task reads one country's
 #' units instead of the whole continent; `ORDER BY rowid` keeps the order of a
@@ -270,7 +245,8 @@ load_gadm_units <- function(gadm_path, iso3, levels = c("ADM1", "ADM2")) {
   do.call(rbind, unname(out))
 }
 
-#' Load LP geometries as written by analysis/00_ingest_outbreakextractr.R:267.
+#' Load LP geometries as written by analysis/00_ingest_outbreakextractr.R
+#' section 7.
 #' @return sf with column lctn_pr
 load_lp_geometries <- function(lp_path) {
   stopifnot(file.exists(lp_path))
@@ -417,24 +393,25 @@ build_crosswalk_pieces <- function(lp_sf, gadm_sf) {
 # `adj_factor` cannot be recovered:
 # estimate_pop_for_geometries() computes it internally and returns only the
 # adjusted numbers, and band_adj_factor() (OutbreakExtractR
-# R/get_country_boundary.R:105-120) is identity on [0.5, 2.0] and 1.0 outside,
+# R/get_country_boundary.R) is identity on [0.5, 2.0] and 1.0 outside,
 # so the adjusted national total alone does not identify it. Two substitutes,
 # both strictly better for the failure mode that matters:
 #   1. a HARD precondition that the boundary cache file exists — this is the
 #      exact detector for get_country_boundary() returning NULL, which SILENTLY
-#      SKIPS the UN adjustment (R/get_country_boundary.R:73) rather than failing;
+#      SKIPS the UN adjustment (OutbreakExtractR get_country_boundary.R) rather
+#      than failing;
 #   2. `natl_ratio` = sum(Q_g over ADM1) / WPP2024 national total, which is free
 #      because the ADM1 polygons tile the country and are extracted anyway.
 
 #' Assert the national-boundary cache entry exists.
 #'
-#' get_country_boundary() (OutbreakExtractR R/get_country_boundary.R:28-87)
+#' get_country_boundary() (OutbreakExtractR R/get_country_boundary.R)
 #' falls back to NULL when the disk cache misses and rgeoboundaries fails, and
 #' estimate_pop_for_geometries() then treats NULL as "skip the UN adjustment"
-#' (:466-474) rather than as an error. Every number in the run would look
-#' plausible and be systematically wrong by the adjustment factor. Fail loudly
-#' instead: the boundary cache must be built (on a node with internet) before
-#' any array is submitted.
+#' (OutbreakExtractR add_population.R) rather than as an error. Every number in
+#' the run would look plausible and be systematically wrong by the adjustment
+#' factor. Fail loudly instead: the boundary cache must be built (on a node with
+#' internet) before any array is submitted.
 assert_boundary_cached <- function(iso3, boundary_cache_dir) {
   f <- file.path(boundary_cache_dir, paste0(toupper(iso3), "_adm0.geojson"))
   if (!file.exists(f)) {
@@ -536,7 +513,7 @@ run_population_task <- function(
 #' names = years, of gid_pop tibbles as returned here); a year found there
 #' extracts the LP roles only, and with no LP in the country no extraction runs
 #' at all. The UN adjustment factor is computed from the country boundary and
-#' the year alone (OutbreakExtractR R/add_population.R:465-479), so dropping
+#' the year alone (OutbreakExtractR R/add_population.R), so dropping
 #' the GADM roles from the call does not move the LP values.
 #'
 #' @param years         extraction years
@@ -827,8 +804,9 @@ run_population_country_task <- function(
     )
   }
   # An all-NA return means the raster never loaded (the download-failure branch
-  # at R/add_population.R:453-461 only `message()`s and moves on). Coalescing
-  # piece-level NA to 0 below is only sound once that is ruled out here.
+  # in OutbreakExtractR add_population.R only `message()`s and moves on).
+  # Coalescing piece-level NA to 0 below is only sound once that is ruled out
+  # here.
   if (all(is.na(extracted))) {
     stop(
       caller,
@@ -921,9 +899,9 @@ run_population_country_task <- function(
       gid_iso3 = pieces$gid_iso3,
       year = year,
       # Zero-to-NA is right for a whole LP ("zero is never a population",
-      # R/add_population.R:508-510) but wrong for a PIECE: a genuinely empty
-      # sliver of an otherwise populated LP contributes 0, and leaving it NA
-      # would break the additivity sum_g H == P_direct. Safe only because the
+      # OutbreakExtractR add_population.R) but wrong for a PIECE: a genuinely
+      # empty sliver of an otherwise populated LP contributes 0, and leaving it
+      # NA would break the additivity sum_g H == P_direct. Safe only because the
       # all-NA raster-failure case is hard-errored above.
       H = dplyr::coalesce(as.numeric(by_role$lp_piece), 0),
       piece_area_km2 = geom_area_km2(pieces),
@@ -1218,69 +1196,23 @@ compute_gid_cover <- function(crosswalk, cover_threshold = 0.90) {
 
 #' Derive each LP's GADM tiling depth from its own geometry.
 #'
-#' WHY THIS EXISTS. The outbreak corpus's `admin_level` string is NOT GADM's
-#' admin depth: Malawi's corpus "ADM2" is a district, which GADM calls ADM1,
-#' and GADM's ADM2 is the Traditional Authority. A district read at the ADM2
-#' tiling shatters into 8-25 sub-units, so `gid_cover` would measure
-#' WITHIN-DISTRICT POPULATION CONCENTRATION instead of compositeness, the
-#' dominance test would declare an ordinary district a composite and
-#' `--composite_policy drop_collapse` would delete it (256 of 1410 corpus LPs).
-#'
-#' THE RULE. Two criteria, deliberately kept separate — they are exactly what
-#' got conflated:
-#'
-#'   POPULATION DOMINANCE decides which levels are ADMISSIBLE.
-#'     Level L is admissible iff pcov_L = max_g w[l->g] >= cover_threshold,
-#'     i.e. a single GADM unit at L owns the LP.
-#'   AREA decides which admissible level best REPRESENTS the LP.
-#'     Among admissible levels, `tiebreak` picks between them (see below).
-#'
-#' If no level is admissible the LP is a genuine multi-unit aggregate: it is
-#' read at ADM1 (the coarsest tiling, where dominance is maximal) and the
-#' dominance test downstream will correctly call it composite.
-#'
-#' TWO REJECTED ALTERNATIVES, recorded so they are not re-tried:
-#'   - "finest admissible level" wrongly flags 54 LPs that lie entirely inside
-#'     one ADM1 (pcov_ADM1 = 1.0) but split ~88/12 across two ADM2s; refining
-#'     the tiling can only ever MANUFACTURE compositeness.
-#'   - "coarsest covering level" over-coarsens every genuine sub-ADM1 city LP up
-#'     to its whole province.
-#'
-#' NO MONOTONICITY ASSUMPTION. pcov_ADM1 >= pcov_ADM2 does NOT hold in general
-#' (1188 of 76144 LP-years violate it) because GADM ADM2 does not nest exactly
-#' inside ADM1 and `drop_sliver_pieces()` runs independently per level. The rule
-#' above compares levels explicitly rather than assuming an ordering.
-#'
-#' STABILITY. The per-year statistics move as population is redistributed, which
-#' flips the level for 23 of 4760 LPs across the 2015-2030 span. Reading one LP
-#' at two tilings in two years would double-count its pieces, so the decision is
-#' taken ONCE per LP from the MEDIAN cover across years.
-#'
-#' TIEBREAK MODES between two admissible levels, kept side-by-side (no
-#' deprecation) via the `tiebreak` argument:
-#'
-#'   "strict" (function default): pick the larger
-#'     of acov_ADM1 / acov_ADM2; ties go to ADM2, the finer level. Measured on
-#'     the 3489 both-admissible LPs in the Aug-2026 corpus this is
-#'     STRUCTURALLY biased toward ADM1: acov_ADM2 - acov_ADM1 is <= 0 for 95%
-#'     of cases (ADM2's own concentration ratio is mechanically harder to push
-#'     high, since it has more, smaller member pieces), so 75.6% of ties
-#'     resolve to ADM1 even when acov_ADM2 itself is very high (the diagnostic
-#'     histogram shows a ~500-LP spike at acov_ADM2 in [0.95, 1.0] that still
-#'     loses to ADM1 under "strict").
-#'   "tolerant": a two-tier rule that corrects that bias by trusting a high
-#'     acov_ADM2 on its own merits before ever comparing it to ADM1:
-#'       1. acov_ADM2 > tiebreak_floor        -> ADM2 outright, no comparison.
-#'       2. else acov_ADM2 - acov_ADM1 > -tiebreak_tol -> ADM2 (doesn't trail
-#'          ADM1 by more than tiebreak_tol).
-#'       3. else -> ADM1.
-#'     Defaults (tiebreak_floor = 0.80, tiebreak_tol = 0.10) are a manual pick,
-#'     not derived from a natural break in the data — the gap histogram is
-#'     unimodal with no gap to read a threshold off (same note as above).
-#'     Emits distinct lp_level_reason values so a downstream reader can tell
-#'     which tier fired: "both_admissible_acov_floor" (tier 1),
-#'     "both_admissible_area_tiebreak_tolerant" (tier 2, ADM2),
-#'     "both_admissible_area_tiebreak_adm1" (tier 2 fallthrough, ADM1).
+#' The corpus `admin_level` string is not GADM's admin depth (a corpus "ADM2"
+#' can be a GADM ADM1), so the level is derived per LP:
+#'   - population dominance decides which levels are admissible: level L is
+#'     admissible iff pcov_L = max_g w[l->g] >= cover_threshold;
+#'   - area decides which admissible level represents the LP (`tiebreak`);
+#'   - if no level is admissible the LP is read at ADM1 and the downstream
+#'     dominance test calls it composite.
+#' Levels are compared explicitly (pcov_ADM1 >= pcov_ADM2 does not always
+#' hold), and the decision is taken once per LP from the median cover across
+#' years, so one LP is never read at two tilings.
+#' Tiebreak modes:
+#'   "strict" (default): the larger of acov_ADM1 / acov_ADM2; ties go to ADM2.
+#'   "tolerant": ADM2 if acov_ADM2 > tiebreak_floor, else ADM2 if
+#'     acov_ADM2 - acov_ADM1 > -tiebreak_tol, else ADM1. Each tier writes its
+#'     own lp_level_reason ("both_admissible_acov_floor",
+#'     "both_admissible_area_tiebreak_tolerant",
+#'     "both_admissible_area_tiebreak_adm1").
 #'
 #' @param crosswalk bound crosswalk rows (lctn_pr, gid, gadm_level, year, H,
 #'   piece_area_km2).
@@ -1506,7 +1438,7 @@ reconcile_crosswalk <- function(crosswalk, lp_pop, tol = 0.01) {
 #' from data already on disk: two LPs with genuinely distinct polygons do not,
 #' by chance, produce the exact same (gid, H) set in every extracted year --
 #' when they do, the crosswalk is repeating one polygon's mass under two (or
-#' more) location_period_ids, and BOTH would independently claim the full
+#' more) location_period_ids, and both would independently claim the full
 #' population as their own denominator/composite split.
 #'
 #' Detect-and-quarantine, not a correction: there is no principled way to

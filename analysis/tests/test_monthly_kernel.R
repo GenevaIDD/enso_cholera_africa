@@ -112,7 +112,7 @@ if (!requireNamespace("dlnm", quietly = TRUE)) {
   }
 
   # 2) Clamping actually clamps: .inject_mso() with an out-of-range mso index
-  #    returns the SAME row as the training-boundary index (not a fresh
+  #    returns the same row as the training-boundary index (not a fresh
   #    extrapolation) -- and a positive control shows what an *unclamped*
   #    direct onebasis() evaluation at that same out-of-range x would have
   #    given, to prove the clamp is suppressing a real divergence, not a

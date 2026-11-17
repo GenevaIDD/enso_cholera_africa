@@ -388,7 +388,7 @@ cat("=====================================================\n\n")
 
 DUR_DAT_PATH <- make_duration_dat_file(opt = opt)
 
-# Policy sidecar. Mirrors 03_prepare_occ.R:804 -- the artefact name is a
+# Policy sidecar. Mirrors the 03_prepare_occ.R one -- the artefact name is a
 # function of the baseline alone, so the parameters that shaped it (censoring
 # tolerance above all) would otherwise leave no trace. The duration track has no
 # population denominator, hence pop_digest = NA. The population / composite /

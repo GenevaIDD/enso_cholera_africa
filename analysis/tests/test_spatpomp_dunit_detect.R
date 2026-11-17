@@ -29,23 +29,15 @@ source("analysis/tests/helpers.R") # expect/fail/expect_true/expect_equal
 
 cat("# test_spatpomp_dunit_detect — detection-error dunit family\n\n")
 
-# Why the detect family exists: the eps "state-conditioning" dunit Csnippets
-# score the onset match with a single near-delta epsilon (.SP_MEAS_EPS =
-# 1e-6). That eps has to be that extreme only because it is silently
-# overriding the PROCESS-level mismatch rate implied by the fitted occurrence
-# hazard `p` itself -- it conflates aleatory Bernoulli disagreement with
-# genuine surveillance detection error, and does almost none of the latter's
-# nominal job. The `*_state_detect` siblings use instead an explicit
-# two-parameter confusion-matrix likelihood
-#
-#     P(obs_Y = 1 | Yout = 1) = 1 - delta_fn      P(obs_Y = 1 | Yout = 0) = delta_fp
-#
-# decoupled from `p`. Because delta_fn/delta_fp are per-run CONFIG parameters,
-# the detect Csnippets cannot be pre-built at module load: they are constructed
-# at dispatch time inside build_spatpomp_tu_c() from
-# .sp_onset_detect_c(delta_fn, delta_fp) spliced into the family's template.
-# The mon track's detect sibling (built on the _ACTPEN template) is the only
-# count-scoring one.
+# The eps state-conditioning dunit Csnippets score the onset match with a
+# near-delta epsilon (.SP_MEAS_EPS = 1e-6), which overrides the mismatch rate
+# implied by the hazard `p`. The `*_state_detect` siblings use an explicit
+# confusion-matrix likelihood, decoupled from `p`:
+#   P(obs_Y = 1 | Yout = 1) = 1 - delta_fn
+#   P(obs_Y = 1 | Yout = 0) = delta_fp
+# delta_fn/delta_fp are per-run config, so these Csnippets are built at
+# dispatch time in build_spatpomp_tu_c() from .sp_onset_detect_c(). The mon
+# detect sibling (on the _ACTPEN template) is the only count-scoring one.
 GOLDEN_PATH <- "analysis/tests/golden/spatpomp_dunit_golden.rds"
 
 # ---------------------------------------------------------------------------

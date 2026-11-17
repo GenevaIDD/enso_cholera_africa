@@ -499,20 +499,14 @@ sim_io_read <- function(path, fmt, expand = TRUE) {
 # ---------------------------------------------------------------------------
 # Compact monthly summary (format 2)
 # ---------------------------------------------------------------------------
-# simulate_one_tu()'s monthly_summary is the dense replicate x gid x month grid
-# (replicate slowest, month fastest) with one row per cell: ~94% of the rows
-# are an inactive cell (Y = active = detected = 0, mu_mon = cases_month = NA),
-# and gid / month are character columns repeated on every row. Format 2 stores
-# the grid's three axes once and each value column sparsely: the cells where it
-# differs from its default (0 for integers, NA for doubles), as
-# diff-encoded cell indices plus values, or as values on the cells of an
-# earlier column ("ref": mu_mon / cases_month on the active cells). Same file
-# name; sim_io_read() expands it to the identical long table, so every reader
-# of the long table is unchanged. Readers that need only a few cells
-# (results_core.R::load_sim_run_monthly()) read sim_monthly_cells() instead.
-# A table that is not a dense grid (or does not survive the round trip) is
-# written in the long format. Merged files (aggregate_partitions()) hold one
-# block per partition. Gate: tests/test_sim_monthly_compact.R.
+# simulate_one_tu()'s monthly_summary is a dense replicate x gid x month grid
+# of mostly inactive cells. Format 2 stores the three axes once and each value
+# column sparsely: the cells that differ from the default (0 for integers, NA
+# for doubles), or values on the cells of an earlier column ("ref"). Same file
+# name; sim_io_read() expands it to the identical long table. Few-cell readers
+# (results_core.R::load_sim_run_monthly()) use sim_monthly_cells(). A table
+# that is not a dense grid, or fails the round trip, is written long. Merged
+# files hold one block per partition. Gate: tests/test_sim_monthly_compact.R.
 
 SIM_MONTHLY_FORMAT <- "sim_monthly_compact"
 SIM_MONTHLY_VERSION <- 2L
@@ -1015,26 +1009,15 @@ write_task_yamls <- function(plan, tasks_dir) {
 # ---------------------------------------------------------------------------
 # build_obs_panel — the filter's observation panel, one row per (gid, month)
 # ---------------------------------------------------------------------------
-# Single definition of the observed panel consumed by the bpfilter (smoothing
-# 08 and forecast 07b) and by the observed-side aggregations (08c, 09). It
-# replaces four verbatim copies of the same
-#   select(gid, t_start, outbreak) -> obs_Y = max(outbreak) per (gid, t_start)
-# block, so the four can never drift.
-#
-# With `mon_dat` (03_prepare_mon.R's outbreaks_monthly_data_*.rds) it adds the
-# per-month observed case count `cases_month`, aggregated with the filter's own
-# footprint rule (spatpomp_core.R::.aggregate_footprint_counts(), call-time
-# dependency -- only reached when `mon_dat` is supplied). `cases_gap` months
-# (reported, unquantified) stay NA. Episode months AFTER the onset month carry
-# no survival-panel row (the survival construction censors them), so they
-# appear here with obs_Y = NA and an observed `cases_month`: the activity
-# measurement scores them, the onset term skips them.
-#
-# `zero_fill = TRUE` writes cases_month = 0 at every NON-ONSET survival-panel
-# row (obs_Y == 0) with no monthly case row -- evidence that no >=50-case episode was running that
-# month (the ingest size filter), which is what lets the filter penalise a
-# latent episode that never ceases. Coverage-agnostic by design: "observed"
-# means "has a survival-panel row".
+# The one observed panel read by the bpfilter (08 smoothing, 07b forecast)
+# and the observed-side aggregations (08c, 09):
+#   obs_Y = max(outbreak) per (gid, t_start).
+# With `mon_dat`, adds `cases_month`, aggregated with the filter's footprint
+# rule (spatpomp_core.R::.aggregate_footprint_counts(), call-time dependency).
+# `cases_gap` months stay NA. Episode months after onset have no survival
+# row, so they carry obs_Y = NA and an observed `cases_month`.
+# `zero_fill = TRUE` writes cases_month = 0 at every non-onset survival row
+# with no monthly case row ("observed" = has a survival-panel row).
 #
 # @param surv_dat  survival panel (gid, t_start, outbreak).
 # @param mon_dat   NULL, or the monthly case frame (gid, month, cases_month,
@@ -1208,16 +1191,11 @@ aggregate_partitions <- function(
 # ---------------------------------------------------------------------------
 # combine_group_runs
 #
-# Merge the per-group aggregated outputs (each `merged/` produced by a per-group
-# forecast run + `--aggregate`) into a single full-Africa dataset, TRUNCATED to
-# `cutoff_month` (= africa_min_horizon = min over groups of each group's
-# horizon). Group runs that reach further are cut back to the last month every
-# group still covers, so the Africa total is defined on a common horizon.
-#
+# Merge the per-group `merged/` outputs into one full-Africa dataset, cut to
+# `cutoff_month` (africa_min_horizon: the last month every group covers).
 #   group_merged_dirs : named list group -> merged/ directory
-#   combined_dir      : output directory for the combined event_table +
-#                       monthly_summary
-#   cutoff_month      : last month to keep (inclusive), Date or "YYYY-MM-DD"
+#   combined_dir      : output directory (event_table + monthly_summary)
+#   cutoff_month      : last month kept (inclusive), Date or "YYYY-MM-DD"
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Per-country censoring + manifest v2 readers
@@ -1606,7 +1584,7 @@ assert_panel_covers_horizon <- function(panel, end, label) {
 #' (horizon_end_g = this month + the group's minimum deployed lag): every
 #' continuation lead past a firm horizon is counted from it. A manifest with
 #' `firm_oni_end` (the last full ONI month) uses it; older manifests
-#' tie the horizons to `last_cfsv2_month`. The ONE accessor for it: never read
+#' tie the horizons to `last_cfsv2_month`. The one accessor for it: never read
 #' `last_cfsv2_month` directly for leads or horizons.
 #' @return character "YYYY-MM-DD" (NULL when the manifest has neither)
 manifest_last_firm_oni <- function(man) {

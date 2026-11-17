@@ -182,23 +182,12 @@ message(sprintf(
 ))
 
 # 5. Per-group extraction ------------------------------------------------------
-# For each ENSO group's ranking:
-#   1. Selects the best lag via the shared rule (analysis/utils/loo_lags.R),
-#      ALWAYS with the occurrence floor disabled
-#      (select_best_lag(..., enforce_occ_floor = FALSE)) — i.e. the plain
-#      max-single_lag-within-se_mult-SEs-of-rank-1 pick, regardless of track.
-#      This is a no-op for the occurrence track (which has no floor concept)
-#      and, for size/duration/monthly, ignores the occurrence-lag constraint.
-#   2. Loads that lag's brms_cb fit + cb_meta for the "enso" variable.
-#   3. Extracts the exposure-response surface at that lag:
-#        - overall    (population-level; dlnm::crosspred() via extract_cb_surface())
-#        - by_country (population draws + country RE draws, restricted to the
-#          group's member countries; extract_cb_country_surface(), shared with
-#          06_fit_figures_lag_compare.R's country-ERF-by-lag figure)
-#      Two exposure grids are evaluated for each:
-#        - full_surface — n_at equally-spaced points over the variable's range
-#        - nina_nino    — exactly ENSO = -2, -1 (nina) and +1, +2 (nino),
-#          recomputed directly (not interpolated off the full grid)
+# Per ENSO group: pick the lag by the shared rule with the occurrence floor
+# off (select_best_lag(..., enforce_occ_floor = FALSE)), load that lag's
+# brms_cb fit + cb_meta, and extract the ERF overall (extract_cb_surface())
+# and by member country (extract_cb_country_surface(), shared with 06). Two
+# grids: full_surface (n_at points over the range) and nina_nino (ENSO = -2,
+# -1, +1, +2, computed directly, not interpolated).
 
 out <- list()
 

@@ -165,7 +165,7 @@ dur_dat <- load_duration_data(opt)
 ep_rec <- attr(dur_dat, "episode_stamp")
 
 # Anchor sidecar (utils/anchor.R) -- the duration analogue of
-# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms_cb.R:110). Gated on
+# `persist_mean_rate_table(opt, size_dat)` (04_fit_siz_brms_cb.R). Gated on
 # duration.offset_baserate, so it is inert for every config that predates it.
 if (anchor_enabled(opt, "dur")) {
   persist_base_rate_table(opt, "dur", dur_dat)
@@ -228,23 +228,11 @@ if (identical(dur_cfg$basehaz_poisson %||% "none", "ms")) {
 }
 
 # 6. Crossbasis predictors -----------------------------------------------------
-# The only difference from 04_fit_dur_brms.R: one or more covariates enter as
-# a dlnm::crossbasis() (distributed-lag, non-linear in both exposure and lag)
-# or dlnm::onebasis() (single-lag, non-linear in exposure only) instead of a
-# plain linear term. Typical use: duration.dlnm.variables.enso with
-# single_lag: <N> to test a NON-LINEAR effect of ENSO at a fixed lag, as a
-# counterpart to the linear enso_lag<N> fixed effect fit by 04_fit_dur_brms.R.
-#
-# Lag matrices (distributed-lag mode) are read from pre-computed
-# <var>_lag1 … <var>_lag{max_lag} columns; single-lag mode reads the single
-# pre-computed <var>_lag<N> column (for ENSO: enso_lag<N>, written by
-# join_enso_lags() — see analysis/utils/enso.R). If a required column is
-# absent, make_lag_matrix() / the single-lag lookup below raises a clear error.
-#
-# One dlnm::crossbasis() (distributed-lag) or dlnm::onebasis() (single-lag) per
-# variable in duration.dlnm.variables. CB matrices are flattened to
-# <var>_cb1 … <var>_cbN columns. Verbatim port of the construction loop shared
-# by 04_fit_occ_brms_cb.R / 04_fit_siz_brms_cb.R, applied to dur_dat.
+# As 04_fit_dur_brms.R, but covariates in duration.dlnm.variables enter as a
+# dlnm::crossbasis() (distributed lag, from <var>_lag1..<var>_lag<max>) or a
+# dlnm::onebasis() (single_lag: <N>, from <var>_lag<N>; ENSO columns from
+# enso.R::join_enso_lags()), flattened to <var>_cb1..N. A missing lag column
+# is an error. Same construction loop as 04_fit_occ_brms_cb.R.
 
 dlnm_cfg <- dur_cfg$dlnm %||% list()
 cbb <- build_cb_block(dur_dat, dlnm_cfg, " (duration model)")

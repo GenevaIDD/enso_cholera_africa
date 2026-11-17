@@ -44,24 +44,14 @@ source("analysis/utils/provenance.R")
 source("analysis/utils/anchor.R")
 
 # 2. Options -------------------------------------------------------------------
-# User-supplied options
-# The population / composite / episode surface is shared with the other three
-# 03_prepare_* scripts (utils/provenance.R::prep_cli_options()), so the tracks
-# cannot drift apart on a default. --pop_source defaults to `crosswalk`:
-# legacy emits no P1 denominator triple, so a legacy size frame cannot serve an
-# `estimand.denominator: gid` fit. `legacy` stays available.
-#
-# Composite policy (only meaningful under crosswalk; inert under legacy):
-#   keep           apportion to K member rows. Cases and pop scale by the same
-#                  w, so all K siblings carry an IDENTICAL implied attack rate
-#                  Y_l/P_l and row-wise PSIS-LOO holds out a row its siblings
-#                  already encode.
-#   collapse       one row per LP-event at the dominant member, carrying the
-#                  FULL Y_l against pop = P_l.
-#   drop           remove TRUE composites, apportion the rest.
-#   drop_collapse  remove TRUE composites, collapse the rest.
-# --episode_key gid_season builds ONE canonical episode per (gid, year_seas)
-# shared with 03_prepare_occ.R (utils/footprint.R::build_canonical_episodes()).
+# User-supplied options. The population / composite / episode options are
+# shared with the other 03_prepare_* scripts (provenance.R::prep_cli_options()).
+# --pop_source crosswalk is the default: legacy has no P1 denominator triple.
+# --composite_policy (crosswalk only): keep = apportion to K member rows (cases
+# and pop scaled by the same w); collapse = one row per LP-event at the dominant
+# member; drop / drop_collapse = remove TRUE composites, then apportion /
+# collapse the rest. --episode_key gid_season: one canonical episode per (gid,
+# year_seas), shared with 03_prepare_occ.R (footprint.R).
 option_list <- c(
   list(
     make_option(
@@ -120,7 +110,7 @@ ob_ts <- readRDS(make_outbreak_metadata_file()) %>%
   ungroup()
 
 # Under --episode_key gid_season both prep scripts must build episodes from the
-# SAME location-period set, so size applies occurrence's population guard here
+# same location-period set, so size applies occurrence's population guard here
 # (03_prepare_occ.R has always dropped LPs with pop < --min_pop at read time)
 # and marks TZA mainland ADM0 before the section-5 ADM0 filter -- it is ADM0
 # by geometry and never enters the canonical episode table. Both are no-ops on
@@ -360,36 +350,14 @@ ob_ts3 <- ob_ts2 %>%
 
 # 7. Apportion composite location periods --------------------------------------
 #
-# THE SEAM IS HERE, and nowhere earlier. Expanding before add_count() above
-# would inflate the multi-outbreak count K-fold, and slice_min(TL) would then
-# return K tied rows instead of one event. Expanding after the collapse in
-# section 10 is too late — that collapse groups on `gid`, which is precisely
-# the column being corrected. Between the two is the only correct place.
-#
-# WHAT IT DOES. A composite LP (e.g. the 7-state Sudan union) is one row whose
-# `gid` is whatever single member the centroid happened to land in. It becomes K
-# rows, one per member gid, with
-#
-#     suspected_cases_g = suspected_cases * w[l,g]      w = H[l,g] / P_l
-#     pop_g             = H[l,g]
-#
-# Cases and population scale by the SAME w, so the attack rate is invariant per
-# member and read_size_data()'s max_attack_rate guard sees exactly what it saw
-# before. A single-gid LP has w = 1 and is a strict no-op.
-#
-# THE PRICE, stated plainly: K pseudo-observations are treated as K real ones,
-# which inflates the effective sample size and hence the precision of the fit.
-# That is why `apportioned` is carried through to the model frame — it is the
-# hook for the two sensitivity runs (response set NA on apportioned rows; a
-# per-row dispersion multiplier keyed on n_apportion_members), neither of which
-# is baked into the primary fit.
-#
-# SEASONALITY. min_seas / year_seas were resolved above from the centroid gid
-# and are NOT recomputed per member. The seasonal offset is a regional property
-# and every member of a composite LP sits in the same region, so this is a
-# deliberate approximation; recomputing it would push each member through the
-# `filter(!is.na(min_seas))` above and silently drop the w-share of any member
-# without a seasonality match.
+# This is the only correct place to expand composites: earlier inflates the
+# add_count() K-fold, later is after section 10 groups on `gid`. A composite LP
+# becomes K member rows with
+#     suspected_cases_g = suspected_cases * w[l,g],   pop_g = H[l,g],
+#     w = H[l,g] / P_l
+# so the attack rate is unchanged per member (single-gid LPs: w = 1, no-op).
+# The K rows count as K observations; `apportioned` is kept as the hook for the
+# sensitivity runs. min_seas / year_seas stay those of the centroid gid.
 if (use_xwalk) {
   xwalk_path <- if (nzchar(opt$crosswalk_path)) {
     opt$crosswalk_path
@@ -400,24 +368,11 @@ if (use_xwalk) {
   xwalk_siz <- load_population_crosswalk(xwalk_path)
 
   # --- explicit drop of crosswalk-unmatched LPs -------------------------------
-  # See the matching block in 03_prepare_occ.R for the full rationale. In brief:
-  # an LP absent from the crosswalk has no population decomposition, so neither
-  # reduction path can act on it -- lp_composite_status() will not call it
-  # composite (no basis for the claim) and both apportion_composite_cases() and
-  # collapse_composite_lps() pass it through untouched under `keep_unmatched =
-  # TRUE`. On the size track that is worse than on occurrence: the row survives
-  # to the model frame with its centroid gid and NO crosswalk population, i.e. a
-  # multi-ADM1 union's whole case count divided by one member's denominator.
-  #
-  # No-op on the final row set under the default `drop_collapse` (the unmatched
-  # LPs are the multi-ADM1 unions, gid_cover far below --cover_threshold), and
-  # containment rather than a fix -- the upstream geometry defect is left in
-  # place so the next data refresh re-surfaces it through the counts below.
-  #
-  # Placed BEFORE the counters so `cases_before` and the conservation gates that
-  # key off it describe the matchable corpus only. Mass removed here is reported
-  # separately and is deliberately NOT folded into `cases_dropped`, which must
-  # keep meaning "mass removed by --composite_policy".
+  # Same drop as 03_prepare_occ.R: an LP absent from the crosswalk has no
+  # population decomposition, so no composite policy can reduce it. Containment,
+  # not a fix (the upstream geometry defect is left to resurface). Placed before
+  # the counters; its mass is reported apart from `cases_dropped`, which means
+  # only "mass removed by --composite_policy".
   st_match <- lp_composite_status(
     ob_ts3,
     xwalk_siz,
@@ -427,8 +382,8 @@ if (use_xwalk) {
     tiling = opt$composite_tiling,
     cover_threshold = opt$cover_threshold
   )
-  # One row per input row, arranged by .row (composite_lp.R:241) — positional
-  # mask on ob_ts3.
+  # One row per input row, arranged by .row
+  # (composite_lp.R::lp_composite_status()) — positional mask on ob_ts3.
   unmatched <- !st_match$matched
   unmatched_lp <- sort(unique(as.character(ob_ts3$location_period_id[
     unmatched
@@ -662,7 +617,7 @@ if (use_xwalk) {
 
 
 # 8. Canonical gid-season episodes (--episode_key gid_season) ------------------
-# ONE episode per (gid, year_seas), built by the SAME call 03_prepare_occ.R
+# One episode per (gid, year_seas), built by the same call 03_prepare_occ.R
 # makes (utils/footprint.R::build_canonical_episodes()): onset = earliest member
 # TL, end = latest member TR, cases = the finest-resolution member total,
 # admin_level = the gid's geometry-derived GADM level. The digest of that
@@ -713,7 +668,7 @@ size_dat <- size_src %>%
   future_map_dfr(~ make_size_data(., baseline = opt$baseline))
 
 # Conservation gate (ii) — THE CLIMATE TRAP.
-# make_size_data() joins climate with inner_join (analysis/utils.R:1150-1154), so a
+# make_size_data() joins climate with inner_join (utils/siz_data.R), so a
 # member gid that has no row in climate_stats is dropped WITHOUT WARNING and its
 # w-share of the cases evaporates. Apportionment then stops conserving, quietly.
 # This gate is deliberately loud rather than a filter: the fix is to extract
@@ -745,73 +700,17 @@ if (use_xwalk) {
 
 
 # 10. Footprint reconciliation -------------------------------------------------
-# Footprint reconciliation: collapse to ONE row per (gid, year_seas, admin_level).
-# ADM3 units are relabelled to their parent ADM2 GID_2 upstream (02_preprocess_climate.R),
-# so an ADM2 footprint carries ~5-10 near-duplicate location-period rows per season,
-# all sharing identical gid-level covariates. A representative uid/location_period_id
-# is fixed per (gid, admin_level) BEFORE the collapse so the per-location_period_id
-# time_to_last_outbreak recursion (grouped below) tracks each footprint's full
-# cross-season series; covariates use first() (siblings identical).
-#
-# CASES ARE A FLOW: summing them WITHIN an admin level is correct
-# (ADM3 children -> footprint total at ADM3 resolution; ADM2 report -> footprint
-# total at ADM2 resolution; summing ACROSS admin levels would double-count).
-#
-# POPULATION IS A STOCK, and summing it is NOT correct. Two failure modes, both
-# live in the corpus:
-#   * two location periods that both report the whole gid have their populations
-#     ADDED, so the denominator doubles (a summed NGA_19_1 reaches 209M against
-#     Nigeria's ~220M);
-#   * sum() over an EMPTY group returns 0, and 0 then travels downstream as a
-#     population (e.g. COD_4_6_1 at pop = 0, and log(0) from there).
-# The replacement is a coverage-saturated denominator,
-#     pop = min( sum_l H[l,g] , Q_g ),
-# so disjoint ADM3 children still sum while overlapping whole-gid reports
-# saturate at the canonical gid population: no set of location periods can
-# contain more people than the gid does. See reconcile_footprint_pop() in
-# analysis/utils.R and analysis/tests/test_footprint_pop_reconciliation.R.
-#
-# THE (gid, admin_level) ID-UNIFICATION STEP IS LEGACY-ONLY. Picking one
-# representative location_period_id/uid across ALL years sharing a gid is sound
-# under --pop_source legacy: `gid` there comes from a stable geometric
-# containment relationship (ADM3 centroid -> its ADM2 parent), so rows sharing a
-# gid really are repeat reports of the SAME footprint. Under --pop_source
-# crosswalk, `gid` instead comes from apportion_composite_cases()/
-# collapse_composite_lps() picking the crosswalk's DOMINANT POPULATION MEMBER for
-# each location period independently -- a choice that can coincide across
-# genuinely unrelated location periods whenever their member candidate sets
-# share the same dominant polygon (a big town swamping several distant, smaller
-# districts' matches). Forcing a single id/uid onto those rows silently merges
-# distinct outbreaks' identities. Example: DRC location periods
-# 14287/14296/14360/14372/14398 (Lubumbashi/Vangu/Kabalo/Kasenga/Moba health
-# districts, formerly Katanga province) all resolve to gid COD.3.6_1 and would
-# collapse onto one id (the lowest, 14287) across different years, each then
-# carrying an unrelated small district's population as its denominator. Under
-# crosswalk, each row keeps its own location_period_id/uid; only the (gid, year_seas,
-# admin_level) grouping below still reconciles genuine same-year, same-gid
-# duplicates.
-# THE MEMBERSHIP MAP MUST BE CAPTURED HERE, before either step below.
-#
-# The collapse takes every non-summed column with `first()`, so the surviving
-# uid / location_period_id is a REPRESENTATIVE LABEL and the identity of the
-# other contributing location periods is gone. That is invisible as long as
-# nothing tries to attach an external per-location-period quantity to an
-# episode -- but 03_prepare_mon.R does exactly that with the monthly case
-# series from 01b_preprocess_outbreaks_monthly.R, and joining it on
-# (uid, location_period_id) would silently return only the label LP's cases.
-# On this corpus that is 314/1581 episodes and 29.7% of the case mass (see the
-# header of analysis/utils/footprint.R for the full measurement).
-#
-# Before `unify_footprint_ids()` specifically, because under legacy that step
-# overwrites uid / location_period_id with one representative across ALL
-# season-years; a map built afterwards would assign every season's cases to a
-# single location period. `footprint_member_rows()` does not modify `size_dat`, so
-# capturing the map here leaves the size frame unchanged.
-#
-# Under --episode_key gid_season the rows ARE already the canonical episodes
-# and the membership map is the canonical one (with `report_level` and the
-# `in_total` flag of the members whose cases the episode total counts); there
-# is nothing left to collapse.
+# Collapse to one row per (gid, year_seas, admin_level); covariates use
+# first() (siblings identical).
+# Cases are a flow: summed within an admin level, never across levels.
+# Population is a stock, never summed: pop = min(sum_l H[l,g], Q_g)
+# (reconcile_footprint_pop(), test_footprint_pop_reconciliation.R).
+# The (gid, admin_level) id unification is legacy-only: under crosswalk,
+# unrelated LPs can share a dominant gid, so each row keeps its own id / uid.
+# The membership map must be captured HERE, before unify_footprint_ids():
+# the collapse keeps only a representative uid / location_period_id, and
+# 03_prepare_mon.R joins monthly cases through this map (footprint.R). Under
+# --episode_key gid_season the rows are already canonical episodes.
 if (gid_season) {
   footprint_members <- ep_res$members
 } else {
@@ -876,9 +775,9 @@ if (use_xwalk) {
 
   # The one filter apportionment DOES perturb. Attack rate is w-invariant, so
   # read_size_data()'s max_attack_rate guard is untouched; min_pop is an ABSOLUTE
-  # floor (utils.R:6049, default 10 people), so a member carrying a tiny w-share
-  # of a large LP can fall under it where the un-split LP never would.
-  # Reported here, at the point of creation, rather than discovered as an
+  # floor (siz_data.R::read_size_data(), default 10), so a member carrying a
+  # tiny w-share of a large LP can fall under it where the un-split LP never
+  # would. Reported here, at the point of creation, rather than discovered as an
   # unexplained row-count drop at fit time.
   n_below <- sum(size_dat$pop < 10, na.rm = TRUE)
   if (n_below) {
@@ -897,30 +796,13 @@ if (use_xwalk) {
 
 # 11. P1: carry BOTH populations, and the coverage between them ----------------
 #
-# A single `pop` column has its MEANING fixed here and then forgotten:
-# everything downstream -- the fit's offset(log(pop)), the mean_rate
-# denominator, the simulator frame -- would receive a number with no unit
-# attached, so a `Q x rbar^H` mismatch could go unnoticed.
-#
-# So emit all three SIDE BY SIDE and let the declared estimand pick (P0/P1 in
-# resolve_size_pop_column()):
-#
-#   pop_footprint  H_g = min( sum_l H[l,g] , Q_g )   the reporting footprint --
-#                  the population of the area actually under surveillance for
-#                  this outbreak. ENDOGENOUS: its extent is a function of where
-#                  the outbreak was detected, so a rate built on it is
-#                  conditioned on the outcome.
-#   pop_gid        Q_g                               the whole admin unit.
-#                  Exogenous, defined for every unit and every projection year,
-#                  hence the only denominator a forward simulator can use
-#                  consistently.
-#   pop_cover      c = H_g / Q_g in (0, 1]           the ratio between them, and
-#                  therefore the exact factor by which mixing the two rescales a
-#                  prediction. Computed at 02_preprocess_crosswalk.R:255 and
-#                  discarded at the collapse; recovered here.
-#
-# `pop` itself is LEFT UNTOUCHED (= today's value) so this block cannot change
-# any existing run. The switch is opt-in downstream, never here.
+# Emit the three populations side by side; the declared estimand picks one
+# (resolve_size_pop_column()):
+#   pop_footprint  H_g = min(sum_l H[l,g], Q_g)  surveilled area (endogenous)
+#   pop_gid        Q_g                            whole admin unit (exogenous;
+#                                                 the simulator's denominator)
+#   pop_cover      c = H_g / Q_g                  the factor between them
+# `pop` itself is left untouched; the switch is opt-in downstream.
 {
   gid_pop_path_p1 <- if (nzchar(opt$gid_pop_path)) {
     opt$gid_pop_path

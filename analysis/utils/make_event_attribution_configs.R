@@ -714,28 +714,19 @@ event_n_replicates <- function(cfg, n) {
 # ---------------------------------------------------------------------------
 # generate_event_attribution_configs(opt) -- library entry point
 # ---------------------------------------------------------------------------
-# The two arms (in-sample, the hindcast's machinery):
-#   factual        = a hindcast (make_hindcast_configs.R::patch_hindcast_config():
-#                    interior handoff, OBSERVED ENSO, historical climate panel)
+# The two arms (in-sample):
+#   factual        = a hindcast (patch_hindcast_config(): interior handoff,
+#                    observed ENSO, historical climate panel)
 #   counterfactual = the same config + simulator.enso.counterfactual (Lenssen
-#                    piControl analogs matched to the launch ONI, restricted to
-#                    one analog set, by default `neutral`: the event did not
-#                    develop), read from a per-event cache built by
+#                    piControl analogs matched to the launch ONI, one analog
+#                    set, default `neutral`), cached per event by
 #                    03_prepare_lenssen_analogs.R --horizon_start <launch>.
-#
-# Same seed, handoff weighting (the template's; uniform by default) and
-# param_draw_mode: random in both arms (or the deploy's
-# event_attribution.param_draw_mode, e.g. cycle for a fixed draws x replicates
-# design, or joint for the draw of each replicate's handoff smoothing
-# replicate; event_param_draw_mode()), so replicate r shares its smoothing
-# state and posterior draw: F_r - C_r isolates the ENSO trajectory (the
-# forecast attribution's pairing).
-#
-# Window per fit group: launch .. the end of the cholera season containing the
-# event peak (first `season_end_by_group` month on or after the peak) + the
-# group's largest positive deployed lag (occ / dur / mon), so lagged effects of
-# the peak stay inside. A unit runs to its members' latest group window; each
-# country is censored at its own group's window by the 09 readers.
+# Both arms share seed, handoff weighting and param_draw_mode
+# (event_param_draw_mode()), so replicate r pairs across arms and F_r - C_r
+# isolates the ENSO trajectory.
+# Window per fit group: launch .. the end of the season holding the event
+# peak + the group's largest positive deployed lag. A unit runs to its
+# members' latest window; 09 censors each country at its own group's window.
 generate_event_attribution_configs <- function(opt) {
   for (k in c(
     "template",

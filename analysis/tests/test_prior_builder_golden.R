@@ -8,7 +8,7 @@
 # Details:
 #   build_occ_priors() / build_duration_priors() / build_size_priors() /
 #   build_monthly_priors() and the shared .PRIOR_DEFAULTS table. Asserts the
-#   current output equals tests/golden/prior_builder_golden.rds EXACTLY
+#   current output equals tests/golden/prior_builder_golden.rds exactly
 #   (identical()), not that a prior is *correct*; --capture writes the
 #   golden (review the diff and commit the RDS). Sections [4]-[6] add
 #   positive assertions. Pure config + string assembly -- no fit, no data/
@@ -60,7 +60,7 @@ cat(
 #
 # --- Reference implementations (frozen) ---------------------------------------
 
-#' .ref_occ_priors — copied from 04_fit_occ_brms.R:158-164 (== 04_fit_occ_brms_cb.R:210-216)
+#' .ref_occ_priors — copied from 04_fit_occ_brms.R (== 04_fit_occ_brms_cb.R)
 .ref_occ_priors <- function(terms, brms_cfg) {
   has_cor_params <- !isTRUE(brms_cfg$re_uncorrelated) &&
     any(grepl("\\+.*\\|", terms$re_terms))
@@ -75,7 +75,7 @@ cat(
   priors
 }
 
-#' .ref_dur_priors — copied from 04_fit_dur_brms.R:201-215 (== 04_fit_dur_brms_cb.R:238-252)
+#' .ref_dur_priors — copied from 04_fit_dur_brms.R (== 04_fit_dur_brms_cb.R)
 .ref_dur_priors <- function(parts, brms_cfg) {
   has_b <- length(c(
     setdiff(parts$fixed_terms, "1"),
@@ -108,7 +108,7 @@ cat(
   priors
 }
 
-# occ/dur, like size/monthly below, are called directly in BOTH modes (see
+# occ/dur, like size/monthly below, are called directly in both modes (see
 # the note above the frozen reference implementations).
 occ_priors_fn <- function(opt, terms, brms_cfg) {
   build_occ_priors(opt, terms, brms_cfg)
@@ -152,23 +152,15 @@ AMPLE_DAT <- .make_dat(
   mso_band = rep(c(1, 2, 3), length.out = 16)
 )
 
-# The brms_cb prior lookup (build_size_priors()/build_monthly_priors() read
-# the brms_cb sub-block from a `brms_cb:` call site) is exercised, not
-# assumed: for every real size/monthly config the brms_cfg passed in mirrors
-# exactly what the deployed 04_fit_<track>_brms[_cb].R script resolves
-# (opt$<track>$brms for backend brms; opt$<track>$brms_cb %||% opt$<track>$brms
-# for backend brms_cb — see the `brms_cfg <-` lines in those four scripts).
-# Occurrence/duration resolve brms_cb in the fit script's own scope, so there
-# is no asymmetry to exercise there.
+# For every real size/monthly config, brms_cfg mirrors what the deployed
+# 04_fit_<track>_brms[_cb].R resolves (brms: opt$<track>$brms; brms_cb:
+# opt$<track>$brms_cb %||% opt$<track>$brms), so the brms_cb lookup is
+# exercised, not assumed.
 #
-# Scoping note: formula parts/terms below are built via the plain formula
-# builders (build_formula_terms() / build_size_formula_parts() / etc.),
-# BEFORE any DLNM crossbasis columns/RE terms are spliced in -- identical
-# scoping to test_formula_builder_golden.R, which characterizes the same
-# builders the same way. CB slope RE terms are always the single-covariate
-# "(col - 1 | group)" form (nested_slope_re_terms(), utils/formula.R) and can
-# never trip the has_cor "+.*|" regex, so this scoping does not under-test the
-# cor gate for brms_cb configs.
+# Formula parts come from the plain builders, before DLNM crossbasis terms are
+# spliced in (as in test_formula_builder_golden.R). CB slope RE terms are
+# single-covariate "(col - 1 | group)" and cannot trip the has_cor regex, so
+# this does not under-test the cor gate.
 #
 # --- 1. Real configs ----------------------------------------------------------
 cat(
@@ -288,7 +280,7 @@ for (path in config_files) {
         } else {
           opt$occurrence$brms
         }
-        # Independent of the builder: mirrors 04_fit_occ_brms.R:148-153's
+        # Independent of the builder: mirrors 04_fit_occ_brms.R's
         # baseline_block switch, which is where the smooth actually enters.
         smooth_occ[[key]] <- identical(.occ_basehaz(brms_cfg), "cyclic")
         .sd_watch(
@@ -728,25 +720,17 @@ expect(
   "at least one real config shows both region/country- and ADM1-tier sd rows"
 )
 
-# Every occurrence / duration config whose basehaz_poisson resolves to
-# cyclic/seasonal, and every size/monthly config with seasonal_term: cyclic,
-# carries exactly one `sds` row at brms's own package default
-# (student_t(3, 0, 2.5)), so the emitted model is numerically the same as
-# leaving it implicit (make_stancode() is byte-identical either way). This
-# section asserts the gate both ways, since a byte-identical-to-golden check
-# can only say that output is consistent, not correct -- and an over-eager
-# gate is not cosmetic: set_prior(class="sds") against a formula with no
-# smooth is a hard brms .validate_prior() failure.
+# Every occurrence / duration config with basehaz_poisson cyclic/seasonal, and
+# every size/monthly config with seasonal_term: cyclic, carries exactly one
+# `sds` row at brms's default student_t(3, 0, 2.5), so the model equals the
+# implicit one.
 #
 # --- 5. class="sds" spline wiggliness prior gate -------------------------------
-# Same rationale as Section [4]: the golden comparison proves the emitted priors
-# changed *consistently*, these assertions prove they changed *correctly*. The
-# stakes are higher here than for a wrong-but-harmless prior string -- an sds
-# prior emitted against a formula with no smooth is a hard brms
-# .validate_prior() error, so a false positive on this gate breaks the fit
-# outright. Both directions are therefore asserted, on fixtures and on all ~400
-# real configs, against an expectation derived from the config rather than read
-# back off the priors.
+# The golden check proves the priors changed consistently; these assertions
+# prove they changed correctly. An sds prior against a formula with no smooth is
+# a hard brms .validate_prior() error, so both directions are asserted, on
+# fixtures and on all real configs, against an expectation derived from the
+# config.
 cat("\n[5] class=\"sds\" smooth-prior gate\n")
 
 .sds_rows <- function(p) {

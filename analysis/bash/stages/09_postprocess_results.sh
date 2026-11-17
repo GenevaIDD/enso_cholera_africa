@@ -2,44 +2,32 @@
 # stages/09_postprocess_results.sh — derive the manuscript-results artefacts
 # (phase 09) as SLURM arrays, one array per dependency wave.
 #
-# 09a_postprocess_results_tasks.R writes one task YAML per step of the results
-# step registry (utils/results_derive.R) and assigns each a wave: steps of one
-# wave never read each other's artefacts. Each wave is one array of
-# 09b_postprocess_results.R --task jobs; wave k + 1 waits on wave k
-# (--dependency=afterok), so no two jobs ever derive the same artefact. Each
-# submission gets its own task folder (09a: tasks/sub-<timestamp>-<pid>/), so
-# submitting again while an earlier submission's waves are pending is safe.
-# Today: wave 1 = every step but report_effects:<track>, report_enso_exposure,
-# report_lags (they read enso_relation), report_convergence and report_software
-# (they read convergence): wave 2.
+# 09a_postprocess_results_tasks.R writes one task YAML per step of the step
+# registry (utils/results_derive.R) and assigns waves: steps of one wave never
+# read each other's artefacts. Wave k + 1 waits afterok on wave k, so no two
+# jobs derive the same artefact. Each submission has its own task folder
+# (tasks/sub-<timestamp>-<pid>/), so overlapping submissions are safe.
 #
-# Run-agnostic: the results config names the run (results.deploy_config,
-# pointed by deploy_prod_run.R --stage align_results), so no --deploy.
-#
-# No --resume: a step whose artefacts are fresh is a no-op (09b reads them
-# back), so re-submitting the whole set only re-derives what is stale. Use
-# --steps to submit a subset (its waves are renumbered from 1).
+# Run-agnostic: the results config names the run (results.deploy_config, set
+# by deploy_prod_run.R --stage align_results). No --resume: fresh steps are
+# no-ops, so resubmitting re-derives only what is stale; --steps submits a
+# subset (waves renumbered from 1).
 #
 # Usage:
 #   bash analysis/bash/stages/09_postprocess_results.sh --config analysis/configs/results/manuscript.yml
 #   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --steps hindcast,oni
-#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --redo          # re-derive regardless of freshness
+#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --redo     # ignore freshness
 #   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --mem 96G --cpus 8 --time 12:00:00
-#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --mem 160G --partition <bigmem partition>
-#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --list         # steps, waves, artefact status
-#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --dry-run       # print the sbatch commands only
-#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --after 123:456  # wave 1 waits afterok on these jobs
+#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --list     # steps, waves, status
+#   bash analysis/bash/stages/09_postprocess_results.sh --config <cfg> --dry-run  # print sbatch only
 #
 # --partition P overrides the cluster profile's (CHOLERA_RES_RESULTS, else its
-# SHORT class). The attribution steps need ~100 GB (run_pipeline.sh asks for
-# 160G): on a cluster with smaller nodes, pass partitions with bigger ones.
-#
-# --after IDS (colon- or comma-separated job ids): gate wave 1 on upstream jobs
-# with --dependency=afterok, e.g. the forecast array jobs of
-# stages/07_forecast_groups.sh. Later waves already wait on wave 1.
-#
-# Prints RESULTS_JOB_IDS=<wave1 id>:<wave2 id>:... on stdout (afterok-ready).
-# Then, locally: 10_manuscript_figures.R, quarto render analysis/11_manuscript_numbers.qmd.
+# SHORT class); the attribution steps need ~100 GB (run_pipeline.sh asks for
+# 160G), so on a cluster with smaller nodes pass partitions with bigger ones.
+# --after IDS (':' or ','): wave 1 waits afterok on upstream jobs, e.g. the
+# forecast arrays of stages/07_forecast_groups.sh.
+# Prints RESULTS_JOB_IDS=<wave1 id>:<wave2 id>:... (afterok-ready). Then,
+# locally: 10_manuscript_figures.R and quarto render of 11.
 
 set -euo pipefail
 

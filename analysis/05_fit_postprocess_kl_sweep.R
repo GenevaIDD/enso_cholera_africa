@@ -56,20 +56,12 @@ option_list <- list(
 )
 
 # 3. Compare the fits ----------------------------------------------------------
-# Per fit: sampler diagnostics; chain modes (chains whose per-chain mean class
-# centres kmu all lie within --mode_tol lags, complete linkage); the
-# "agreeing" chains = the dominant mode, or with --n_agree n the n
-# best-agreeing chains; R-hat and bulk / tail ESS on all and on the agreeing
-# chains (utils/diagnostics.R::fit_diagnostics()); class centres, El Nino
-# contrasts, weights and kappa; MAP partition; membership uncertainty: the
-# country x class responsibility matrix (all and agreeing chains, with each
-# country's prior registry group), the M1 country mixture (per draw
-# sum_k r_ck * kcon_k and sum_k r_ck * kmu_k vs the hard-MAP class, agreeing
-# chains) and partition stability (per draw a partition sampled from Cat(r_c),
-# adjusted Rand index vs the MAP; all and agreeing chains).
-# Across fits (same rows and countries, checked): country-block PSIS-LOO and
-# WAIC on all and on the agreeing chains (descriptive: high Pareto k is
-# expected), loo_compare differences and stacking weights, per-country elpd.
+# Per fit: sampler diagnostics, chain modes (class centres kmu within
+# --mode_tol lags) and the agreeing chains (dominant mode or --n_agree best),
+# R-hat / ESS (diagnostics.R::fit_diagnostics()), class centres and contrasts,
+# MAP partition and membership uncertainty (responsibilities, country mixture,
+# partition stability by adjusted Rand index). Across fits: country-block
+# PSIS-LOO / WAIC, loo_compare and stacking weights, per-country elpd.
 # Outputs: {fits,classes,partition,loo,loo_country,diagnostics,
 # diagnostics_chains,responsibilities,country_mixture,stability}.csv + loo.rds.
 main <- function() {

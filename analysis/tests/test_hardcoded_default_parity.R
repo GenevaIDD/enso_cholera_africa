@@ -25,28 +25,16 @@ cat(
 
 PATHS_R <- "analysis/utils/paths.R"
 
-# Why this exists: test_config_defaults_parity.R ratchets
-# `config_defaults.yml` vs `get_default_options()`, the two *declared*
-# default sources. It does not cover a third, undeclared source:
-# consumer-side literals hardcoded directly in `paths.R` filename builders
-# (`DEFAULT_BACKEND` and friends, plus every bare `%||% "literal"` fallback)
-# and in `04_fit_run.R`'s dispatcher. When one of these literals silently
-# drifts from `get_default_options()`, the artefact a script WRITES (named
-# from the canonical default) and the artefact a second script READS (named
-# from the stale literal) disagree, and `file.exists()` guards turn that into
-# a silent wrong-file read rather than an error. HARD on the precedent of
-# `cli_route_completeness`, hard because its allowlist (`KNOWN_UNROUTED`) is
-# `character(0)`.
+# Guards a third, undeclared default source: consumer-side literals in the
+# paths.R filename builders (`DEFAULT_*` constants, bare `%||% "literal"`
+# fallbacks) and the 04_fit_run.R dispatcher. A literal that drifts from
+# get_default_options() makes a writer and a reader name different files, and
+# file.exists() guards turn that into a silent wrong-file read. HARD: the
+# allowlist (KNOWN_UNROUTED) is empty.
 #
-# Design: hybrid, registry-led (same shape as
-# `test_cli_route_completeness.R`): a regex mechanically *finds* every
-# `%||% "literal"` site and `DEFAULT_*` constant in `paths.R`; it cannot *map*
-# them (`mon$backend` -> `monthly.backend`, `opt$baseline` -> top-level
-# `baseline`, and some sites have no `get_default_options()` counterpart at
-# all). So SITE_MAP hand-maintains the mapping — to a `get_default_options()`
-# key path for sites that assert equality, or to an explicit "no counterpart"
-# reason for sites that structurally cannot have one. New-unmapped fails;
-# stale-mapped fails; mapped-but-unequal fails.
+# A regex finds every site; SITE_MAP maps each to a get_default_options() key
+# path (asserting equality) or to a "no counterpart" reason. New-unmapped,
+# stale-mapped and mapped-but-unequal all fail.
 #
 # --- Extraction --------------------------------------------------------------
 
@@ -337,7 +325,7 @@ SITE_MAP <- list(
   )
 )
 
-# DEFAULT_* constants (paths.R:230-234) map onto get_default_options() the
+# DEFAULT_* constants (paths.R) map onto get_default_options() the
 # same way make_occ_run_file()'s own comment already claims ("must mirror
 # get_default_options()") -- this gate is what actually checks that claim.
 DEFAULT_CONST_MAP <- list(
@@ -495,25 +483,16 @@ expect(
 # 6. Simulator modules
 # =============================================================================
 # Every `<expr> %||% <literal>` in the simulator / smoothing modules whose expr
-# resolves to a key that get_default_options() defines must equal that default.
-# Literals are strings, numbers (incl. `L`), TRUE/FALSE, NA*, Inf. Unlike
-# SITE_MAP above, sites are not listed one by one (there are ~200): the
-# expression's ROOT is mapped to a key-path prefix (`flt` -> simulator.filter,
-# `sim` -> simulator, `opt` -> top level, ...), and the rest of the `$` chain
-# is the key. So the registries are:
-#   SIM_EXPR_MAP     exact expressions mapped directly (the smoothing state S$*)
+# resolves to a get_default_options() key must equal that default. The expr's
+# root maps to a key-path prefix (`flt` -> simulator.filter, `opt` -> top
+# level); the rest of the `$` chain is the key. Registries:
+#   SIM_EXPR_MAP     exact expressions mapped directly (smoothing state S$*)
 #   SIM_ROOT_MAP     root -> key-path prefix(es) (file-specific or "*")
-#   SIM_IGNORED      roots that are not config lists (draw bundles, stamps,
-#                    already-resolved function arguments), with the reason
-#   SIM_ALLOWLIST    (file, expr, literal) sites allowed to differ, with the reason
-# A root in none of them fails [6a]; an allowlist entry whose site is gone, or
-# whose key now has an equal default, fails [6c]. A key whose default is NULL
-# ("unset") is not compared (its literal is the consumer's own fallback for the
-# unset case), except simulator.seed, whose effective default is the top-level
-# `seed` (make_options_from_config() copies it into a NULL simulator.seed).
-# Sentinel literals (NA*, "", "(none)", ...: helpers_parse.R::NULLOR_SENTINELS)
-# are never compared. Sites come from the parse tree (which also catches a
-# literal on the line after its `%||%`).
+#   SIM_IGNORED      roots that are not config lists, with the reason
+#   SIM_ALLOWLIST    (file, expr, literal) sites allowed to differ, with reason
+# Fails: an unmapped root [6a]; a stale allowlist entry [6c]. Not compared:
+# keys whose default is NULL (except simulator.seed, which inherits `seed`) and
+# sentinel literals (helpers_parse.R::NULLOR_SENTINELS).
 cat("\n[6] simulator-module %||% literals agree with get_default_options()\n")
 source("analysis/tests/helpers_parse.R")
 
@@ -874,22 +853,16 @@ expect(
 # =============================================================================
 # 7. Every other module and script
 # =============================================================================
-# The [6] rule for analysis/*.R and analysis/utils/*.R minus the SIM_FILES:
-# every operand of a literal-terminated `%||%` chain whose root maps to a key
-# that get_default_options() defines must equal that default. paths.R sites
-# that SITE_MAP above already covers ([1]-[3], string literals) are skipped.
-# Registries:
+# The [6] rule for analysis/*.R and analysis/utils/*.R minus SIM_FILES
+# (paths.R sites already in SITE_MAP are skipped). Registries:
 #   NULLOR_ROOT_MAP   root -> key-path prefix(es), file-specific or "*"
-#   NULLOR_EXPR_MAP   exact expressions -> key path (SIM_EXPR_MAP plus the
-#                     locals that hold one config value)
-#   NULLOR_IGNORED    roots that are not config lists, each with the reason
-#   NULLOR_ALLOWLIST  (file, expr, literal) sites allowed to differ, with the reason
-# [7a] every chain operand's root is mapped or ignored; [7b] no mismatch
-# outside the allowlist; [7c] the allowlist is not stale; [7d] the pop_year
-# sites (routed through sim_frame_pop_args()) leave no
-# pop_year literal behind. A key whose default is NULL is not compared, nor a
-# sentinel literal. Operands that are no key chain (a call, an index) are not
-# config reads and are counted, not checked.
+#   NULLOR_EXPR_MAP   exact expressions -> key path
+#   NULLOR_IGNORED    roots that are not config lists, with the reason
+#   NULLOR_ALLOWLIST  (file, expr, literal) sites allowed to differ, with reason
+# [7a] every operand root is mapped or ignored; [7b] no mismatch outside the
+# allowlist; [7c] the allowlist is not stale; [7d] no pop_year literal outside
+# sim_frame_pop_args(). NULL-default keys and sentinels are not compared;
+# non-key operands (calls, indexing) are counted, not checked.
 cat(
   "\n[7] %||% literals in every other module / script agree with get_default_options()\n"
 )

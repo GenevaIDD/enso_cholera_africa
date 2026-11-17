@@ -30,8 +30,9 @@ suppressPackageStartupMessages({
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 # Evaluate `expr` while saving/restoring the global RNG state, so a seeded draw
-# does not perturb the caller's RNG stream. Same idiom as sim_io.R:427-433
-# (kept local — modules never source() each other).
+# does not perturb the caller's RNG stream. Same idiom as
+# results_derive.R::.with_seed() (kept local — modules never source() each
+# other).
 .with_preserved_rng <- function(expr) {
   had_seed <- exists(".Random.seed", envir = .GlobalEnv)
   old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
@@ -121,39 +122,18 @@ smoothing_draw_idx <- function(design, seed_root, tu, tus, n_reps, max_draw_s) {
 # ---------------------------------------------------------------------------
 # State-vector constants
 # ---------------------------------------------------------------------------
-# 11 unit-statenames; each expands to name1..nameU (spatPomp convention).
-# Order matters for the packed/unpacked state in the step function.
-# `mu` is the monthly-case (`mon`) NegBin mean for this month, carried as state
-# so the joint dunit Csnippet can read it (R-function measures are
-# ignored by bpfilter). It is held at 0 under the occurrence_bernoulli
-# measurements (no extra work; constant shape).
-# `size_phi` is the mon NegBin dispersion, carried as STATE (not covariate)
-# because spatPomp unit-measure Csnippets expose states bare per unit but NOT
-# covariates (covariates only appear as covarname+unitindex, e.g. "size_phi3").
-# Seeded once in rinit; re-emitted unchanged by rprocess. Held at 0 under the
-# Bernoulli path. The slot names come from the episode-total size track, retired
-# downstream (mon replaces it). Names and positions are kept because the smoothing
-# cache schema token is
-# length(.SP_UNIT_STATENAMES) and the C variant indexes ST(7,u)/ST(8,u).
-# `active`/`mso` (duration track): pure unobserved latent state — the
-# ongoing-episode indicator and months-since-onset clock, as in the v1
-# kernel. Appended, never inserted, so the Csnippet C variant's
-# 0-based positional index macros (spatpomp_core_c.R) keep indices 0..8 stable.
-# The measurement model is intentionally unchanged: .SP_DUNIT* still scores
-# obs_Y against latent `p`/`Yout` only, never `active`/`mso` — zero Csnippet
-# change, zero logLik-scale change, no invalidation of resample_by_loglik()
-# weights or existing smoothing comparisons. `active`/`mso` default to 0 (held there
-# by rinit/rprocess) whenever no duration draws bundle is supplied, so every
-# existing (non-duration) caller is unaffected by the two extra slots.
-#
-# Monthly-case (`mon`) track: adds NO new slot. `mu` and `size_phi` are exactly
-# a mean and a dispersion, which is what the mon measurement needs, so the mon
-# path WRITES INTO THOSE TWO: mu is the per-active-month expected case count and
-# size_phi the mon fit's dispersion. Consequences, all deliberate:
-# .SM_CACHE_SCHEMA_VERSION (below) is unchanged so every existing smoothing
-# handoff cache stays valid with no forced rebuild; the C variant's positional
-# ST(i,u) macros are untouched; and `active`/`mso` (already maintained by the
-# duration promotion block) are read directly by the mon measurement.
+# 11 unit-statenames, each expanded to name1..nameU (spatPomp convention).
+# Order matters: the step function packs/unpacks by position, the C variant
+# indexes ST(k,u) (spatpomp_core_c.R) and the smoothing cache schema token is
+# length(.SP_UNIT_STATENAMES). New slots are appended, never inserted.
+#   mu, size_phi  the mon NegBin mean and dispersion, carried as STATE because
+#                 bpfilter ignores R-function measures and unit-measure
+#                 Csnippets see states (not covariates) bare per unit. Held at
+#                 0 on the Bernoulli path. The slot names come from the retired
+#                 size track; mon reuses them, so no new slot or cache bump.
+#   active, mso   duration-track latent state (ongoing-episode flag, months
+#                 since onset); never scored by the measurement, held at 0
+#                 without a duration draws bundle.
 .SP_UNIT_STATENAMES <- c(
   "u_days",
   "o",
@@ -168,7 +148,7 @@ smoothing_draw_idx <- function(design, seed_root, tu, tus, n_reps, max_draw_s) {
   "mso"
 )
 
-# `covariate_feed: detected` appends ONE slot, `det` (the per-episode detection
+# `covariate_feed: detected` appends one slot, `det` (the per-episode detection
 # flag, simulator_core.R::update_detection()), at position 12 / C index 11.
 # Appended -- never inserted -- so every positional ST(k,u) macro and every
 # existing consumer is unchanged, and it exists ONLY under the detected feed:
@@ -217,20 +197,10 @@ smoothing_draw_idx <- function(design, seed_root, tu, tus, n_reps, max_draw_s) {
 # ---------------------------------------------------------------------------
 # smoothing handoff-cache schema versioning
 # ---------------------------------------------------------------------------
-# The smoothing cache (hist_filter_tu=<tu>_*.qs, written by
-# 08c_smoothing_compile.R) has no statename manifest, so a cache written
-# before the .SP_UNIT_STATENAMES 9->11 change would silently misalign
-# named-vector state lookups in downstream consumers. `.SM_CACHE_SCHEMA_VERSION` is
-# derived from `length(.SP_UNIT_STATENAMES)`, not a hand-incremented counter,
-# so it moves in lockstep with the statenames vector automatically.
-#
-# The empirical baseline-rate anchor (`offset(log(base_rate_<track>))`,
-# utils/anchor.R) deliberately does NOT move it. The anchor is a STATIC
-# per-unit constant, exactly like `pop`: the C builder folds it into the `*_lp_static`
-# covariate column that already exists (precompute_*_lp_static(),
-# spatpomp_core_c.R). No new state slot, no new covariate column, no change to
-# the positional ST(i,u) macros -- so every existing smoothing handoff cache stays
-# valid (the precompute-at-R-time design of the C variant is what avoids a bump).
+# The smoothing cache (08c_smoothing_compile.R) has no statename manifest, so
+# the schema version is derived from length(.SP_UNIT_STATENAMES) and moves with
+# it. The baseline-rate anchor does not move it: like `pop`, it is folded into
+# the existing `*_lp_static` covariate (spatpomp_core_c.R).
 .SM_CACHE_SCHEMA_VERSION <- length(.SP_UNIT_STATENAMES)
 .SM_CACHE_SCHEMA_VERSIONS <- c(
   .SM_CACHE_SCHEMA_VERSION,
@@ -312,31 +282,18 @@ check_smoothing_cache_schema <- function(path, tu = NULL) {
 # Measurement-class predicates (used by the Csnippet builder and the smoothing)
 # ---------------------------------------------------------------------------
 # Orthogonal axes:
-#   - State    : the occurrence likelihood conditions on the LATENT state `Yout`
-#                (near-delta vs obs_Y), not the deterministic hazard `p`. The
-#                non-state variants score `p`, which is (nearly) constant across
-#                particles and therefore cannot pull the filtered occurrence
-#                trajectory toward the observations — the cause of the systemic
-#                occurrence over-estimation. The `_state` variants fix this by
-#                making obs_Y a (noisy) measurement of the realized Yout.
-#   - Monthly  : the case term is scored at EVERY ACTIVE month against the mon
-#                fit's per-month mu. The case term is gated on `mu > 0.0` (a
-#                cessation-order-safe proxy for "active this month" -- see the
-#                .SP_DUNIT_MON_NB comment), so it hard-requires the duration
-#                track (nothing else maintains `mu` on a per-month basis).
-# The episode-total NegBin (size track) measurement family is not provided
-# (the size track is retired downstream); its names fail .check_measurement()
-# like any other unknown string.
-# "act" (activity-scored): the detect sibling whose case term is scored in
-# EVERY month carrying an observed monthly count -- including post-onset months
-# whose obs_Y is NA (the survival panel censors them) -- and whose zero counts
-# (build_obs_panel(zero_fill = TRUE)) penalise a latent episode that is still
-# running. See .sp_case_actpen_zi_c() / .make_dunit_mon(score_case_if_na_y=TRUE).
-# "actn" (normalized): the `_act` sibling whose INACTIVE-state case
-# term is a proper mixture (total mass 1 for every phi) instead of the
-# 0-or-floor-NB pair whose mass is 2 - NB(0) -- see .sp_case_actpen_zi_norm_c()
-# (and .sp_case_who_norm_c() for the `_who` form). Part of .SP_ACT_MEAS, so
-# every `_act` predicate (detect, state, mon, monthly_case_obs guard) applies.
+#   _state  the onset term scores the latent draw `Yout` against obs_Y, not the
+#           near-deterministic hazard `p`, so resampling can pull the filtered
+#           occurrence toward the observations.
+#   _mon    the case term is scored at every active month, gated on mu > 0
+#           (see .SP_DUNIT_MON_NB); requires the duration track.
+#   _act    the case term is scored in every month with an observed count,
+#           including post-onset months with obs_Y NA; zero counts penalise a
+#           latent episode still running (.sp_case_actpen_zi_c()).
+#   _actn   `_act` with a normalised inactive-state mixture of mass 1
+#           (.sp_case_actpen_zi_norm_c(), .sp_case_who_norm_c()).
+# The size-track (episode-total NegBin) family is retired; its names fail
+# .check_measurement().
 .SP_ACTN_MEAS <- c(
   "occurrence_duration_mon_NB_state_detect_actn",
   "occurrence_duration_mon_NB_state_detect_actn_who"
@@ -433,10 +390,10 @@ check_smoothing_cache_schema <- function(path, tu = NULL) {
   invisible(m)
 }
 
-#' Resolve the measurement-side `simulator.filter.*` keys, ONCE, for both
+#' Resolve the measurement-side `simulator.filter.*` keys, once, for both
 #' drivers (historical smoothing 08 via smoothing_make_config(), forecast 07b).
-#' Previously each driver repeated its own `flt$key %||% default` lines; every
-#' new measurement key is added here and nowhere else.
+#' Every measurement key is resolved here and nowhere else (no per-driver
+#' `flt$key %||% default` lines).
 #'
 #'   measurement       default "occurrence_duration_mon_NB" (both drivers' default)
 #'   delta_fn/delta_fp detection-error rates (.SP_STATE_DELTA_FN/_FP defaults)
@@ -808,7 +765,7 @@ obs_panel_for_filter <- function(
 # Build observation table — long, one row per (month_index, gid)
 # ---------------------------------------------------------------------------
 
-#' Footprint-aligned count aggregation -- the ONE implementation of the rule
+#' Footprint-aligned count aggregation -- the one implementation of the rule
 #' shared by the filter's observed-count channel (obs_CM monthly cases) and by
 #' sim_io.R::build_obs_panel(): sum the counts
 #' WITHIN each admin level, then take the MAX across per-level totals, i.e. the
@@ -993,7 +950,7 @@ build_obs_for_tu <- function(
     )
   }
 
-  # WHO dashboard national monthly count (the `_who` measurement): the SAME
+  # WHO dashboard national monthly count (the `_who` measurement): the same
   # value on every unit of the country in a scored month, NA elsewhere, so the
   # per-unit shares of the country term sum to the full term. Joined on the
   # grid, never on obs_raw, so it does not depend on survival-panel rows.
@@ -1020,71 +977,42 @@ build_obs_for_tu <- function(
 
 #' Build the spatPomp covariate table from the TU climate panel.
 #'
-#' All covariates are per-unit rows (shared_covarnames is unsupported alongside
-#' per-unit covars in spatPomp v1.1.0, so ENSO is replicated across units).
-#' Includes a t0 row (time = 0) required by spatPomp.
+#' All covariates are per-unit rows (spatPomp v1.1.0 does not support
+#' shared_covarnames alongside per-unit covars, so ENSO is replicated across
+#' units). Includes the t0 row (time = 0) spatPomp requires.
+#' spatPomp suffixes covariate names with the unit index (paste0(colname,
+#' unit)), so pass only the lags and basis columns the model uses:
+#' "enso_lag1" + unit 11 collides with "enso_lag11" + unit 1.
+#' Each track's cross-basis columns get their own prefix because the tracks
+#' select their ENSO lag independently; a shared column would let one track's
+#' basis drive another track's linear predictor.
 #'
 #' @param panel_tu   panel tibble for this TU (warmup + horizon months).
 #' @param frame_tu   location frame for this TU.
 #' @param months     ordered Date vector of ALL months covered (warmup + horizon),
 #'                   indexed 1..M. Month index 0 is t0 (the row before month 1).
-#' @param enso_cols  optional character vector of ENSO column names to include.
-#'                   When NULL (default), all enso_lag* columns in the panel are
-#'                   used — but NOTE: spatPomp v1.1.0 internally forms covariate
-#'                   names via paste0(colname, unit_index), so multi-lag panels
-#'                   cause naming collisions (e.g. "enso_lag1" + unit 11 =
-#'                   "enso_lag11" + unit 1 = "enso_lag111"). Pass only the lags
-#'                   actually used by the model to avoid this.
-#' @param cb_meta   optional DLNM cross-basis metadata (occurrence model). When
-#'                  non-NULL, cross-basis design columns (`<var>_cb<k>`) are
-#'                  reconstructed from the panel's lag columns via
-#'                  build_cb_design() and appended to the covar table. ENSO
-#'                  cross-bases use the panel's observed enso_lag* values
-#'                  (deterministic in the filter window); climate cross-bases
-#'                  use the `<var>_lag*` columns (emitted by 03c/03d).
-#'                  NOTE: like enso_cols, the cross-basis column names are
-#'                  suffixed with the unit index inside spatPomp — keep cb basis
-#'                  dimension small to avoid paste0(colname, unit) collisions.
-#' @param cb_meta_by_group optional named list of per-group cb_meta (occurrence
-#'                  model) for grouped fits. When non-NULL and frame_tu carries a
-#'                  `group` column, each unit's cross-basis columns are built from
-#'                  ITS group's cb_meta — groups may carry different single_lags /
-#'                  fitted bases, so a single shared cb_meta would mis-parse all
-#'                  but one group. Takes precedence over `cb_meta`.
-#' @param mon_harmonics logical; when TRUE, append the four calendar-month
-#'                  harmonic columns (`sin_month`, `cos_month`, `sin2_month`,
-#'                  `cos2_month`) required by the monthly-case (`mon`) track's
-#'                  default `seasonal_term: "harmonic2"`, and by a duration fit
-#'                  under `duration.seasonal_term: "harmonic2"` (the C builder
-#'                  sets it TRUE for either). Built here rather than
-#'                  derived from the step function's `t` on purpose: the covariate
-#'                  table already carries the one-month index shift that gives
-#'                  month k's transition month k's covariates (see the
-#'                  "Covariate time-alignment" comment below), so building the
-#'                  harmonics as covariates inherits that alignment instead of
-#'                  re-deriving it and risking the exact off-by-one the seam-gap
-#'                  investigation found. Default FALSE leaves the covariate table
-#'                  of every non-mon run bit-for-bit unchanged.
-#' @param cb_meta_mon,cb_meta_mon_by_group optional cb_meta for the monthly-case
-#'                  (`mon`) fit, ungrouped / per-group. Its PANEL cross-bases
-#'                  (everything except the latent `mso`, which is handled by
-#'                  `build_mso_basis()` instead) are built exactly like the
-#'                  occurrence ones but emitted under a `.SP_MON_CB_PREFIX`
-#'                  prefix. The prefix is not cosmetic: the two tracks select
-#'                  their ENSO single-lag independently (occ 4 / mon 9 for East,
-#'                  say), so an unprefixed `enso_cb1` would be one column serving
-#'                  two different fitted bases, and whichever was written last
-#'                  would silently drive both linear predictors.
-#' @param cb_meta_dur,cb_meta_dur_by_group same treatment for the duration fit,
-#'                  under `.SP_DUR_CB_PREFIX`. This exists for the same reason
-#'                  as the mon pair and is equally not optional: the deployed
-#'                  per-group best-lag fits select ENSO lags per track (Horn:
-#'                  occ 11, mon 11, dur 8), so before it was added the duration
-#'                  linear predictor silently read the occurrence columns -- its
-#'                  own coefficients evaluated against another track's basis at
-#'                  another track's lag. NULL (the default) emits nothing and
-#'                  leaves the covariate table of every occurrence-only run
-#'                  bit-for-bit unchanged.
+#' @param enso_cols  optional ENSO column names to include; NULL (default) uses
+#'                   every enso_lag* column in the panel.
+#' @param cb_meta   optional DLNM cross-basis metadata (occurrence). Non-NULL
+#'                  appends `<var>_cb<k>` columns, built by build_cb_design()
+#'                  from the panel's enso_lag* (or climate `<var>_lag*`)
+#'                  columns.
+#' @param cb_meta_by_group optional named list of per-group cb_meta (grouped
+#'                  occurrence fits). When frame_tu has a `group` column, each
+#'                  unit's columns use its own group's cb_meta. Takes precedence
+#'                  over `cb_meta`.
+#' @param mon_harmonics logical; TRUE appends `sin_month`, `cos_month`,
+#'                  `sin2_month` and `cos2_month` for the `mon` track and for a
+#'                  duration fit with seasonal_term "harmonic2". Built as
+#'                  covariates so they inherit the table's one-month index shift
+#'                  (see "Covariate time-alignment" below). FALSE (default)
+#'                  leaves the table unchanged.
+#' @param cb_meta_mon,cb_meta_mon_by_group optional cb_meta for the `mon` fit,
+#'                  ungrouped / per-group. Its panel cross-bases (all but the
+#'                  latent `mso`, handled by build_mso_basis()) are emitted
+#'                  under `.SP_MON_CB_PREFIX`.
+#' @param cb_meta_dur,cb_meta_dur_by_group same for the duration fit, under
+#'                  `.SP_DUR_CB_PREFIX`. NULL (default) emits nothing.
 #' @param season_k  logical; TRUE appends the month-of-season column `seas_k`
 #'                  read by the season onset gate (onset_eligibility: season).
 #'                  FALSE (default) leaves the table unchanged.
@@ -1292,7 +1220,7 @@ build_covar_for_tu <- function(
   # collapses to a single (effectively min_seas=1 / no-shift) result reused for
   # every row, dropping the per-gid cholera-season rotation entirely. Build a
   # per-min_seas lookup table via lapply/vapply instead (mirrors the correct
-  # per-gid computation in simulate_one_tu, simulator_core.R:1663-1665) and
+  # per-gid computation in simulate_one_tu() in simulator_core.R) and
   # index into it, rather than a single vectorized `%m+% period(<vector>)` mutate.
   ms_map <- setNames(as.integer(frame_tu$min_seas), as.character(frame_tu$gid))
   ms_vals <- sort(unique(ms_map[is.finite(ms_map)]))
@@ -1383,21 +1311,14 @@ build_covar_for_tu <- function(
 # ---------------------------------------------------------------------------
 # Measurement Csnippets — read latent state `p`
 # ---------------------------------------------------------------------------
-# Probe findings that shape this implementation:
-#   (A) rprocess R-function IS honored by bpfilter (scalar per-particle per step).
-#   (B) shared_covarnames forbidden alongside per-unit covars — ENSO replicated.
-#   (C) R-function dunit/eunit/vunit/runit measures are SILENTLY IGNORED by
-#       bpfilter; only Csnippets (mode=3) are dispatched. Fix: carry predictive
-#       hazard `p` as a latent state; measures are trivial Csnippets reading `p`.
-#   (D) simulate() does not auto-build rmeasure from runit_measure.
-#   (E) saved.states extracted via bf@saved.states (exported accessor errors).
-#
-# dunit output var: `lik`  (+ give_log flag)
-# eunit output var: `ey`
-# vunit output var: `vc`
-# runit output var: `Y`    (NOT the obsname; template-hardcoded)
-# State `p` per unit u: __x[__stateindex["p"] + u]  (0-based u inside C)
-# Obs  `obs_Y` per unit u: __y[__obsindex["obs_Y"] + u]  (but "obs_Y1" after hitch)
+# bpfilter constraints that shape this code:
+#   * R-function dunit/eunit/vunit/runit measures are SILENTLY IGNORED; only
+#     Csnippets run. Hence the hazard `p` is carried as latent state.
+#   * shared_covarnames cannot sit beside per-unit covariates (ENSO is
+#     replicated per unit); simulate() does not build rmeasure from
+#     runit_measure; saved states are read via bf@saved.states.
+# Output vars: dunit `lik` (+ give_log), eunit `ey`, vunit `vc`, runit `Y`.
+# State `p` of unit u: __x[__stateindex["p"] + u] (0-based u).
 
 .SP_DUNIT <- pomp::Csnippet(
   "if (ISNA(obs_Y)) { lik = give_log ? 0.0 : 1.0; return; }
@@ -1412,30 +1333,16 @@ build_covar_for_tu <- function(
 # ---------------------------------------------------------------------------
 # State-conditioning measurement Csnippets (siblings).
 # ---------------------------------------------------------------------------
-# The .SP_DUNIT measure above scores the latent HAZARD `p`, which
-# is (nearly) deterministic across particles within a unit-month — so the
-# bpfilter cannot discriminate particles by their realized occurrence draw, and
-# the filtered `Yout` is a free-running prior simulation that over-fires wherever
-# the covariate hazard is high.  The variants below instead treat obs_Y as a
-# (near-perfect) measurement of the LATENT occurrence state `Yout`, with a small
-# surveillance error EPS, so resampling pins the filtered occurrence to observed
-# history.  EPS keeps the weight from collapsing to exactly zero when no particle
-# matches (avoids degenerate ESS); it is the false-positive/false-negative rate.
-#
-# ONSET TERM x FAMILY TEMPLATE
-# ----------------------------
-# Every state-conditioning dunit is (NA guard) + (ONSET term on Yout vs obs_Y) +
-# (that family's CASE term) + (lik tail). The onset term is the ONLY thing that
-# differs between an eps sibling and its detection-error ("_detect") sibling, so
-# it is written exactly once per scheme (.sp_onset_eps_c / .sp_onset_detect_c)
-# and each family's case term exactly once (.SP_TPL_*). The eps objects below
-# are built from those templates at module load; the detect siblings are built
-# by the SAME factories at dispatch time inside build_spatpomp_tu_c(), because
-# delta_fn/delta_fp are per-run config parameters and a statically built
-# Csnippet cannot vary per run.
-#
-# Contract for template authors: the case term must NOT reference `match` (the
-# detect onset block does not declare it) — gate on `Yout`/`obs_Y`/`mu` instead.
+# These dunits treat obs_Y as a near-perfect measurement of the latent onset
+# `Yout`, with surveillance error EPS (keeps weights off exactly zero), so
+# resampling pins the filtered occurrence to the observed history.
+# Each dunit = (NA guard) + (ONSET term) + (family CASE term) + (lik tail).
+# Onset terms are written once per scheme (.sp_onset_eps_c /
+# .sp_onset_detect_c), case terms once per family (.SP_TPL_*). The detect
+# siblings are built inside build_spatpomp_tu_c() because delta_fn / delta_fp
+# are per-run parameters.
+# Contract: a case term must NOT reference `match` (the detect onset block does
+# not declare it); gate on `Yout` / `obs_Y` / `mu`.
 .SP_MEAS_EPS <- 1e-6
 # Detection-error rates, used only by the `_detect` siblings. These are DEFAULTS
 # now, not fixed constants: simulator.filter.delta_fn / .delta_fp override them
@@ -1507,31 +1414,17 @@ build_covar_for_tu <- function(
 # ---------------------------------------------------------------------------
 # Monthly-case (`mon`) measurement Csnippets.
 # ---------------------------------------------------------------------------
-# Selected when measurement is in .SP_MON_MEAS. Occurrence term as .SP_DUNIT /
-# .SP_DUNIT_STATE, plus a NegBin case term gated on `mu > 0.0` that scores
-# `obs_CM` (this month's observed case count). `mu` carries the mon fit's
-# per-month mean and `size_phi` the mon fit's dispersion.
-#
-# Gating on `mu > 0.0` rather than the RECORDED `active` state is deliberate,
-# not cosmetic. `mon_mu_block` (spatpomp_core_c.R) computes mu from the PRE-cessation
-# av_new/mv_new -- correctly nonzero for an episode's final active month --
-# but the cessation block that runs immediately after can reset active/mso to
-# 0 in that SAME step before writing them into ST(9,u)/ST(10,u). So the
-# RECORDED `active` state for a month reflects "entering next month", not
-# "was active this month", and gating on `active > 0.5` silently drops the
-# case observation for the final month of every single episode. `mu` has no
-# such ambiguity: it is set to exactly 0.0 when inactive and to exp(lp) > 0.0
-# otherwise (mon_mu_block's `if (av_new[u] < 0.5) { ST(7,u) = 0.0; ... }`), so
-# `mu > 0.0` is an exact, order-independent proxy for "active this month".
-#
-# Hurdle structure per (unit, month):
-#   obs_Y NA                     -> loglik 0    (no observation)
-#   obs_Y == 0                   -> log(1 - p)
-#   obs_Y == 1                   -> log(p)
+# Occurrence term as .SP_DUNIT / .SP_DUNIT_STATE plus a NegBin case term on
+# obs_CM (mean `mu`, dispersion `size_phi`), gated on `mu > 0.0`, NOT on the
+# recorded `active`: the cessation block can reset `active` in the same step,
+# so gating on it would drop every episode's final month. mu is exactly 0 when
+# inactive (mon_mu_block, spatpomp_core_c.R).
+# Per (unit, month):
+#   obs_Y NA                     -> loglik 0
+#   obs_Y == 0 / 1               -> log(1 - p) / log(p)
 #   + mu > 0, obs_CM observed    -> + dnbinom(obs_CM; mu, size_phi)
-#   + mu > 0, obs_CM NA          -> + 0         (active but magnitude unobserved)
-# The occurrence half is untouched, so with every obs_CM NA this degenerates
-# EXACTLY to .SP_DUNIT.
+#   + mu > 0, obs_CM NA          -> + 0
+# With every obs_CM NA this is exactly .SP_DUNIT.
 .SP_DUNIT_MON_NB <- pomp::Csnippet(
   "if (ISNA(obs_Y)) { lik = give_log ? 0.0 : 1.0; return; }
    double pc = (p < 1e-9 ? 1e-9 : (p > 1.0-1e-9 ? 1.0-1e-9 : p));
@@ -1553,19 +1446,13 @@ build_covar_for_tu <- function(
 # ---------------------------------------------------------------------------
 # mon-family dunit combinator: (NA guard) + (ONSET term) + (CASE term)
 # ---------------------------------------------------------------------------
-# Every mon-family dunit is the same three pieces. The onset terms already have
-# factories (.sp_onset_eps_c / .sp_onset_detect_c); these are the case-term
-# factories, and .make_dunit_mon() splices them. The pre-existing factories
-# below are thin wrappers over it and emit byte-identical C (pinned by
-# test_spatpomp_dunit_detect.R's golden).
-#
-# score_case_if_na_y = FALSE (every pre-existing sibling): the whole density is
-#   skipped when obs_Y is NA -- the classic `if (ISNA(obs_Y)) return` guard.
-# score_case_if_na_y = TRUE (the `_act` sibling): only the ONSET term is skipped
-#   when obs_Y is NA; the CASE term is still scored whenever obs_CM is observed.
-#   Needed because the survival panel censors every month after an onset, so
-#   obs_Y is NA in exactly the post-onset months whose counts carry the
-#   cessation information.
+# Every mon-family dunit is (NA guard) + (ONSET term) + (CASE term), spliced
+# by .make_dunit_mon(); the older factories are thin wrappers emitting
+# byte-identical C (golden: test_spatpomp_dunit_detect.R).
+# score_case_if_na_y = FALSE: skip the whole density when obs_Y is NA.
+# score_case_if_na_y = TRUE (`_act`): skip only the onset term; the case term
+#   is still scored when obs_CM is observed, since the survival panel censors
+#   obs_Y in exactly the post-onset months that carry cessation information.
 #' The negative-binomial log-pmf as a C expression, log NB(x; mean m, size r),
 #' with `r` and `m` C variables in scope. `cont` is the indentation of the
 #' continuation line, so every case-term factory emits the same text it always
@@ -1815,37 +1702,13 @@ build_covar_for_tu <- function(
 # term (below) strictly dominates this one, so the mon track's detect sibling is
 # built on _ACTPEN instead.
 .SP_DUNIT_MON_NB_STATE <- .make_dunit_mon_nb_state(.sp_onset_eps_c())
-# Activity-penalized sibling ("actpen" -- Idea B from the mon-recovery
-# investigation, replacing an earlier Idea-A boolean-match attempt): the
-# problem being fixed is the same as documented for .SP_DUNIT_MON_NB_STATE
-# above -- the NegBin case-count term is silently SKIPPED whenever a
-# particle's own mu == 0, so a particle that wrongly declared cessation pays
-# nothing for missing a real observed case count. Root-caused empirically on
-# the BBB_2_1 fixture unit: a 12-month true episode collapsed to 0% of
-# filtered passes still "active" by month 5, because nothing in the
-# likelihood disfavored early spurious cessation.
-#
-# Idea A (tried first, reverted here) added a second near-deterministic
-# eps/1-eps state-conditioning term on activity match, on top of the onset
-# match. That made the activity penalty ~13.8 nats on mismatch -- 5-8x
-# larger than the NegBin term's entire dynamic range in this fixture -- so it
-# behaved as a near-hard constraint rather than a graded probabilistic
-# penalty (flagged as "too strong").
-#
-# Idea B (this version) instead keeps the NegBin term itself as the only
-# source of penalty, but stops SKIPPING it when mu == 0: it substitutes a
-# small floor mean (`.SP_MON_MU_FLOOR`) for likelihood evaluation ONLY when
-# a case count was actually observed and the particle's own mu is 0. This
-# grades the penalty by how implausible the observed count is under a
-# near-zero mean, instead of an all-or-nothing eps switch, and does not
-# touch the actual mu state written to ST(7,u) (downstream smoothing/
-# forecast code relies on that being exactly 0 when inactive).
-#
-# Coverage note (unchanged from Idea A's caveat): this only fixes the
-# "falsely ceased, real count observed" direction. It does nothing for the
-# opposite direction (falsely still active, nothing observed) -- there is no
-# observation to grade against in that case, so it remains unpenalized here,
-# same as in .SP_DUNIT_MON_NB_STATE.
+# Activity-penalised sibling ("actpen"): .SP_DUNIT_MON_NB_STATE skips the case
+# term when a particle's own mu == 0, so a particle that wrongly ceased pays
+# nothing for a real observed count. Here, when a count is observed and
+# mu == 0, the NegBin is evaluated at a floor mean (.SP_MON_MU_FLOOR) instead:
+# a graded penalty. The mu state in ST(7,u) is untouched (downstream code needs
+# exactly 0 when inactive). The opposite error (falsely active, nothing
+# observed) stays unpenalised.
 .SP_MON_MU_FLOOR <- 0.1
 .make_dunit_mon_nb_state_actpen <- function(
   onset,
@@ -1861,7 +1724,7 @@ build_covar_for_tu <- function(
 # built at dispatch time in build_spatpomp_tu_c() via
 # .make_dunit_mon_nb_state_actpen(.sp_onset_detect_c(delta_fn, delta_fp)).
 # See .sp_onset_detect_c() above for the eps-vs-fitted-`p` rationale.
-#' The ONE measurement -> dunit Csnippet dispatch used by build_spatpomp_tu_c().
+#' The one measurement -> dunit Csnippet dispatch used by build_spatpomp_tu_c().
 #' Detect siblings are built here, at dispatch time, because delta_fn/delta_fp
 #' are per-run config values; the eps siblings stay module-level objects.
 .select_dunit <- function(
@@ -2046,7 +1909,7 @@ build_covar_for_tu <- function(
 #' subsample strategy as the occurrence bundles, so the
 #' cessation-hazard evaluation uses the matching per-group draw. Mirrors
 #' `simulate_one_tu()`'s own `grouping$draws_dur_by_group` lookup
-#' (`simulator_core.R:2226`), just subsetted for the filter window instead of
+#' (in `simulator_core.R`), just subsetted for the filter window instead of
 #' used verbatim.
 #'
 #' @return list(draws_sub_by_group = <named list of 1-or-n-draw duration bundles>).
@@ -2340,7 +2203,7 @@ assert_partition_column <- function(frame, partition_by) {
 #'
 #' Pre-flight for a partition whose TUs may mix fit groups (partition_by =
 #' registry; also run for enso_region / country). Collects every violation and
-#' stops ONCE with all of them, before any per-TU precompute:
+#' stops once with all of them, before any per-TU precompute:
 #'   - each country on the frame carries a fit group (grouped mode);
 #'   - within a mixed TU, the groups' duration fits share one basehaz kind and
 #'     (factor) breaks -- the C duration kernel holds one table per TU
@@ -2769,33 +2632,19 @@ run_one_bpfilter_replicate <- function(
 # ---------------------------------------------------------------------------
 # Compact filter_traj storage (simulator.filter.traj_storage)
 # ---------------------------------------------------------------------------
-# spatPomp 1.1.0's bpfilter(filter_traj = TRUE) keeps every resampled particle
-# of every step and block (`xparticles`, doubles) plus every ancestry vector
-# (`pedigree`) until the end, then draws ONE particle per block and walks its
-# ancestry back. That store, ntimes x state vars x Np x 8 bytes, is the whole
-# memory peak of a smoothing replicate (deployed hmmCE unit: ~90 GB at Np = 10k
-# over ~213 months), and almost all of it is particles with no descendant in
-# the final population, which the backward walk can never reach.
-#
-# .bpfilter_traj_compact() is spatPomp:::bpfilter.internal (1.1.0) with two
-# storage changes and nothing else:
-#   (a) ancestry pruning -- every `prune_every` steps, per block (ancestry is
-#       per block), drop the stored columns that are no longer an ancestor of
-#       the current population and remap the pedigree indices onto the kept
-#       columns. The current top step is never pruned, so the final draw
-#       sample.int(Np, 1) indexes the same population as the original;
-#   (b) float32 (optional) -- kept states stored as float::fl(), converted
-#       back to double one column at a time in the backward walk. Integer
-#       states are exact below 2^24; p / mu round to ~6e-8 relative.
-# Pruning consumes no random numbers and the backward walk reaches the same
-# particles, so "pruned" returns a filter.traj and logLik identical() to
-# "full" for the same seed (tests/test_bpfilter_traj_compact.R).
-#
-# Its environment is set to the spatPomp namespace (below), so the shared
-# lines resolve the same internals (pStop_, vec_dmeasure, the
-# bpfilter_computations C routine) as the original. Re-diff it against
-# deparse(spatPomp:::bpfilter.internal) on any spatPomp upgrade: the test
-# checks the installed version is the one this copy was taken from.
+# spatPomp 1.1.0's bpfilter(filter_traj = TRUE) stores every resampled
+# particle and ancestry vector until the end; that store is the memory peak of
+# a smoothing replicate. .bpfilter_traj_compact() is
+# spatPomp:::bpfilter.internal (1.1.0) with two storage changes only:
+#   (a) ancestry pruning every `prune_every` steps, per block: drop columns no
+#       longer ancestral to the current population and remap the pedigree;
+#       the top step is never pruned;
+#   (b) optional float32 storage (float::fl()), decoded per column in the
+#       backward walk.
+# Pruning uses no random numbers: "pruned" returns a filter.traj and logLik
+# identical() to "full" for the same seed (tests/test_bpfilter_traj_compact.R).
+# Its environment is the spatPomp namespace. Re-diff it against
+# deparse(spatPomp:::bpfilter.internal) on any spatPomp upgrade.
 .SP_TRAJ_STORAGES <- c("full", "pruned", "pruned_float32")
 .SP_TRAJ_COMPACT_SPATPOMP_VERSION <- "1.1.0"
 
@@ -2930,26 +2779,16 @@ run_one_bpfilter_replicate <- function(
   })
 
   # --- compact store (replaces xparticles / pedigree) ------------------------
-  # Per block i: st[[i]][[lev]] = kept states at level lev (lev 1 = init.x,
-  # lev nt + 1 = after step nt's resampling), one column per stored particle;
-  # anc[[i]][[lev]] (lev >= 2) = for each stored column of level lev, its
-  # parent COLUMN in st[[i]][[lev - 1]]; alive[[i]][[lev]] = which stored
-  # columns are still ancestors of the top population (NULL = all of them).
-  # A level is physically compacted only once its live columns are at most
-  # half of its stored ones, so each level is copied O(1) times in total
-  # instead of at every prune (re-copying the recent, still-shrinking levels at
-  # every step cost ~30 % run time in GC on the test fixture) and holds at
-  # most twice its live particles. Compaction remaps the parent indices of the
-  # level above; a dead column's parent may remap to 0, which is never read
-  # (the backward walk only visits live columns; tabulate() ignores 0) and
-  # stays 0 at later compactions.
-  # Invariant after a prune at top level T: for every lev <= T the live set of
-  # lev - 1 is exactly the parent set of the live set of lev, so a later prune
-  # can stop at the first level at or below T whose live set does not shrink.
-  # Under float32 the stored matrix is the float32 bit pattern
-  # (float::fl(m)@Data, a plain integer matrix), so pruning subsets it with
-  # base `[` (float's own `[` method fails on one-column extraction from a
-  # matrix with rownames); only the backward walk decodes, a column at a time.
+  # Per block i: st[[i]][[lev]] = stored states at level lev (lev 1 = init.x),
+  # one column per particle; anc[[i]][[lev]] = each column's parent column in
+  # lev - 1; alive[[i]][[lev]] = columns still ancestral to the top population
+  # (NULL = all).
+  # A level is compacted only once at most half its columns are live, so each
+  # level is copied O(1) times. A dead column's parent may remap to 0, which is
+  # never read. Invariant: the live set of lev - 1 is the parent set of the live
+  # set of lev, so a prune stops at the first level whose live set does not
+  # shrink. float32 matrices hold the bit pattern (float::fl(m)@Data) and are
+  # subset with base `[` (float's `[` fails on one-column extraction).
   .enc <- if (float32) {
     function(m) {
       r <- suppressWarnings(range(m, finite = TRUE))
@@ -3316,26 +3155,16 @@ merge_filter_traj_by_unit <- function(ft_list, gids_list, statenames = NULL) {
 
 #' Assemble region-level smoothing records from per-member (per-country) records.
 #'
-#' The ENSO-region forward/hindcast run (`filter.partition_by: enso_region`)
-#' reuses the EXISTING country-level smoothing caches rather than re-running
-#' smoothing: for a region TU, each member country's per-replicate smoothing
-#' records are merged into one region record shaped exactly like a country
-#' record, so the whole downstream handoff path
-#' (`filter_traj_to_warmup → resample_by_loglik → forecast_from_filtered`) runs
-#' unchanged. The ADM1 neighbour-contagion kernel — built over the forecast
-#' `frame_tu`'s centroids — then spans the region's units across borders
-#' automatically (there is no bpfilter in the forward phase).
-#'
-#' Records are paired by replicate across members (member record lists must have
-#' equal length; records are ordered by `rep_id` when present so pairing is by
-#' replicate identity, not list position — they come from one smoothing run).
-#' For each replicate the region record carries:
-#'   - `gids`        = concatenation of member gids (region unit order),
-#'   - `filter_traj` = member arrays stacked along the unit axis with contiguous
-#'                     `1..U_region` position re-indexing (`merge_filter_traj_by_unit`),
-#'   - `filt_months` = the common vector (asserted identical across members),
-#'   - `logLik`      = SUM of member logLiks (independent country partitions ⇒
-#'                     additive joint log-likelihood; used by `resample_by_loglik`).
+#' An ENSO-region forward run (`filter.partition_by: enso_region`) reuses the
+#' country-level smoothing caches: each member's per-replicate records merge
+#' into one region record shaped like a country record, so
+#' filter_traj_to_warmup() -> resample_by_loglik() -> forecast_from_filtered()
+#' run unchanged.
+#' Records are paired by `rep_id` (when present), not list position; member
+#' lists must have equal length. Per replicate: `gids` and `filter_traj` are
+#' stacked in region unit order (merge_filter_traj_by_unit()), `filt_months`
+#' must match across members, and `logLik` is the sum of member logLiks
+#' (independent partitions).
 #'
 #' @param member_recs named list (name = member ISO3) of per-replicate record
 #'        lists, each record a `list(filter_traj, gids, filt_months, logLik,
@@ -3392,7 +3221,7 @@ assemble_region_smoothing_records <- function(
     )
     if (!any(is.na(rid))) recs[order(rid)] else recs
   })
-  # Pairing by position is only valid when every member holds the SAME
+  # Pairing by position is only valid when every member holds the same
   # replicate set: failed replicates are dropped per member by the caller, so
   # two members that each lost a different replicate have equal counts but
   # different rep_ids and would be silently mis-paired.
@@ -3513,36 +3342,22 @@ resample_by_loglik <- function(warmup_list, logliks, n = length(warmup_list)) {
 
 #' Pick the forecast replicates' handoff states from the smoothing replicates.
 #'
-#' `weighting = "uniform"` (default): every smoothing
-#' replicate counts equally. Forecast replicate r (global id = offset + r) takes
-#' smoothing replicate ((offset + r - 1) mod m) + 1, a balanced, deterministic
-#' assignment: chunk-safe (the global id, not the chunk-local one, picks the
-#' state), and the same replicate id starts from the same smoothing replicate
-#' in every arm (factual / counterfactual / hindcast). Consumes no RNG.
-#'
-#' `weighting = "shuffled"`: balanced like "uniform", but the global ids fall
-#' into blocks of m consecutive replicates and block j = floor((id - 1) / m)
-#' takes a permutation of 1..m drawn under set.seed(seed + .HANDOFF_SEED_OFFSET
-#' + j): each smoothing replicate is used exactly once per full block (counts
-#' differ by at most one over a partial block). Under "uniform" the state is
-#' (id - 1) mod m, so a cycle posterior draw (id - 1) mod S always meets the
-#' same states when gcd(S, m) > 1 (S = 200, m = 100: one state per draw);
-#' shuffling breaks that tie for any S. Still chunk-safe and shared across arms
-#' (it depends only on the global id and `seed`); the global RNG stream is
-#' preserved.
-#'
-#' `weighting = "loglik"`: SIR resampling by exp(logLik) (resample_by_loglik()),
-#' The smoothing replicates are independent filter runs
-#' whose whole-period log-likelihoods differ by thousands of log units, so the
-#' effective sample size is ~1 and every forecast replicate starts from one
-#' smoothing replicate.
-#'
-#' `weighting = "joint"` (param_draw_mode "joint"): forecast
-#' replicate r (global id) takes the smoothing replicate whose rep_id is
-#' j(r) = ((r - 1) mod n_smoothing) + 1, matched by rep_id rather than by
-#' position, so the pairing is the same in every unit and arm even when a unit
-#' lost a replicate. A missing rep_id is an error: its draw has no state in
-#' that unit. Consumes no RNG.
+#' Every mode is chunk-safe: the global replicate id (offset + r), not the
+#' chunk-local one, picks the state, so an id starts from the same state in
+#' every arm (factual / counterfactual / hindcast).
+#'   "uniform" (default): id takes smoothing replicate ((id - 1) mod m) + 1.
+#'     Consumes no RNG.
+#'   "shuffled": balanced like "uniform", but each block of m consecutive ids
+#'     takes a permutation of 1..m drawn under
+#'     set.seed(seed + .HANDOFF_SEED_OFFSET + block). This breaks the lock-step
+#'     between cycled posterior draws and states when gcd(S, m) > 1. The global
+#'     RNG stream is preserved.
+#'   "loglik": SIR resampling by exp(logLik) (resample_by_loglik()). The
+#'     log-likelihoods differ by thousands of units, so this collapses onto one
+#'     smoothing replicate.
+#'   "joint": id takes the smoothing replicate with rep_id
+#'     ((id - 1) mod n_smoothing) + 1, matched by rep_id, not position; a
+#'     missing rep_id is an error. Consumes no RNG.
 #'
 #' @param warmup_list list of m warmup mini-panels (one per smoothing replicate).
 #' @param logliks     numeric(m); used by "loglik" and for the ESS message.
@@ -3842,43 +3657,29 @@ anchor_warmup_active_to_observed <- function(
 # ---------------------------------------------------------------------------
 
 #' Derive the per-replicate posterior draw index for each track at the forecast
-#' handoff. Pulled out of forecast_from_filtered() so the branch logic can be
-#' unit-tested without running a forecast (mirrors .occ_bundle_from_draws_df()).
+#' handoff (split out of forecast_from_filtered() so it can be unit-tested).
 #'
-#' Three modes select the per-replicate occurrence draw (`param_draw_mode`, with
-#' the legacy `spread_param_draws` boolean kept as a fallback):
-#'
-#'   "inherited" (spread_param_draws = FALSE): each replicate inherits its
-#'     handoff particle's posterior_draw_idx — the oldest behaviour. When the
-#'     smoothing cache was built with n_draws_in_filter=1 every particle carries
-#'     draw_idx=1, so the whole ensemble collapses to one posterior draw and the
-#'     mon predictive tail flattens.
-#'   "cycle" (spread_param_draws = TRUE): each replicate gets a distinct draw
-#'     cycling 1..S over the full bundle (via replicate_ids), restoring
-#'     posterior-parameter spread deterministically.
-#'   "joint": each replicate runs the global posterior draw
-#'     its handoff state was reconstructed under (`handoff_draw_d`, the
-#'     smoothing record's draw_d), so state and parameters are one joint
-#'     posterior draw. Needs a shared_cycle smoothing cache (07b checks
-#'     meta.yml) and draws within 1..S_occ (no wrap: a wrapped index would be
-#'     another draw).
-#'   "random" (new global default): each replicate draws a FRESH random index in
-#'     1..S_occ, seeded per replicate by seed + .DRAW_SEED_OFFSET + replicate_id
-#'     so the mapping is chunk-safe (invariant to replicate_offset) and, in an
-#'     enso_region partition, shared across all member countries' units (one
-#'     per-replicate index broadcast by the kernel). The handoff draw_idx is
-#'     ignored.
-#'
-#' In every mode dur/mon wrap off the clamped occurrence index, so the three
-#' tracks stay paired (one posterior sample per replicate across
-#' occurrence/duration/monthly).
+#' `param_draw_mode` picks the occurrence draw; the legacy `spread_param_draws`
+#' is the fallback when it is NULL/blank:
+#'   "random" (default): a fresh index in 1..S_occ seeded by
+#'     seed + .DRAW_SEED_OFFSET + replicate_id: chunk-safe, and shared by all
+#'     units of an enso_region partition. The handoff draw_idx is ignored.
+#'   "cycle" (spread_param_draws = TRUE): indices cycle 1..S over replicate_ids.
+#'   "inherited" (spread_param_draws = FALSE): each replicate keeps its handoff
+#'     particle's posterior_draw_idx; with n_draws_in_filter = 1 the whole
+#'     ensemble collapses to one draw.
+#'   "joint": each replicate runs the draw its handoff state was reconstructed
+#'     under (handoff_draw_d). Needs a shared_cycle smoothing cache (07b checks
+#'     meta.yml) and indices within 1..S_occ (no wrap).
+#' In every mode dur/mon wrap off the occurrence index, so the three tracks stay
+#' paired on one posterior sample per replicate.
 #'
 #' @param handoff_list list of Np warmup mini-panels (each carries
 #'   posterior_draw_idx); read only in the "inherited" mode.
 #' @param replicate_ids integer[Np] = seq_len(Np) + replicate_offset.
 #' @param S_occ number of draws in the occurrence bundle.
 #' @param S_dur,S_mon number of draws in the dur/mon bundles, or NULL when that
-#'   track is inactive (then its index is NULL, matching the legacy path).
+#'   track is inactive (then its index is NULL).
 #' @param spread_param_draws logical; legacy alias honoured only when
 #'   param_draw_mode is NULL/blank (TRUE -> "cycle", FALSE -> "inherited").
 #' @param param_draw_mode character one of "random"/"cycle"/"inherited"/"joint",
@@ -3957,56 +3758,35 @@ anchor_warmup_active_to_observed <- function(
 
 #' Run the forecast phase after bpfilter, using each particle as a replicate.
 #'
-#' Each of the Np particles becomes one forecast replicate. The posterior draw
-#' index for each track is derived by .forecast_param_indices() via param_draw_mode:
-#' "random" (default) = a fresh chunk-safe random draw per replicate (shared
-#' across a region's member units); "cycle" = deterministic 1..S spread;
-#' "inherited" = each particle's filtered draw_idx. The legacy spread_param_draws
-#' boolean is honoured only when param_draw_mode is NULL/blank. ENSO scenarios are
-#' passed through unchanged.
-#'
-#' This function is the M3 handoff: it bridges bpfilter → simulate_one_tu,
-#' preserving the existing 09b/09c output schema.
+#' Each of the Np particles becomes one forecast replicate; the per-track
+#' posterior draw comes from .forecast_param_indices() (param_draw_mode). ENSO
+#' scenarios pass through unchanged. Writes the output schema 07b/07c read.
 #'
 #' @param handoff_list     list of Np mini-panels from filtered_states_to_warmup().
 #' @param tu               TU label (character).
 #' @param frame_tu         location frame for this TU.
 #' @param panel_tu_full    climate panel for this TU covering the forecast horizon.
 #' @param draws_occ        full occurrence draws bundle (not subsetted).
-#' @param draws_dur        Optional duration (cessation-hazard) draws bundle
-#'                          (`extract_duration_draws()`). NULL
-#'                          (default) leaves the forecast on
-#'                          `simulate_one_tu()`'s legacy (non-duration-aware)
-#'                          path. When supplied, `posterior_idx_dur` is
-#'                          derived by wrapping `posterior_idx_occ`, so the
-#'                          draws stay paired to the filtered particle's
-#'                          occurrence draw.
-#' @param draws_mon        Optional monthly-case (`mon`) draws bundle
-#'                          (`extract_monthly_draws()`). NULL (default) leaves
-#'                          the forecast without case counts. Supplied,
-#'                          `posterior_idx_mon` is wrapped off
-#'                          `posterior_idx_occ` exactly like `_dur`, keeping
-#'                          all parameter sets on the filtered particle's draw.
-#' @param cb_meta_mon      Optional cb_meta sidecar for the mon fit; forwarded to
-#'                          `simulate_one_tu()`, which collapses its `mso` entry
-#'                          into the months-since-onset basis table.
-#' @param cb_meta_dur      Optional cb_meta sidecar for the `dur` fit; forwarded
-#'                          to `simulate_one_tu()`. The deployed best-lag
-#'                          duration fits are `_cb` fits with `enso_cb<k>` fixed
-#'                          effects, and the duration best lag is selected
-#'                          independently of occ/mon, so the duration basis
-#'                          must come from its own sidecar. Omitting it leaves
-#'                          the cessation hazard ENSO-blind (`evaluate_lp()`
-#'                          silently skips a FE whose covariate is absent).
+#' @param draws_dur        optional duration (cessation-hazard) draws bundle
+#'   (extract_duration_draws()). NULL (default) keeps the forecast
+#'   non-duration-aware. Its index wraps off the occurrence index.
+#' @param draws_mon        optional monthly-case draws bundle
+#'   (extract_monthly_draws()). NULL (default) produces no case counts. Its
+#'   index wraps off the occurrence index.
+#' @param cb_meta_mon      optional cb_meta sidecar for the mon fit; forwarded
+#'   to simulate_one_tu(), which builds the mso basis from it.
+#' @param cb_meta_dur      optional cb_meta sidecar for the `dur` fit; forwarded
+#'   to simulate_one_tu(). Required for an ENSO duration fit: without it the
+#'   cessation hazard is ENSO-blind (evaluate_lp() skips a FE whose covariate
+#'   is absent).
 #' @param enso_scenarios   named list of ENSO scenario matrices (or NULL).
 #' @param horizon          list(start=, end=) — the FORECAST horizon.
 #' @param output_part      output directory for this TU.
 #' @param out_fmt          output format ("qs" or "rds").
 #' @param dry_run          logical; if TRUE, no files written.
 #' @param seed             integer root seed.
-#' @param force_o_tu       logical; forwarded to simulate_one_tu(). See that
-#'                          function's docstring for the partition_by=country
-#'                          rationale. Default FALSE.
+#' @param force_o_tu       logical; forwarded to simulate_one_tu() (see there
+#'                          for partition_by=country). Default FALSE.
 #' @param incidence_cap    NULL or a number > 0; forwarded to simulate_one_tu()
 #'                          (monthly cases <= incidence_cap x pop).
 #' @param onset_eligibility "inactive" / "season"; forwarded to simulate_one_tu()
@@ -4018,20 +3798,11 @@ anchor_warmup_active_to_observed <- function(
 #' @param cessation_exposure "full" / "half"; forwarded to simulate_one_tu()
 #'                          (simulator.cessation_exposure). Must match the
 #'                          smoothing cache's (meta.yml identity field).
-#' @param replicate_offset Global replicate-ID offset for this call (default 0).
-#'   Supports parallel replicate-chunking: when multiple concurrent processes
-#'   each forecast a disjoint slice of one TU's replicates (e.g. one SLURM
-#'   array task per country, fanned out further over replicate chunks), each
-#'   chunk's `handoff_list` is only Np-long (its own chunk size) but must not
-#'   reuse replicate_id 1..Np — that would collide with every other chunk of
-#'   the same TU downstream (07b/07c key on replicate_id as a per-TU-unique
-#'   ensemble-member label). `replicate_ids` becomes seq_len(Np) + offset.
-#'   `warmup_panels_list`/`enso_scenarios` are looked up by simulate_one_tu()
-#'   using the *value* of replicate_id (simulator_core.R:
-#'   `warmup_panels_list[[rep_id]]`, `enso_scenarios[[ec]][, rep_id]`), not by
-#'   loop position, so they must be left-padded by `offset` placeholder
-#'   entries/columns (never read, since this call's replicate_ids never index
-#'   into the padding) to keep the value-indexed lookups landing correctly.
+#' @param replicate_offset global replicate-id offset for this call (default 0),
+#'   for chunked forecasts: replicate_ids = seq_len(Np) + offset, so chunks of
+#'   one TU never reuse an id (07b/07c key on replicate_id). simulate_one_tu()
+#'   looks up `warmup_panels_list` and `enso_scenarios` by the id's value, so
+#'   both must be left-padded with `offset` unused entries / columns.
 forecast_from_filtered <- function(
   handoff_list,
   tu,
@@ -4200,34 +3971,19 @@ smoothing_cache_meta <- function(
   )
 }
 
-# Optional identity fields of a smoothing cache dir:
-# field name -> legacy value, the value every cache built before the field
-# existed was built under. Each field is registered here once, and both
-# sides follow one rule:
-#   - written (smoothing_cache_identity()) only when the value is not the
-#     legacy one, so a default run's meta.yml is unchanged;
-#   - an absent field reads as the legacy value;
-#   - a mismatch is an error naming the field and both values
-#     (.cache_meta_optional_check(), called by check_smoothing_cache_meta()).
-# Registered:
-#   pop_year: simulator.location_frame.pop_year of the
-#     smoothing; legacy 2020 (simulator_core.R::.SIM_POP_YEAR_DEFAULT). A
-#     forecast reading the cache must run under the same population year.
-#   who_scale_digest / db_overlap: the estimated WHO-scale
-#     table's content digest (legacy "": fixed scale) and the DB-overlap rule
-#     (legacy "score_both") of the smoothing. RECORD-ONLY (.SM_META_RECORD_ONLY):
-#     a forecast does not know them, so the read side checks them only when
-#     the expectation names them.
-#   onset_eligibility: simulator.onset_eligibility of the
-#     smoothing; legacy "inactive". A forecast handing off from the cache must
-#     run under the same gate (checked always, like pop_year).
-#   cessation_exposure: simulator.cessation_exposure of the
-#     smoothing; legacy "full". Checked always, like onset_eligibility.
-#   draw_design / max_draws: simulator.filter.draw_design
-#     (legacy "per_tu_random") and simulator.max_draws (legacy 200, the
-#     simulator default) of the smoothing. RECORD-ONLY: checked only when the
-#     expectation names them, i.e. by a param_draw_mode joint forecast, which
-#     needs a shared_cycle cache thinned to its own max_draws.
+# Optional identity fields of a smoothing cache dir: field -> legacy value
+# (the value every cache built before the field existed used). A field is
+# written (smoothing_cache_identity()) only when it differs from its legacy
+# value, an absent field reads as legacy, and a mismatch is an error naming
+# both values (.cache_meta_optional_check()). Fields in .SM_META_RECORD_ONLY are
+# checked only when the expectation names them (a forecast cannot know them).
+#   pop_year            legacy 2020 (.SIM_POP_YEAR_DEFAULT); always checked
+#   who_scale_digest    legacy "" (fixed WHO scale); record-only
+#   db_overlap          legacy "score_both"; record-only
+#   onset_eligibility   legacy "inactive"; always checked
+#   cessation_exposure  legacy "full"; always checked
+#   draw_design         legacy "per_tu_random"; record-only
+#   max_draws           legacy 200; record-only (param_draw_mode forecasts)
 .SM_META_OPTIONAL_FIELDS <- list(
   pop_year = 2020L,
   who_scale_digest = "",

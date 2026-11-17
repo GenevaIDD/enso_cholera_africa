@@ -1159,23 +1159,13 @@ build_fig1_v91 <- function(tracks = STACKED_TRACKS) {
 }
 
 # ---------------------------------------------------------------------------
-# Figure 1c, seasonality design. The weight/correlation c
-# (fig1_weight_panel() / fig1_corr_panel() / fig1_legend_row()) and its
-# layout (build_fig1_v91()) stay above, side by side.
-#
-# Columns = ENSO group, on a 2-year calendar axis (x = 1..24: Jan Y .. Dec
-# Y+1, FIG1C_PEAK_X = Dec Y). Rows, top down:
-#   the composite El Nino / La Nina ONI cycle (09's oni_composite) over the
-#     Rising / Peak / Decay boxes (FIG1C_PHASES), the "ENSO group" header;
-#   the group's mean monthly rainfall (09's rain_enso, FIG1_RAIN_SEASON_WEIGHTING);
-#   per track (FIG1C_TRACKS, named on the left): the ELPD-implied lag weights
-#     (pseudo-BMA of 09's lag_rank) at x = FIG1C_PEAK_X + lag, the deployed
-#     lag marked above the strip, the same / following-year key on the first
-#     track; and the track's seasonality relative to its annual mean with its
-#     interval (09's seasonality `fitted`), d's vertical "more / fewer" key in
-#     the leftmost column.
-# Then c's legends, and d as the last row of the same grid, so c's and d's
-# panels share their left and right edges.
+# Figure 1c, seasonality design (the weight / correlation variant and
+# build_fig1_v91() stay above). Columns = ENSO group on a 2-year calendar axis
+# (x = 1..24, FIG1C_PEAK_X = Dec Y). Rows: the composite ONI cycle over the
+# FIG1C_PHASES boxes; the group's mean monthly rainfall; per track
+# (FIG1C_TRACKS) the ELPD lag weights at x = FIG1C_PEAK_X + lag, deployed lag
+# marked, and the seasonality relative to the annual mean. Then c's legends and
+# d as the last row of the same grid, so c and d share their edges.
 # ---------------------------------------------------------------------------
 
 #' c's 2-year x scale: three-letter month names at FIG1C_X_BREAKS.
